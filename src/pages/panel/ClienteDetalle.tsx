@@ -2,8 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Paso3Modulos } from '@/pages/onboarding/Paso3Modulos'
-import type { Cliente, UsuarioCliente } from '@/types'
+import { Paso2Admin, type DatosAdmin } from '@/pages/onboarding/Paso2Admin'
+import { Paso4Permisos, type ResultadoEquipo } from '@/pages/onboarding/Paso4Permisos'
+import { guardarAdmin, guardarEquipo } from '@/lib/altaEquipo'
+import type { Cliente, Modulo, UsuarioCliente } from '@/types'
 
 interface FilaClienteModulo {
   id: string
@@ -11,14 +15,23 @@ interface FilaClienteModulo {
   activo: boolean
 }
 
+const DATOS_ADMIN_VACIOS: DatosAdmin = { nombre: '', modo: 'full', email: '', cuil: '' }
+
 export function ClienteDetalle() {
   const { id } = useParams<{ id: string }>()
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [usuarios, setUsuarios] = useState<UsuarioCliente[]>([])
   const [filasModulos, setFilasModulos] = useState<FilaClienteModulo[]>([])
+  const [modulosActivosFull, setModulosActivosFull] = useState<Modulo[]>([])
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [mensaje, setMensaje] = useState<string | null>(null)
+
+  // Flujo de "completar Admin y Equipo" para un cliente que se quedó a
+  // mitad de camino del wizard (Paso 1-3 hechos, Paso 4 nunca terminado).
+  const [completando, setCompletando] = useState(false)
+  const [subPaso, setSubPaso] = useState<'admin' | 'equipo'>('admin')
+  const [datosAdminNuevo, setDatosAdminNuevo] = useState<DatosAdmin>(DATOS_ADMIN_VACIOS)
 
   async function cargarTodo() {
     if (!id) return
@@ -28,12 +41,26 @@ export function ClienteDetalle() {
       await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('usuarios_cliente').select('*').eq('cliente_id', id),
-        supabase.from('cliente_modulos').select('id, modulo_id, activo').eq('cliente_id', id),
+        supabase
+          .from('cliente_modulos')
+          .select('id, modulo_id, activo, modulos(*)')
+          .eq('cliente_id', id),
       ])
 
     setCliente(clienteData ?? null)
     setUsuarios(usuariosData ?? [])
-    setFilasModulos(clienteModulosData ?? [])
+    setFilasModulos(
+      (clienteModulosData ?? []).map((f: any) => ({
+        id: f.id,
+        modulo_id: f.modulo_id,
+        activo: f.activo,
+      })),
+    )
+    setModulosActivosFull(
+      (clienteModulosData ?? [])
+        .filter((f: any) => f.activo)
+        .map((f: any) => f.modulos as Modulo),
+    )
     setCargando(false)
   }
 
@@ -78,6 +105,21 @@ export function ClienteDetalle() {
     await cargarTodo()
     setGuardando(false)
     setMensaje('Guardado.')
+  }
+
+  async function completarAdmin() {
+    if (!id) return
+    await guardarAdmin(id, datosAdminNuevo)
+    setSubPaso('equipo')
+  }
+
+  async function completarEquipo(resultado: ResultadoEquipo) {
+    if (!id) return
+    await guardarEquipo(id, resultado)
+    setCompletando(false)
+    setSubPaso('admin')
+    setDatosAdminNuevo(DATOS_ADMIN_VACIOS)
+    await cargarTodo()
   }
 
   if (cargando) {
@@ -137,6 +179,34 @@ export function ClienteDetalle() {
             </Card>
           ))}
         </div>
+
+        {/* Solo se ofrece completar el alta si todavía no hay nadie
+            cargado — si ya hay equipo, este cliente terminó su wizard. */}
+        {usuarios.length === 0 && !completando && (
+          <Button variant="secondary" className="mt-4" onClick={() => setCompletando(true)}>
+            Completar alta de Admin y Equipo
+          </Button>
+        )}
+
+        {completando && subPaso === 'admin' && (
+          <div className="mt-6 border-t border-gray-100 pt-6">
+            <Paso2Admin
+              datos={datosAdminNuevo}
+              onChange={setDatosAdminNuevo}
+              onContinuar={completarAdmin}
+            />
+          </div>
+        )}
+
+        {completando && subPaso === 'equipo' && (
+          <div className="mt-6 border-t border-gray-100 pt-6">
+            <Paso4Permisos
+              tipoNegocio={cliente.tipo_negocio}
+              modulosActivos={modulosActivosFull}
+              onFinalizar={completarEquipo}
+            />
+          </div>
+        )}
       </div>
     </div>
   )
