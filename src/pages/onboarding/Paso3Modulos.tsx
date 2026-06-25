@@ -9,9 +9,19 @@ import type { Modulo, TipoNegocio } from '@/types'
 interface Paso3Props {
   tipoNegocio: TipoNegocio
   onContinuar: (modulosSeleccionados: string[]) => void
+  /** Si se pasa, se usa tal cual en vez de calcular la sugerencia por tipo
+   * de negocio — es el caso de "gestionar módulos de un cliente existente",
+   * donde la preselección tiene que ser lo que ya está activo de verdad. */
+  preseleccionados?: string[]
+  textoBoton?: (cantidad: number) => string
 }
 
-export function Paso3Modulos({ tipoNegocio, onContinuar }: Paso3Props) {
+export function Paso3Modulos({
+  tipoNegocio,
+  onContinuar,
+  preseleccionados,
+  textoBoton,
+}: Paso3Props) {
   const [modulos, setModulos] = useState<Modulo[]>([])
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set())
   const [cargando, setCargando] = useState(true)
@@ -22,14 +32,19 @@ export function Paso3Modulos({ tipoNegocio, onContinuar }: Paso3Props) {
       const lista = data ?? []
       setModulos(lista)
 
-      const sugeridos = MODULOS_SUGERIDOS[tipoNegocio] ?? []
-      const preseleccion = lista
-        .filter((m) => m.vertical === 'core' || sugeridos.includes(m.slug))
-        .map((m) => m.id)
-      setSeleccionados(new Set(preseleccion))
+      if (preseleccionados) {
+        setSeleccionados(new Set(preseleccionados))
+      } else {
+        const sugeridos = MODULOS_SUGERIDOS[tipoNegocio] ?? []
+        const preseleccion = lista
+          .filter((m) => m.vertical === 'core' || sugeridos.includes(m.slug))
+          .map((m) => m.id)
+        setSeleccionados(new Set(preseleccion))
+      }
       setCargando(false)
     }
     cargar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipoNegocio])
 
   function toggle(id: string) {
@@ -73,7 +88,9 @@ export function Paso3Modulos({ tipoNegocio, onContinuar }: Paso3Props) {
         disabled={seleccionados.size === 0}
         onClick={() => onContinuar(Array.from(seleccionados))}
       >
-        Activar {seleccionados.size} módulo{seleccionados.size === 1 ? '' : 's'}
+        {textoBoton
+          ? textoBoton(seleccionados.size)
+          : `Activar ${seleccionados.size} módulo${seleccionados.size === 1 ? '' : 's'}`}
       </Button>
     </div>
   )

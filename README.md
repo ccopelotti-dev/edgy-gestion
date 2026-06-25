@@ -5,22 +5,45 @@ sirve a todos los clientes: cada cliente es una fila en la tabla `clientes`
 de Supabase, y el sidebar + las rutas se arman solos según qué módulos tenga
 activos (`cliente_modulos`).
 
+Dos partes bien separadas conviven en el mismo proyecto:
+
+- **`/panel/*`** — el panel interno de Edgy. Protegido por `RutaStaff`: solo
+  entra quien esté en `personal_edgy`. Ahí se da de alta un cliente nuevo,
+  se administran los clientes existentes (módulos activos, equipo) y a
+  futuro va a vivir el dashboard de métricas.
+- **`/dashboard`, `/m/:slug`** — lo que ve el cliente final una vez que
+  Edgy le entregó el sistema. Resuelve qué cliente es por el usuario
+  logueado (`useClienteActual`), no hace falta tocar nada ahí para esto.
+
 ## Estructura
 
 ```
 src/
-  components/        Layout, Sidebar, componentes de UI base (button, input, card, switch)
-  hooks/             useClienteActual — trae el cliente logueado y sus módulos activos
+  components/
+    Layout.tsx, Sidebar.tsx       Shell del dashboard del cliente
+    PanelLayout.tsx, PanelSidebar.tsx   Shell del panel interno de Edgy
+    RutaStaff.tsx                 Guard de ruta — solo personal_edgy entra a /panel
+    ui/                           button, input, card, switch
+  hooks/
+    useClienteActual.ts           Cliente logueado + sus módulos activos (dashboard cliente)
+    usePersonalEdgy.ts            ¿el usuario logueado es staff de Edgy?
   lib/               cliente de Supabase + utilidades
   modules/           un módulo por carpeta (ver más abajo)
     registry.ts      mapea slug -> componente, con lazy() para code-splitting
     tesoreria/       placeholder a reemplazar por el código real del VPS
   pages/
     DashboardHome.tsx
-    ModuloRoute.tsx  resuelve /m/:slug contra el registro de módulos
-    onboarding/      los 4 pasos del wizard "nuevo proyecto"
+    ModuloRoute.tsx                resuelve /m/:slug contra el registro de módulos
+    onboarding/                    los 4 pasos del wizard, ahora bajo /panel/nuevo-cliente
+    panel/
+      ClientesListado.tsx          listado de clientes ya dados de alta
+      ClienteDetalle.tsx           datos, módulos activos (reusa Paso3Modulos) y equipo
 supabase/
-  migrations/0001_init.sql   esquema completo + políticas RLS
+  migrations/
+    0001_init.sql                       esquema base (histórico)
+    0002_fix_insert_policies.sql        políticas de autoservicio (histórico — SUPERADO, ver 0003)
+    0003_consolidado_v2_a_v8.sql        estado real de producción: roles reutilizables,
+                                         personal_edgy, CUIL+PIN, fixes de constraints
 ```
 
 ## Cómo correrlo
@@ -35,16 +58,35 @@ cp .env.example .env   # completar con tu URL y anon key de Supabase
 npm run dev
 ```
 
-Antes de levantarlo:
+Antes de levantarlo, en el SQL editor del proyecto de Supabase que vayas a usar,
+correr en este orden exacto:
 
-1. Correr la migración: pegar `supabase/migrations/0001_init.sql` completo en
-   el SQL editor del proyecto de Supabase que vayas a usar, y ejecutarlo.
-2. **Exponer el schema en la API** — sin este paso, Supabase devuelve error
-   porque por default solo expone `public`. En el dashboard de Supabase:
-   `Project Settings → API → Exposed schemas` → agregar `edgy_gestion` a la
-   lista → guardar.
+1. `supabase/migrations/0001_init.sql`
+2. `supabase/migrations/0002_fix_insert_policies.sql`
+3. `supabase/migrations/0003_consolidado_v2_a_v8.sql`
 
-Sin estos dos pasos el dashboard carga pero no puede leer ni escribir nada.
+Los tres son necesarios incluso en un proyecto nuevo: el 0003 da de baja
+puntualmente lo que el 0002 había creado (el autoservicio) y deja la base
+en el estado real de hoy. **Exponer el schema en la API** — sin este paso,
+Supabase devuelve error porque por default solo expone `public`. En el
+dashboard de Supabase: `Project Settings → API → Exposed schemas` → agregar
+`edgy_gestion` a la lista → guardar.
+
+Sin estos pasos el dashboard carga pero no puede leer ni escribir nada.
+
+### Personal de Edgy
+
+Para que alguien pueda entrar a `/panel`, tiene que existir una fila suya en
+`edgy_gestion.personal_edgy` con su `user_id` de `auth.users`. No hay UI para
+esto todavía — se hace a mano por SQL editor.
+
+### Login
+
+`/panel` reutiliza el login que ya existe en la landing (`edgysistemas.tech`,
+modal de Supabase Auth) en vez de tener uno propio: si no hay sesión activa,
+`RutaStaff` redirige ahí. Si hay sesión pero la cuenta no está en
+`personal_edgy`, bloquea con un mensaje en vez de redirigir a ciegas.
+
 
 ## Cómo migrar el módulo Tesorería que ya corre en el VPS
 

@@ -47,15 +47,10 @@ export function Sidebar({ nombreCliente, logoUrl, colorMarca, modulos }: Sidebar
           </NavLink>
         ))}
       </nav>
-
-      <div className="border-t border-gray-200 px-3 py-4">
-        <NavLink
-          to="/configuracion/modulos"
-          className="block rounded-md px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50"
-        >
-          Agregar módulos
-        </NavLink>
-      </div>
+      {/* "Agregar módulos" se sacó de acá: activar módulos quedó reservado
+          a personal de Edgy (ver migración v4). "Mi Equipo" para que el
+          Admin del cliente sume gente queda para el próximo ciclo de
+          diseño — el del dashboard del cliente en sí. */}
     </aside>
   )
 }

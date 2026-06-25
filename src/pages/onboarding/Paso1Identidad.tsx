@@ -13,6 +13,10 @@ const TIPOS_NEGOCIO: { value: TipoNegocio; label: string }[] = [
 
 export interface DatosIdentidad {
   nombre: string
+  titular: string
+  direccion: string
+  cuit: string
+  telefono: string
   tipoNegocio: TipoNegocio | ''
   logoFile: File | null
   colorMarca: string
@@ -31,12 +35,49 @@ export function Paso1Identidad({ datos, onChange, onContinuar }: Paso1Props) {
     <div className="mx-auto max-w-md space-y-6">
       <div>
         <label className="mb-2 block text-sm font-medium text-gray-900">
-          Nombre de tu negocio
+          Nombre Comercial
         </label>
         <Input
           placeholder="Ej: Café de la Esquina"
           value={datos.nombre}
           onChange={(e) => onChange({ ...datos, nombre: e.target.value })}
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-900">Titular</label>
+        <Input
+          placeholder="Nombre y apellido del titular"
+          value={datos.titular}
+          onChange={(e) => onChange({ ...datos, titular: e.target.value })}
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-900">Dirección</label>
+        <Input
+          placeholder="Calle, número, localidad"
+          value={datos.direccion}
+          onChange={(e) => onChange({ ...datos, direccion: e.target.value })}
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-900">CUIT</label>
+        <Input
+          placeholder="20XXXXXXXXX (11 dígitos, sin guiones)"
+          value={datos.cuit}
+          onChange={(e) => onChange({ ...datos, cuit: e.target.value.replace(/\D/g, '') })}
+          maxLength={11}
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-900">Teléfono</label>
+        <Input
+          placeholder="Ej: 2954123456"
+          value={datos.telefono}
+          onChange={(e) => onChange({ ...datos, telefono: e.target.value })}
         />
       </div>
 

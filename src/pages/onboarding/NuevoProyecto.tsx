@@ -1,26 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { Paso1Identidad, type DatosIdentidad } from './Paso1Identidad'
-import { Paso2Auth } from './Paso2Auth'
+import { Paso2Admin, type DatosAdmin } from './Paso2Admin'
 import { Paso3Modulos } from './Paso3Modulos'
-import { Paso4Permisos, type UsuarioNuevo } from './Paso4Permisos'
+import { Paso4Permisos, type ResultadoEquipo } from './Paso4Permisos'
 import type { Modulo, TipoNegocio } from '@/types'
 
 type Paso = 1 | 2 | 3 | 4
 
 const PASOS_LABEL: Record<Paso, string> = {
-  1: 'Tu negocio',
-  2: 'Acceso',
+  1: 'Cliente',
+  2: 'Admin',
   3: 'Módulos',
   4: 'Equipo',
 }
-
-// Usamos localStorage (no sessionStorage) a propósito: el link de
-// confirmación de correo suele abrirse en una pestaña nueva, y
-// localStorage es lo único que esa pestaña nueva puede leer porque
-// comparte origen con la pestaña donde arrancó el wizard.
-const CLAVE_CLIENTE_PENDIENTE = 'edgy_pending_cliente_id'
 
 export function NuevoProyecto() {
   const navigate = useNavigate()
@@ -29,67 +23,24 @@ export function NuevoProyecto() {
   const [modulosActivos, setModulosActivos] = useState<Modulo[]>([])
   const [datosIdentidad, setDatosIdentidad] = useState<DatosIdentidad>({
     nombre: '',
+    titular: '',
+    direccion: '',
+    cuit: '',
+    telefono: '',
     tipoNegocio: '',
     logoFile: null,
     colorMarca: '#D4537E',
   })
+  const [datosAdmin, setDatosAdmin] = useState<DatosAdmin>({
+    nombre: '',
+    modo: 'full',
+    email: '',
+    cuil: '',
+  })
 
-  // Paso 2 → vincula al usuario ya logueado con el cliente que quedó
-  // pendiente. Recibe el clienteId como parámetro (no de React state) para
-  // que funcione incluso si esta función corre en el primer render, antes
-  // de que el estado del componente termine de inicializarse.
-  async function vincularUsuarioAlCliente(clienteIdPendiente: string) {
-    const { data: authData } = await supabase.auth.getUser()
-    if (!authData.user) return
-
-    const { data: existente } = await supabase
-      .from('usuarios_cliente')
-      .select('id')
-      .eq('cliente_id', clienteIdPendiente)
-      .eq('user_id', authData.user.id)
-      .maybeSingle()
-
-    if (!existente) {
-      await supabase.from('usuarios_cliente').insert({
-        cliente_id: clienteIdPendiente,
-        user_id: authData.user.id,
-        email: authData.user.email,
-        rol: 'admin',
-      })
-    }
-
-    localStorage.removeItem(CLAVE_CLIENTE_PENDIENTE)
-    setClienteId(clienteIdPendiente)
-    setPaso(3)
-  }
-
-  // Al montar: si quedó un cliente a mitad de camino (porque el link de
-  // correo recargó la página, en esta pestaña o en una nueva), lo
-  // recuperamos. Y nos suscribimos a los cambios de sesión: en cuanto
-  // Supabase confirme el login —ya sea por Google o por el link de
-  // correo— seguimos solos, sin que el usuario tenga que volver a tocar
-  // "Continuar".
-  useEffect(() => {
-    const idPendiente = localStorage.getItem(CLAVE_CLIENTE_PENDIENTE)
-    if (idPendiente) {
-      setClienteId(idPendiente)
-      setPaso((actual) => (actual === 1 ? 2 : actual))
-    }
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      const idActual = localStorage.getItem(CLAVE_CLIENTE_PENDIENTE)
-      if (session && idActual) {
-        vincularUsuarioAlCliente(idActual)
-      }
-    })
-
-    return () => {
-      listener.subscription.unsubscribe()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Paso 1 → crea la fila en `clientes`. A partir de acá ya existe el tenant.
+  // Paso 1 -> crea la fila en `clientes`. A partir de aca ya existe el tenant.
+  // Ya no hace falta sobrevivir a una recarga de pagina por un link de
+  // correo: todo el wizard lo completa personal de Edgy de una sentada.
   async function crearCliente() {
     let logoUrl: string | null = null
     if (datosIdentidad.logoFile) {
@@ -106,6 +57,10 @@ export function NuevoProyecto() {
       .from('clientes')
       .insert({
         nombre: datosIdentidad.nombre,
+        titular: datosIdentidad.titular || null,
+        direccion: datosIdentidad.direccion || null,
+        cuit: datosIdentidad.cuit || null,
+        telefono: datosIdentidad.telefono || null,
         tipo_negocio: datosIdentidad.tipoNegocio,
         logo_url: logoUrl,
         color_marca: datosIdentidad.colorMarca,
@@ -119,12 +74,11 @@ export function NuevoProyecto() {
       return
     }
 
-    localStorage.setItem(CLAVE_CLIENTE_PENDIENTE, data.id)
     setClienteId(data.id)
     setPaso(2)
   }
 
-  // Paso 3 → activa los módulos elegidos para este cliente
+  // Paso 3 -> activa los modulos elegidos para este cliente
   async function activarModulos(modulosSeleccionados: string[]) {
     if (!clienteId) return
 
@@ -144,35 +98,87 @@ export function NuevoProyecto() {
     setPaso(4)
   }
 
-  // Paso 4 → equipo y permisos, y listo: el dashboard ya tiene todo lo que necesita
-  async function finalizar(usuarios: UsuarioNuevo[]) {
+  // Paso 4 -> crea el rol Dueno + los roles operativos con su bundle de
+  // permisos, da de alta al Admin (datos del Paso 2) y al resto del
+  // equipo que se haya agregado. Todo en terminos de ROLES reutilizables,
+  // no de permisos sueltos por persona.
+  async function finalizar(resultado: ResultadoEquipo) {
     if (!clienteId) return
 
-    for (const usuario of usuarios) {
-      const { data: usuarioCliente } = await supabase
-        .from('usuarios_cliente')
-        .insert({ cliente_id: clienteId, email: usuario.email, rol: usuario.rol })
+    const { data: rolDueno, error: errDueno } = await supabase
+      .from('roles')
+      .insert({ cliente_id: clienteId, nombre: 'Dueño', es_sistema: true, es_admin: true })
+      .select()
+      .single()
+
+    if (errDueno || !rolDueno) {
+      // eslint-disable-next-line no-console
+      console.error('Error creando el rol Dueño', errDueno)
+      return
+    }
+
+    await supabase.from('usuarios_cliente').insert({
+      cliente_id: clienteId,
+      rol_id: rolDueno.id,
+      rol: 'Dueño',
+      nombre: datosAdmin.nombre,
+      auth_mode: datosAdmin.modo,
+      email: datosAdmin.modo === 'full' ? datosAdmin.email : null,
+      cuil: datosAdmin.modo === 'pin' ? datosAdmin.cuil : null,
+    })
+
+    const idsPorNombreRol = new Map<string, string>()
+
+    for (const rolDraft of resultado.roles) {
+      const { data: rolCreado, error: errRol } = await supabase
+        .from('roles')
+        .insert({
+          cliente_id: clienteId,
+          nombre: rolDraft.nombre,
+          es_sistema: true,
+          es_admin: rolDraft.esAdmin,
+        })
         .select()
         .single()
 
-      if (!usuarioCliente) continue
+      if (errRol || !rolCreado) {
+        // eslint-disable-next-line no-console
+        console.error('Error creando rol', rolDraft.nombre, errRol)
+        continue
+      }
 
-      const filasPermisos = Object.entries(usuario.permisos).map(([moduloId, nivel]) => ({
-        usuario_cliente_id: usuarioCliente.id,
+      idsPorNombreRol.set(rolDraft.nombre, rolCreado.id)
+
+      const filasPermisos = Object.entries(rolDraft.permisos).map(([moduloId, nivel]) => ({
+        rol_id: rolCreado.id,
         modulo_id: moduloId,
         nivel,
       }))
       if (filasPermisos.length > 0) {
-        await supabase.from('permisos').insert(filasPermisos)
+        await supabase.from('permisos_rol').insert(filasPermisos)
       }
     }
 
-    navigate('/dashboard')
+    for (const persona of resultado.personas) {
+      const rolId = idsPorNombreRol.get(persona.rolNombre)
+      if (!rolId) continue
+
+      await supabase.from('usuarios_cliente').insert({
+        cliente_id: clienteId,
+        rol_id: rolId,
+        rol: persona.rolNombre,
+        nombre: persona.nombre,
+        cuil: persona.cuil,
+        auth_mode: 'pin',
+      })
+    }
+
+    navigate(`/panel/clientes/${clienteId}`)
   }
 
   return (
     <div className="flex min-h-screen bg-white">
-      {/* Panel de marca — fijo, no se ve en pantallas chicas para no robarle
+      {/* Panel de marca - fijo, no se ve en pantallas chicas para no robarle
           espacio al formulario en celulares */}
       <aside className="hidden w-72 shrink-0 flex-col justify-between bg-brand-500 px-8 py-10 text-white md:flex">
         <div>
@@ -205,21 +211,29 @@ export function NuevoProyecto() {
           ))}
         </div>
 
-      {paso === 1 && (
-        <Paso1Identidad
-          datos={datosIdentidad}
-          onChange={setDatosIdentidad}
-          onContinuar={crearCliente}
-        />
-      )}
-      {paso === 2 && <Paso2Auth />}
-      {paso === 3 && (
-        <Paso3Modulos
-          tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
-          onContinuar={activarModulos}
-        />
-      )}
-      {paso === 4 && <Paso4Permisos modulosActivos={modulosActivos} onFinalizar={finalizar} />}
+        {paso === 1 && (
+          <Paso1Identidad
+            datos={datosIdentidad}
+            onChange={setDatosIdentidad}
+            onContinuar={crearCliente}
+          />
+        )}
+        {paso === 2 && (
+          <Paso2Admin datos={datosAdmin} onChange={setDatosAdmin} onContinuar={() => setPaso(3)} />
+        )}
+        {paso === 3 && (
+          <Paso3Modulos
+            tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
+            onContinuar={activarModulos}
+          />
+        )}
+        {paso === 4 && (
+          <Paso4Permisos
+            tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
+            modulosActivos={modulosActivos}
+            onFinalizar={finalizar}
+          />
+        )}
       </div>
     </div>
   )
