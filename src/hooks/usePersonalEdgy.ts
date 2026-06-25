@@ -25,9 +25,18 @@ export function usePersonalEdgy(): UsePersonalEdgyResult {
 
   useEffect(() => {
     let activo = true
+    // Solo la PRIMERA resolución debe mostrar el estado "cargando" (y por
+    // lo tanto desmontar lo que esté debajo, como hace RutaStaff). Cada
+    // re-chequeo posterior — Supabase dispara onAuthStateChange cada vez
+    // que revalida el token, por ejemplo al volver a la pestaña — tiene
+    // que actualizar en silencio. Si no, cualquier estado guardado en un
+    // componente hijo (como los pasos del wizard de alta) se perdía cada
+    // vez que la pantalla se "apagaba y volvía a armar" de golpe.
+    let primeraVez = true
 
     async function resolver() {
-      setCargando(true)
+      if (primeraVez) setCargando(true)
+
       const { data: authData } = await supabase.auth.getUser()
 
       if (!authData.user) {
@@ -35,8 +44,9 @@ export function usePersonalEdgy(): UsePersonalEdgyResult {
           setHaySesion(false)
           setEsStaff(false)
           setNombre(null)
-          setCargando(false)
+          if (primeraVez) setCargando(false)
         }
+        primeraVez = false
         return
       }
 
@@ -50,7 +60,8 @@ export function usePersonalEdgy(): UsePersonalEdgyResult {
       setHaySesion(true)
       setEsStaff(!!data)
       setNombre(data?.nombre ?? null)
-      setCargando(false)
+      if (primeraVez) setCargando(false)
+      primeraVez = false
     }
 
     resolver()
