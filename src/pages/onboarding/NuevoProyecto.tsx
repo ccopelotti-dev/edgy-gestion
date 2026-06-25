@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { guardarAdmin, guardarEquipo } from '@/lib/altaEquipo'
 import { Paso1Identidad, type DatosIdentidad } from './Paso1Identidad'
 import { Paso2Admin, type DatosAdmin } from './Paso2Admin'
 import { Paso3Modulos } from './Paso3Modulos'
@@ -132,73 +133,8 @@ export function NuevoProyecto() {
   async function finalizar(resultado: ResultadoEquipo) {
     if (!clienteId) return
 
-    const { data: rolDueno, error: errDueno } = await supabase
-      .from('roles')
-      .insert({ cliente_id: clienteId, nombre: 'Dueño', es_sistema: true, es_admin: true })
-      .select()
-      .single()
-
-    if (errDueno || !rolDueno) {
-      // eslint-disable-next-line no-console
-      console.error('Error creando el rol Dueño', errDueno)
-      return
-    }
-
-    await supabase.from('usuarios_cliente').insert({
-      cliente_id: clienteId,
-      rol_id: rolDueno.id,
-      rol: 'Dueño',
-      nombre: datosAdmin.nombre,
-      auth_mode: datosAdmin.modo,
-      email: datosAdmin.modo === 'full' ? datosAdmin.email : null,
-      cuil: datosAdmin.modo === 'pin' ? datosAdmin.cuil : null,
-    })
-
-    const idsPorNombreRol = new Map<string, string>()
-
-    for (const rolDraft of resultado.roles) {
-      const { data: rolCreado, error: errRol } = await supabase
-        .from('roles')
-        .insert({
-          cliente_id: clienteId,
-          nombre: rolDraft.nombre,
-          es_sistema: true,
-          es_admin: rolDraft.esAdmin,
-        })
-        .select()
-        .single()
-
-      if (errRol || !rolCreado) {
-        // eslint-disable-next-line no-console
-        console.error('Error creando rol', rolDraft.nombre, errRol)
-        continue
-      }
-
-      idsPorNombreRol.set(rolDraft.nombre, rolCreado.id)
-
-      const filasPermisos = Object.entries(rolDraft.permisos).map(([moduloId, nivel]) => ({
-        rol_id: rolCreado.id,
-        modulo_id: moduloId,
-        nivel,
-      }))
-      if (filasPermisos.length > 0) {
-        await supabase.from('permisos_rol').insert(filasPermisos)
-      }
-    }
-
-    for (const persona of resultado.personas) {
-      const rolId = idsPorNombreRol.get(persona.rolNombre)
-      if (!rolId) continue
-
-      await supabase.from('usuarios_cliente').insert({
-        cliente_id: clienteId,
-        rol_id: rolId,
-        rol: persona.rolNombre,
-        nombre: persona.nombre,
-        cuil: persona.cuil,
-        auth_mode: 'pin',
-      })
-    }
+    await guardarAdmin(clienteId, datosAdmin)
+    await guardarEquipo(clienteId, resultado)
 
     navigate(`/panel/clientes/${clienteId}`)
   }
