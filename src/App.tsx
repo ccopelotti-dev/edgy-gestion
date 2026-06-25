@@ -7,6 +7,7 @@ import { ModuloRoute } from '@/pages/ModuloRoute'
 import { NuevoProyecto } from '@/pages/onboarding/NuevoProyecto'
 import { ClientesListado } from '@/pages/panel/ClientesListado'
 import { ClienteDetalle } from '@/pages/panel/ClienteDetalle'
+import { CompletarCuenta } from '@/pages/CompletarCuenta'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
 
 // La raíz ("/") no sabe de antemano si quien entra es personal de Edgy o
@@ -32,6 +33,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RaizRedirect />} />
+        <Route path="/completar-cuenta" element={<CompletarCuenta />} />
 
         {/* Panel interno de Edgy - protegido, solo personal_edgy entra */}
         <Route element={<RutaStaff />}>

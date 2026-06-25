@@ -56,9 +56,7 @@ export function NuevoProyecto() {
   })
   const [datosAdmin, setDatosAdmin] = useState<DatosAdmin>({
     nombre: '',
-    modo: 'full',
     email: '',
-    cuil: '',
   })
   const [enviandoPaso1, setEnviandoPaso1] = useState(false)
   const [errorPaso1, setErrorPaso1] = useState<string | null>(null)
@@ -149,10 +147,12 @@ export function NuevoProyecto() {
     setPaso(5)
   }
 
-  // Paso 5 -> marca el cliente como activo, y agrega su subdominio como
+  // Paso 5 -> marca el cliente como activo, agrega su subdominio como
   // domain_alias en Netlify (Opción A: Netlify no soporta wildcard real,
   // así que cada cliente se registra individualmente — ver
-  // netlify/functions/agregar-dominio.js). El DNS wildcard en el
+  // netlify/functions/agregar-dominio.js), e invita al Admin real por
+  // mail para que defina su propia contraseña (ver
+  // netlify/functions/invitar-admin.js). El DNS wildcard en el
   // proveedor (Porkbun) sigue siendo una sola vez, no por cliente.
   async function activarCliente() {
     if (!clienteId) return
@@ -168,14 +168,24 @@ export function NuevoProyecto() {
     const token = sesion.session?.access_token
     if (!token) throw new Error('No hay sesión activa para habilitar el subdominio')
 
-    const resp = await fetch('/.netlify/functions/agregar-dominio', {
+    const respDominio = await fetch('/.netlify/functions/agregar-dominio', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ slug: datosIdentidad.slug }),
     })
-    const resultado = await resp.json()
-    if (!resp.ok || !resultado.ok) {
-      throw new Error(resultado.error || 'No pudimos habilitar el subdominio en Netlify')
+    const resultadoDominio = await respDominio.json()
+    if (!respDominio.ok || !resultadoDominio.ok) {
+      throw new Error(resultadoDominio.error || 'No pudimos habilitar el subdominio en Netlify')
+    }
+
+    const respInvite = await fetch('/.netlify/functions/invitar-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ clienteId }),
+    })
+    const resultadoInvite = await respInvite.json()
+    if (!respInvite.ok || !resultadoInvite.ok) {
+      throw new Error(resultadoInvite.error || 'No pudimos invitar al Admin por mail')
     }
   }
 
@@ -230,6 +240,7 @@ export function NuevoProyecto() {
         <Paso5Activacion
           nombre={datosIdentidad.nombre}
           slug={datosIdentidad.slug}
+          emailAdmin={datosAdmin.email}
           onActivar={activarCliente}
           onIrAlCliente={() => navigate(`/panel/clientes/${clienteId}`)}
         />

@@ -5,22 +5,19 @@ import { urlCliente } from '@/lib/slug'
 interface Paso5Props {
   nombre: string
   slug: string
+  emailAdmin: string
   onActivar: () => Promise<void>
   onIrAlCliente: () => void
 }
 
 /**
- * Último paso del wizard: marca el cliente como activo y agrega su
- * subdominio como domain_alias en Netlify (vía onActivar, en
- * NuevoProyecto.tsx) — Netlify no soporta wildcard real, así que cada
- * cliente se registra individualmente (tope: 100 por sitio; cuando haya
- * varios clientes esto migra a un wildcard real con Cloudflare).
- *
- * Importante: este paso NO genera una contraseña de acceso real. El
- * Admin (Paso 2, modo "Email") todavía no tiene una cuenta de Supabase
- * Auth creada automáticamente por este wizard — ver nota en pantalla.
+ * Último paso del wizard: marca el cliente como activo, agrega su
+ * subdominio como domain_alias en Netlify, e invita al Admin real por
+ * mail para que defina su propia contraseña (todo vía onActivar, en
+ * NuevoProyecto.tsx — ver netlify/functions/agregar-dominio.js e
+ * invitar-admin.js).
  */
-export function Paso5Activacion({ nombre, slug, onActivar, onIrAlCliente }: Paso5Props) {
+export function Paso5Activacion({ nombre, slug, emailAdmin, onActivar, onIrAlCliente }: Paso5Props) {
   const [activando, setActivando] = useState(false)
   const [activado, setActivado] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -69,9 +66,8 @@ export function Paso5Activacion({ nombre, slug, onActivar, onIrAlCliente }: Paso
         </div>
 
         <p className="text-sm text-gray-500">
-          Este wizard todavía no crea una cuenta de acceso real para el Admin
-          (modo Email) — hace falta darla de alta a mano en Supabase Auth, o
-          esperar a la Edge Function de PIN para el modo CUIL+PIN.
+          Le mandamos una invitación a <span className="font-medium text-gray-900">{emailAdmin}</span> para
+          que defina su contraseña — todavía no puede entrar hasta que abra ese mail.
         </p>
 
         <Button className="w-full" onClick={onIrAlCliente}>
@@ -94,6 +90,13 @@ export function Paso5Activacion({ nombre, slug, onActivar, onIrAlCliente }: Paso
         <label className="mb-2 block text-sm font-medium text-gray-900">URL final</label>
         <div className="rounded-lg border border-gray-200 px-3.5 py-2.5 text-sm text-gray-900">
           {url}
+        </div>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-900">Admin</label>
+        <div className="rounded-lg border border-gray-200 px-3.5 py-2.5 text-sm text-gray-900">
+          {emailAdmin}
         </div>
       </div>
 
