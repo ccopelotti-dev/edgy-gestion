@@ -16,6 +16,19 @@ const PASOS_LABEL: Record<Paso, string> = {
   4: 'Equipo',
 }
 
+// Traduce los errores más comunes de Postgres a algo que tenga sentido
+// para quien está completando el wizard, en vez de mostrar el mensaje
+// crudo de la base (o, peor, no mostrar nada).
+function traducirErrorCliente(error: { code?: string; message?: string } | null): string {
+  if (error?.code === '23505') {
+    if (error.message?.includes('cuit')) {
+      return 'Ya existe un cliente con ese CUIT. Revisá el dato, o buscalo en "Clientes" si ya está cargado.'
+    }
+    return 'Ya existe un cliente con esos datos.'
+  }
+  return 'No pudimos crear el cliente. Probá de nuevo en un momento.'
+}
+
 export function NuevoProyecto() {
   const navigate = useNavigate()
   const [paso, setPaso] = useState<Paso>(1)
@@ -37,19 +50,30 @@ export function NuevoProyecto() {
     email: '',
     cuil: '',
   })
+  const [enviandoPaso1, setEnviandoPaso1] = useState(false)
+  const [errorPaso1, setErrorPaso1] = useState<string | null>(null)
 
   // Paso 1 -> crea la fila en `clientes`. A partir de aca ya existe el tenant.
   // Ya no hace falta sobrevivir a una recarga de pagina por un link de
   // correo: todo el wizard lo completa personal de Edgy de una sentada.
   async function crearCliente() {
+    setEnviandoPaso1(true)
+    setErrorPaso1(null)
+
     let logoUrl: string | null = null
     if (datosIdentidad.logoFile) {
       const ruta = `${Date.now()}-${datosIdentidad.logoFile.name}`
-      const { data: subida } = await supabase.storage
+      const { data: subida, error: errSubida } = await supabase.storage
         .from('logos-clientes')
         .upload(ruta, datosIdentidad.logoFile)
       if (subida) {
         logoUrl = supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
+      } else if (errSubida) {
+        // El logo es opcional — si falla la subida no bloqueamos la
+        // creación del cliente, pero lo dejamos anotado en la consola
+        // para poder diagnosticarlo (ej: si el bucket no existe todavía).
+        // eslint-disable-next-line no-console
+        console.error('No se pudo subir el logo (se sigue sin logo)', errSubida)
       }
     }
 
@@ -71,10 +95,13 @@ export function NuevoProyecto() {
     if (error || !data) {
       // eslint-disable-next-line no-console
       console.error('Error creando cliente', error)
+      setErrorPaso1(traducirErrorCliente(error))
+      setEnviandoPaso1(false)
       return
     }
 
     setClienteId(data.id)
+    setEnviandoPaso1(false)
     setPaso(2)
   }
 
@@ -203,6 +230,8 @@ export function NuevoProyecto() {
           datos={datosIdentidad}
           onChange={setDatosIdentidad}
           onContinuar={crearCliente}
+          error={errorPaso1}
+          enviando={enviandoPaso1}
         />
       )}
       {paso === 2 && (

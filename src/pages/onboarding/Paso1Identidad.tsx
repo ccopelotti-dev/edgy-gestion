@@ -26,9 +26,11 @@ interface Paso1Props {
   datos: DatosIdentidad
   onChange: (datos: DatosIdentidad) => void
   onContinuar: () => void
+  error?: string | null
+  enviando?: boolean
 }
 
-export function Paso1Identidad({ datos, onChange, onContinuar }: Paso1Props) {
+export function Paso1Identidad({ datos, onChange, onContinuar, error, enviando }: Paso1Props) {
   const puedeContinuar = datos.nombre.trim().length > 0 && datos.tipoNegocio !== ''
 
   return (
@@ -143,8 +145,12 @@ export function Paso1Identidad({ datos, onChange, onContinuar }: Paso1Props) {
         </div>
       </div>
 
-      <Button className="w-full" disabled={!puedeContinuar} onClick={onContinuar}>
-        Continuar
+      {error && (
+        <p className="rounded-lg bg-red-50 px-3.5 py-2.5 text-sm text-red-600">{error}</p>
+      )}
+
+      <Button className="w-full" disabled={!puedeContinuar || enviando} onClick={onContinuar}>
+        {enviando ? 'Creando...' : 'Continuar'}
       </Button>
     </div>
   )
