@@ -47,9 +47,9 @@ export async function guardarAdmin(clienteId: string, datosAdmin: DatosAdmin): P
     rol_id: rolDuenoId,
     rol: 'Dueño',
     nombre: datosAdmin.nombre,
-    auth_mode: datosAdmin.modo,
-    email: datosAdmin.modo === 'full' ? datosAdmin.email : null,
-    cuil: datosAdmin.modo === 'pin' ? datosAdmin.cuil : null,
+    auth_mode: 'full',
+    email: datosAdmin.email,
+    cuil: null,
   })
 }
 
