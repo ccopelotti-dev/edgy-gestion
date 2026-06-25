@@ -1,56 +1,55 @@
 import { NavLink } from 'react-router-dom'
 import type { ModuloActivo } from '@/hooks/useClienteActual'
-import { cn } from '@/lib/utils'
+import { colorDeContraste } from '@/lib/colorContraste'
+import { iconoDeModulo, IconoInicio } from '@/modules/iconosModulo'
 
 interface SidebarProps {
-  nombreCliente: string
-  logoUrl: string | null
   colorMarca: string | null
   modulos: ModuloActivo[]
 }
 
-export function Sidebar({ nombreCliente, logoUrl, colorMarca, modulos }: SidebarProps) {
-  return (
-    <aside className="flex h-screen w-64 flex-col border-r border-gray-200 bg-white">
-      <div className="flex items-center gap-3 border-b border-gray-200 px-5 py-5">
-        {logoUrl ? (
-          <img src={logoUrl} alt={nombreCliente} className="h-8 w-8 rounded-md object-cover" />
-        ) : (
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium text-white"
-            style={{ backgroundColor: colorMarca ?? '#0C1A2E' }}
-          >
-            {nombreCliente.charAt(0).toUpperCase()}
-          </div>
-        )}
-        <span className="truncate text-sm font-medium text-gray-900">{nombreCliente}</span>
-      </div>
+/** Rail vertical de íconos, pintado por completo en el color de marca
+ * del cliente — el ícono del módulo activo se resalta con el color de
+ * contraste que mejor se vea contra ese color (blanco o gris oscuro,
+ * calculado, no fijo). El logo va en el header (Layout.tsx), no acá. */
+export function Sidebar({ colorMarca, modulos }: SidebarProps) {
+  const fondo = colorMarca ?? '#0C1A2E'
+  const contraste = colorDeContraste(fondo)
+  const inactivoOpacidad = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.55)' : 'rgba(32,31,27,0.55)'
+  const activoFondo = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.18)' : 'rgba(32,31,27,0.12)'
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {modulos.length === 0 && (
-          <p className="px-2 py-4 text-sm text-gray-400">
-            Todavía no activaste ningún módulo.
-          </p>
-        )}
-        {modulos.map((modulo) => (
+  return (
+    <aside
+      className="flex h-screen w-16 flex-shrink-0 flex-col items-center gap-1.5 py-4"
+      style={{ backgroundColor: fondo }}
+    >
+      <NavLink
+        to="/dashboard"
+        end
+        className="flex h-10 w-10 items-center justify-center rounded-xl transition-colors"
+        style={({ isActive }) => ({
+          backgroundColor: isActive ? activoFondo : 'transparent',
+        })}
+      >
+        {({ isActive }) => <IconoInicio size={18} color={isActive ? contraste : inactivoOpacidad} />}
+      </NavLink>
+
+      {modulos.map((modulo) => {
+        const Icono = iconoDeModulo(modulo.slug)
+        return (
           <NavLink
             key={modulo.id}
             to={`/m/${modulo.slug}`}
-            className={({ isActive }) =>
-              cn(
-                'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                isActive ? 'bg-brand-50 text-brand-500' : 'text-gray-600 hover:bg-gray-50',
-              )
-            }
+            title={modulo.nombre}
+            className="flex h-10 w-10 items-center justify-center rounded-xl transition-colors"
+            style={({ isActive }) => ({
+              backgroundColor: isActive ? activoFondo : 'transparent',
+            })}
           >
-            {modulo.nombre}
+            {({ isActive }) => <Icono size={18} color={isActive ? contraste : inactivoOpacidad} />}
           </NavLink>
-        ))}
-      </nav>
-      {/* "Agregar módulos" se sacó de acá: activar módulos quedó reservado
-          a personal de Edgy (ver migración v4). "Mi Equipo" para que el
-          Admin del cliente sume gente queda para el próximo ciclo de
-          diseño — el del dashboard del cliente en sí. */}
+        )
+      })}
     </aside>
   )
 }

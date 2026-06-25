@@ -34,10 +34,21 @@ export function CompletarCuenta() {
     setGuardando(true)
     setError(null)
     const { error: updateError } = await supabase.auth.updateUser({ password })
-    setGuardando(false)
 
     if (updateError) {
+      setGuardando(false)
       setError('No pudimos guardar la contraseña. Probá de nuevo en un momento.')
+      return
+    }
+
+    // Recién acá existe una sesión real con la contraseña ya puesta —
+    // vinculamos esta cuenta a la fila de usuarios_cliente que el
+    // wizard dejó esperando (matchea por email, ver migración 0006).
+    const { error: vincularError } = await supabase.rpc('vincular_usuario_actual')
+    setGuardando(false)
+
+    if (vincularError) {
+      setError('Guardamos la contraseña, pero no pudimos vincular tu cuenta. Avisale a Edgy Sistemas.')
       return
     }
 

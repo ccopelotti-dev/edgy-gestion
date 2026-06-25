@@ -1,0 +1,35 @@
+import {
+  Home,
+  Wallet,
+  Package,
+  ShoppingCart,
+  ShoppingBag,
+  Armchair,
+  ChefHat,
+  QrCode,
+  Truck,
+  Banknote,
+  CircleDashed,
+  type LucideIcon,
+} from 'lucide-react'
+
+/** Uno por cada slug del catálogo (ver migración 0001_init.sql). Si
+ * agregan un módulo nuevo al catálogo y no está acá, cae en
+ * CircleDashed en vez de romper. */
+const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
+  tesoreria: Wallet,
+  'productos-stock': Package,
+  ventas: ShoppingCart,
+  compras: ShoppingBag,
+  'mesas-salon': Armchair,
+  'comandas-cocina': ChefHat,
+  'menu-qr': QrCode,
+  'delivery-whatsapp': Truck,
+  'caja-turno': Banknote,
+}
+
+export function iconoDeModulo(slug: string): LucideIcon {
+  return ICONOS_POR_SLUG[slug] ?? CircleDashed
+}
+
+export { Home as IconoInicio }
