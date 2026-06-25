@@ -15,7 +15,7 @@ interface FilaClienteModulo {
   activo: boolean
 }
 
-const DATOS_ADMIN_VACIOS: DatosAdmin = { nombre: '', modo: 'full', email: '', cuil: '' }
+const DATOS_ADMIN_VACIOS: DatosAdmin = { nombre: '', email: '' }
 
 export function ClienteDetalle() {
   const { id } = useParams<{ id: string }>()
