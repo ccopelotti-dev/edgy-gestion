@@ -6,6 +6,7 @@ import type { Modulo, NivelPermiso, TipoNegocio } from '@/types'
 import { ROLES_SUGERIDOS } from '@/types'
 
 const NIVELES: { value: NivelPermiso; label: string }[] = [
+  { value: 'sin_acceso', label: 'Sin acceso' },
   { value: 'lectura', label: 'Solo ver' },
   { value: 'escritura', label: 'Editar' },
   { value: 'admin', label: 'Administrar' },
@@ -187,7 +188,7 @@ export function Paso4Permisos({ tipoNegocio, modulosActivos, onFinalizar }: Paso
       </div>
 
       <Button className="w-full" onClick={() => onFinalizar({ roles, personas })}>
-        Empezar a operar el sistema
+        Continuar
       </Button>
     </div>
   )
