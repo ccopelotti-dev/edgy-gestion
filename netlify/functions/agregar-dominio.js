@@ -25,7 +25,6 @@ export default async (req) => {
   const auth = req.headers.get('authorization') || ''
   const token = auth.replace(/^Bearer\s+/i, '')
   if (!token) {
-    console.error('agregar-dominio: falta el header Authorization')
     return new Response(JSON.stringify({ ok: false, error: 'Falta sesión' }), { status: 401 })
   }
 
@@ -33,13 +32,11 @@ export default async (req) => {
   try {
     const body = await req.json()
     slug = String(body.slug || '').toLowerCase()
-  } catch (e) {
-    console.error('agregar-dominio: body inválido', e)
+  } catch {
     return new Response(JSON.stringify({ ok: false, error: 'Body inválido' }), { status: 400 })
   }
 
   if (!SLUG_VALIDO.test(slug)) {
-    console.error('agregar-dominio: slug con formato inválido:', slug)
     return new Response(JSON.stringify({ ok: false, error: 'Slug con formato inválido' }), { status: 400 })
   }
 
@@ -49,27 +46,29 @@ export default async (req) => {
     { db: { schema: 'edgy_gestion' } },
   )
 
+  // 1) Confirmar que quien llama es personal de Edgy — mismo criterio que
+  // usePersonalEdgy.ts en el frontend (una fila en personal_edgy con ese
+  // user_id), pero validado server-side con la service_role key porque
+  // este endpoint hace algo que ningún RLS de Supabase puede proteger:
+  // tocar la configuración de Netlify.
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token)
   if (userError || !userData?.user) {
-    console.error('agregar-dominio: sesión inválida', userError)
     return new Response(JSON.stringify({ ok: false, error: 'Sesión inválida' }), { status: 401 })
   }
 
-  const { data: staffRow, error: staffError } = await supabaseAdmin
+  const { data: staffRow } = await supabaseAdmin
     .from('personal_edgy')
     .select('user_id')
     .eq('user_id', userData.user.id)
     .maybeSingle()
 
-  if (staffError) {
-    console.error('agregar-dominio: error consultando personal_edgy', staffError)
-  }
-
   if (!staffRow) {
-    console.error('agregar-dominio: usuario no es personal_edgy:', userData.user.id)
     return new Response(JSON.stringify({ ok: false, error: 'No autorizado' }), { status: 403 })
   }
 
+  // 2) Agregar el subdominio como domain_alias en Netlify, mezclando con
+  // los que ya existan (un PATCH sin GET previo pisaría los de otros
+  // clientes ya activados).
   const NETLIFY_TOKEN = process.env.NETLIFY_API_TOKEN
   const SITE_ID = process.env.NETLIFY_SITE_ID
   const dominio = `${slug}.edgysistemas.tech`
@@ -78,8 +77,6 @@ export default async (req) => {
     headers: { Authorization: `Bearer ${NETLIFY_TOKEN}` },
   })
   if (!getRes.ok) {
-    const detalleGet = await getRes.text()
-    console.error('agregar-dominio: GET a Netlify falló', getRes.status, detalleGet)
     return new Response(
       JSON.stringify({ ok: false, error: 'No pudimos leer la configuración de Netlify' }),
       { status: 502 },
@@ -95,7 +92,6 @@ export default async (req) => {
   }
 
   if (aliasesActuales.length >= 100) {
-    console.error('agregar-dominio: tope de 100 alias alcanzado')
     return new Response(
       JSON.stringify({
         ok: false,
@@ -116,7 +112,6 @@ export default async (req) => {
 
   if (!patchRes.ok) {
     const detalle = await patchRes.text()
-    console.error('agregar-dominio: PATCH a Netlify falló', patchRes.status, detalle)
     return new Response(
       JSON.stringify({ ok: false, error: 'Netlify rechazó el subdominio', detalle }),
       { status: 502 },
