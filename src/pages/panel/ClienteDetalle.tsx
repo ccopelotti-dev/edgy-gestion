@@ -33,6 +33,24 @@ export function ClienteDetalle() {
   const [subPaso, setSubPaso] = useState<'admin' | 'equipo'>('admin')
   const [datosAdminNuevo, setDatosAdminNuevo] = useState<DatosAdmin>(DATOS_ADMIN_VACIOS)
 
+  // Reenviar acceso al Admin si el primer mail de invitación no le
+  // llegó (ej. límite de envíos, lo borró por error, etc.) — usa el
+  // flujo estándar de "recuperar contraseña" de Supabase, que funciona
+  // igual de bien para una cuenta que nunca llegó a tener contraseña.
+  // No hace falta la service_role key para esto, es un método público.
+  const [reenviando, setReenviando] = useState<string | null>(null)
+  const [reenviado, setReenviado] = useState<string | null>(null)
+
+  async function reenviarAcceso(email: string) {
+    setReenviando(email)
+    setReenviado(null)
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://panel.edgysistemas.tech/completar-cuenta',
+    })
+    setReenviando(null)
+    setReenviado(email)
+  }
+
   async function cargarTodo() {
     if (!id) return
     setCargando(true)
@@ -175,7 +193,23 @@ export function ClienteDetalle() {
                   {u.auth_mode === 'full' ? u.email : `CUIL ${u.cuil}`}
                 </p>
               </div>
-              <span className="text-sm capitalize text-gray-500">{u.rol}</span>
+              <div className="flex items-center gap-3">
+                {u.rol === 'Dueño' && u.auth_mode === 'full' && u.email && (
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-brand-500 disabled:opacity-50"
+                    disabled={reenviando === u.email}
+                    onClick={() => reenviarAcceso(u.email as string)}
+                  >
+                    {reenviando === u.email
+                      ? 'Enviando...'
+                      : reenviado === u.email
+                        ? 'Enviado'
+                        : 'Reenviar acceso'}
+                  </button>
+                )}
+                <span className="text-sm capitalize text-gray-500">{u.rol}</span>
+              </div>
             </Card>
           ))}
         </div>
