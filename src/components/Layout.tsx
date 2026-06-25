@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, Navigate } from 'react-router-dom'
 import { Store } from 'lucide-react'
 import { Sidebar } from '@/components/Sidebar'
 import { useClienteActual } from '@/hooks/useClienteActual'
@@ -9,6 +9,12 @@ export function DashboardLayout() {
 
   if (cargando) {
     return <div className="flex h-screen items-center justify-center text-gray-400">Cargando...</div>
+  }
+
+  // Sin sesión en absoluto (no hay user_id, no hay error de negocio
+  // asociado) -> a loguearse, no a un mensaje sin salida.
+  if (!error && !cliente) {
+    return <Navigate to="/ingresar" replace />
   }
 
   if (error || !cliente) {

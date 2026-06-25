@@ -8,14 +8,17 @@ import { NuevoProyecto } from '@/pages/onboarding/NuevoProyecto'
 import { ClientesListado } from '@/pages/panel/ClientesListado'
 import { ClienteDetalle } from '@/pages/panel/ClienteDetalle'
 import { CompletarCuenta } from '@/pages/CompletarCuenta'
+import { Ingresar } from '@/pages/Ingresar'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
 
 // La raíz ("/") no sabe de antemano si quien entra es personal de Edgy o
 // un cliente — antes mandaba siempre a /dashboard (la pantalla del
 // cliente). Ahora consulta personal_edgy primero y manda a cada uno a su
-// lugar.
+// lugar. Si no hay sesión en absoluto, manda a /ingresar — antes caía en
+// /dashboard de todos modos, que solo sabe mostrar un mensaje muerto sin
+// forma de loguearse ahí mismo.
 function RaizRedirect() {
-  const { esStaff, cargando } = usePersonalEdgy()
+  const { esStaff, haySesion, cargando } = usePersonalEdgy()
 
   if (cargando) {
     return (
@@ -23,6 +26,10 @@ function RaizRedirect() {
         Cargando...
       </div>
     )
+  }
+
+  if (haySesion === false) {
+    return <Navigate to="/ingresar" replace />
   }
 
   return <Navigate to={esStaff ? '/panel' : '/dashboard'} replace />
@@ -33,6 +40,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RaizRedirect />} />
+        <Route path="/ingresar" element={<Ingresar />} />
         <Route path="/completar-cuenta" element={<CompletarCuenta />} />
 
         {/* Panel interno de Edgy - protegido, solo personal_edgy entra */}
