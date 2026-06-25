@@ -7,12 +7,31 @@ import { ModuloRoute } from '@/pages/ModuloRoute'
 import { NuevoProyecto } from '@/pages/onboarding/NuevoProyecto'
 import { ClientesListado } from '@/pages/panel/ClientesListado'
 import { ClienteDetalle } from '@/pages/panel/ClienteDetalle'
+import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
+
+// La raíz ("/") no sabe de antemano si quien entra es personal de Edgy o
+// un cliente — antes mandaba siempre a /dashboard (la pantalla del
+// cliente). Ahora consulta personal_edgy primero y manda a cada uno a su
+// lugar.
+function RaizRedirect() {
+  const { esStaff, cargando } = usePersonalEdgy()
+
+  if (cargando) {
+    return (
+      <div className="flex h-screen items-center justify-center text-gray-400">
+        Cargando...
+      </div>
+    )
+  }
+
+  return <Navigate to={esStaff ? '/panel' : '/dashboard'} replace />
+}
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<RaizRedirect />} />
 
         {/* Panel interno de Edgy - protegido, solo personal_edgy entra */}
         <Route element={<RutaStaff />}>
@@ -36,3 +55,4 @@ export default function App() {
     </BrowserRouter>
   )
 }
+
