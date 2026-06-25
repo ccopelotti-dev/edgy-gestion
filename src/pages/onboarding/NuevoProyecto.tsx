@@ -177,64 +177,50 @@ export function NuevoProyecto() {
   }
 
   return (
-    <div className="flex min-h-screen bg-white">
-      {/* Panel de marca - fijo, no se ve en pantallas chicas para no robarle
-          espacio al formulario en celulares */}
-      <aside className="hidden w-72 shrink-0 flex-col justify-between bg-brand-500 px-8 py-10 text-white md:flex">
-        <div>
-          <span className="text-lg font-semibold tracking-tight">Edgy Sistemas</span>
-          <p className="mt-2 text-sm text-white/70">
-            Sistema de gestión modular para PyMEs
-          </p>
-        </div>
-        <p className="text-xs text-white/50">Edgy Gestión · Panel de alta de clientes</p>
-      </aside>
-
-      <div className="flex-1 px-4 py-10">
-        <div className="mx-auto mb-10 flex max-w-2xl items-center justify-center gap-2">
-          {([1, 2, 3, 4] as Paso[]).map((p) => (
-            <div key={p} className="flex items-center gap-2">
-              <div
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium ${
-                  p === paso
-                    ? 'bg-brand-500 text-white'
-                    : p < paso
-                      ? 'bg-brand-50 text-brand-500'
-                      : 'bg-gray-100 text-gray-400'
-                }`}
-              >
-                {p}
-              </div>
-              <span className="text-xs text-gray-500">{PASOS_LABEL[p]}</span>
-              {p < 4 && <span className="mx-1 h-px w-6 bg-gray-200" />}
+    <div>
+      <div className="mx-auto mb-10 flex max-w-2xl items-center justify-center gap-2">
+        {([1, 2, 3, 4] as Paso[]).map((p) => (
+          <div key={p} className="flex items-center gap-2">
+            <div
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium ${
+                p === paso
+                  ? 'bg-brand-500 text-white'
+                  : p < paso
+                    ? 'bg-brand-50 text-brand-500'
+                    : 'bg-gray-100 text-gray-400'
+              }`}
+            >
+              {p}
             </div>
-          ))}
-        </div>
-
-        {paso === 1 && (
-          <Paso1Identidad
-            datos={datosIdentidad}
-            onChange={setDatosIdentidad}
-            onContinuar={crearCliente}
-          />
-        )}
-        {paso === 2 && (
-          <Paso2Admin datos={datosAdmin} onChange={setDatosAdmin} onContinuar={() => setPaso(3)} />
-        )}
-        {paso === 3 && (
-          <Paso3Modulos
-            tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
-            onContinuar={activarModulos}
-          />
-        )}
-        {paso === 4 && (
-          <Paso4Permisos
-            tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
-            modulosActivos={modulosActivos}
-            onFinalizar={finalizar}
-          />
-        )}
+            <span className="text-xs text-gray-500">{PASOS_LABEL[p]}</span>
+            {p < 4 && <span className="mx-1 h-px w-6 bg-gray-200" />}
+          </div>
+        ))}
       </div>
+
+      {paso === 1 && (
+        <Paso1Identidad
+          datos={datosIdentidad}
+          onChange={setDatosIdentidad}
+          onContinuar={crearCliente}
+        />
+      )}
+      {paso === 2 && (
+        <Paso2Admin datos={datosAdmin} onChange={setDatosAdmin} onContinuar={() => setPaso(3)} />
+      )}
+      {paso === 3 && (
+        <Paso3Modulos
+          tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
+          onContinuar={activarModulos}
+        />
+      )}
+      {paso === 4 && (
+        <Paso4Permisos
+          tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
+          modulosActivos={modulosActivos}
+          onFinalizar={finalizar}
+        />
+      )}
     </div>
   )
 }
