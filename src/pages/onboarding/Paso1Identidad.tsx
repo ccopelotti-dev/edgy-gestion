@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { generarSlug, slugValido, urlCliente } from '@/lib/slug'
 import type { TipoNegocio } from '@/types'
 
 const TIPOS_NEGOCIO: { value: TipoNegocio; label: string }[] = [
@@ -20,6 +22,7 @@ export interface DatosIdentidad {
   tipoNegocio: TipoNegocio | ''
   logoFile: File | null
   colorMarca: string
+  slug: string
 }
 
 interface Paso1Props {
@@ -31,7 +34,28 @@ interface Paso1Props {
 }
 
 export function Paso1Identidad({ datos, onChange, onContinuar, error, enviando }: Paso1Props) {
-  const puedeContinuar = datos.nombre.trim().length > 0 && datos.tipoNegocio !== ''
+  const [slugTocado, setSlugTocado] = useState(datos.slug !== generarSlug(datos.nombre))
+
+  const slugFormatoOk = datos.slug.trim().length > 0 && slugValido(datos.slug)
+  const puedeContinuar =
+    datos.nombre.trim().length > 0 && datos.tipoNegocio !== '' && slugFormatoOk
+
+  function actualizarNombre(nombre: string) {
+    onChange({
+      ...datos,
+      nombre,
+      slug: slugTocado ? datos.slug : generarSlug(nombre),
+    })
+  }
+
+  function actualizarSlug(valor: string) {
+    setSlugTocado(true)
+    const limpio = valor
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-+/g, '-')
+    onChange({ ...datos, slug: limpio })
+  }
 
   return (
     <div className="mx-auto max-w-md space-y-6">
@@ -42,8 +66,29 @@ export function Paso1Identidad({ datos, onChange, onContinuar, error, enviando }
         <Input
           placeholder="Ej: Café de la Esquina"
           value={datos.nombre}
-          onChange={(e) => onChange({ ...datos, nombre: e.target.value })}
+          onChange={(e) => actualizarNombre(e.target.value)}
         />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-900">Subdominio</label>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-400">https://</span>
+          <Input
+            placeholder="cafe-de-la-esquina"
+            value={datos.slug}
+            onChange={(e) => actualizarSlug(e.target.value)}
+            className="flex-1"
+          />
+          <span className="text-sm text-gray-400">.edgysistemas.tech</span>
+        </div>
+        <p className="mt-2 text-sm text-gray-500">
+          {datos.slug
+            ? slugFormatoOk
+              ? `Va a entrar por ${urlCliente(datos.slug)}`
+              : 'Solo minúsculas, números y guiones, sin espacios.'
+            : 'Se completa solo a partir del nombre, lo podés editar.'}
+        </p>
       </div>
 
       <div>

@@ -6,6 +6,8 @@ export type TipoNegocio =
   | 'servicios'
   | 'agro'
 
+export type EstadoCliente = 'pendiente' | 'activo'
+
 export interface Cliente {
   id: string
   nombre: string
@@ -16,6 +18,8 @@ export interface Cliente {
   cuit: string | null
   logo_url: string | null
   color_marca: string | null
+  slug: string | null
+  estado: EstadoCliente
   created_at: string
 }
 

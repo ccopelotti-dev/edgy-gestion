@@ -6,15 +6,17 @@ import { Paso1Identidad, type DatosIdentidad } from './Paso1Identidad'
 import { Paso2Admin, type DatosAdmin } from './Paso2Admin'
 import { Paso3Modulos } from './Paso3Modulos'
 import { Paso4Permisos, type ResultadoEquipo } from './Paso4Permisos'
+import { Paso5Activacion } from './Paso5Activacion'
 import type { Modulo, TipoNegocio } from '@/types'
 
-type Paso = 1 | 2 | 3 | 4
+type Paso = 1 | 2 | 3 | 4 | 5
 
 const PASOS_LABEL: Record<Paso, string> = {
   1: 'Cliente',
   2: 'Admin',
   3: 'Módulos',
   4: 'Equipo',
+  5: 'Activación',
 }
 
 // Traduce los errores más comunes de Postgres a algo que tenga sentido
@@ -25,7 +27,13 @@ function traducirErrorCliente(error: { code?: string; message?: string } | null)
     if (error.message?.includes('cuit')) {
       return 'Ya existe un cliente con ese CUIT. Revisá el dato, o buscalo en "Clientes" si ya está cargado.'
     }
+    if (error.message?.includes('slug')) {
+      return 'Ese subdominio ya lo está usando otro cliente. Probá con otra variante.'
+    }
     return 'Ya existe un cliente con esos datos.'
+  }
+  if (error?.code === '23514' && error.message?.includes('clientes_slug_formato')) {
+    return 'El subdominio solo puede tener minúsculas, números y guiones.'
   }
   return 'No pudimos crear el cliente. Probá de nuevo en un momento.'
 }
@@ -44,6 +52,7 @@ export function NuevoProyecto() {
     tipoNegocio: '',
     logoFile: null,
     colorMarca: '#D4537E',
+    slug: '',
   })
   const [datosAdmin, setDatosAdmin] = useState<DatosAdmin>({
     nombre: '',
@@ -89,6 +98,7 @@ export function NuevoProyecto() {
         tipo_negocio: datosIdentidad.tipoNegocio,
         logo_url: logoUrl,
         color_marca: datosIdentidad.colorMarca,
+        slug: datosIdentidad.slug,
       })
       .select()
       .single()
@@ -136,13 +146,43 @@ export function NuevoProyecto() {
     await guardarAdmin(clienteId, datosAdmin)
     await guardarEquipo(clienteId, resultado)
 
-    navigate(`/panel/clientes/${clienteId}`)
+    setPaso(5)
+  }
+
+  // Paso 5 -> marca el cliente como activo, y agrega su subdominio como
+  // domain_alias en Netlify (Opción A: Netlify no soporta wildcard real,
+  // así que cada cliente se registra individualmente — ver
+  // netlify/functions/agregar-dominio.js). El DNS wildcard en el
+  // proveedor (Porkbun) sigue siendo una sola vez, no por cliente.
+  async function activarCliente() {
+    if (!clienteId) return
+
+    const { error } = await supabase
+      .from('clientes')
+      .update({ estado: 'activo' })
+      .eq('id', clienteId)
+
+    if (error) throw error
+
+    const { data: sesion } = await supabase.auth.getSession()
+    const token = sesion.session?.access_token
+    if (!token) throw new Error('No hay sesión activa para habilitar el subdominio')
+
+    const resp = await fetch('/.netlify/functions/agregar-dominio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ slug: datosIdentidad.slug }),
+    })
+    const resultado = await resp.json()
+    if (!resp.ok || !resultado.ok) {
+      throw new Error(resultado.error || 'No pudimos habilitar el subdominio en Netlify')
+    }
   }
 
   return (
     <div>
       <div className="mx-auto mb-10 flex max-w-2xl items-center justify-center gap-2">
-        {([1, 2, 3, 4] as Paso[]).map((p) => (
+        {([1, 2, 3, 4, 5] as Paso[]).map((p) => (
           <div key={p} className="flex items-center gap-2">
             <div
               className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium ${
@@ -156,7 +196,7 @@ export function NuevoProyecto() {
               {p}
             </div>
             <span className="text-xs text-gray-500">{PASOS_LABEL[p]}</span>
-            {p < 4 && <span className="mx-1 h-px w-6 bg-gray-200" />}
+            {p < 5 && <span className="mx-1 h-px w-6 bg-gray-200" />}
           </div>
         ))}
       </div>
@@ -184,6 +224,14 @@ export function NuevoProyecto() {
           tipoNegocio={datosIdentidad.tipoNegocio as TipoNegocio}
           modulosActivos={modulosActivos}
           onFinalizar={finalizar}
+        />
+      )}
+      {paso === 5 && (
+        <Paso5Activacion
+          nombre={datosIdentidad.nombre}
+          slug={datosIdentidad.slug}
+          onActivar={activarCliente}
+          onIrAlCliente={() => navigate(`/panel/clientes/${clienteId}`)}
         />
       )}
     </div>
