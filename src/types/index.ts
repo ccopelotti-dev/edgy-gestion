@@ -54,7 +54,7 @@ export interface Rol {
 // ('ver'/'editar') que no coincidían con las filas reales ('lectura'/
 // 'escritura'/'admin'), por lo que ningún permiso guardado con los
 // valores viejos habría funcionado nunca contra nivel_rango() en SQL.
-export type NivelPermiso = 'lectura' | 'escritura' | 'admin'
+export type NivelPermiso = 'sin_acceso' | 'lectura' | 'escritura' | 'admin'
 
 export interface PermisoRol {
   id: string
