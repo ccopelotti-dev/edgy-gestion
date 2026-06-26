@@ -45,8 +45,9 @@ export default function App() {
           <Route index element={<DashboardHome />} />
         </Route>
        <Route path="/m/:slug/*" element={<DashboardLayout />}>
-          <Route index element={<ModuloRoute />} />
-        </Route>
+  <Route index element={<ModuloRoute />} />
+  <Route path="*" element={<ModuloRoute />} />
+</Route>
       </Routes>
     </BrowserRouter>
   )
