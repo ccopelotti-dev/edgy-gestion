@@ -216,4 +216,12 @@ export function Caja() {
                       </TableCell>
                     </TableRow>
                   ))}
-             
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
