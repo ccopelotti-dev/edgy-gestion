@@ -109,8 +109,8 @@ export function Caja() {
               dispatch({ type: 'ADD_CAJA', payload: v })
               if (isBankSettled(v.medioPago) && v.cuentaId) {
                 dispatch({
-                  type: 'ADD_BANK',
-                  payload: { ...v, cuentaId: v.cuentaId },
+                  type: 'ADD_BANK' as const,
+                  payload: { ...v, cuentaId: v.cuentaId, medioPago: v.medioPago, monto: v.monto, fecha: v.fecha, tipo: v.tipo, concepto: v.concepto, categoria: v.categoria },
                 })
               }
             }}
@@ -216,12 +216,4 @@ export function Caja() {
                       </TableCell>
                     </TableRow>
                   ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
+             

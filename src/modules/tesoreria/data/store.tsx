@@ -14,11 +14,9 @@ import type {
   ChequeEstado,
   TreasuryState,
 } from '../types'
-import { isBankSettled } from '../types'
 import { todayISO } from '../lib/format'
 import { seedState } from './seed'
 
-// v3: cheques emitidos como pasivo flotante con débito al pagarse + vencimientos.
 const STORAGE_KEY = 'edgy-tesoreria-v3'
 
 function uid(prefix: string): string {
@@ -27,7 +25,6 @@ function uid(prefix: string): string {
     .slice(2, 7)}`
 }
 
-/** Cuenta por defecto para acreditar cobros: primera cuenta corriente, o la primera. */
 function defaultDepositAccount(state: TreasuryState): string | undefined {
   const cc = state.bankAccounts.find((a) => a.tipo === 'cuenta_corriente')
   return (cc ?? state.bankAccounts[0])?.id
@@ -45,15 +42,13 @@ function chequeAfectaBanco(
 type Action =
   | { type: 'ADD_CAJA'; payload: Omit<CajaMovement, 'id'> }
   | { type: 'DELETE_CAJA'; id: string }
-  | { type: 'ADD_BANK_MOV'; payload: Omit<BankMovement, 'id'> }
+  | { type: 'ADD_BANK'; payload: Omit<BankMovement, 'id'> }
   | { type: 'DELETE_BANK_MOV'; id: string }
   | { type: 'ADD_ACCOUNT'; payload: Omit<BankAccount, 'id'> }
-  | { type: 'ADD_CHEQUE'; payload: Omit<Cheque, 'id'> }
+  | { type: 'ADD_CHEQUE'; payload: Omit<Cheque, 'id' | 'estado'> }
   | {
-      type: 'SET_CHEQUE_ESTADO'
-      id: string
-      estado: ChequeEstado
-      cuentaDepositoId?: string
+      type: 'CHEQUE_TRANSITION'
+      payload: { chequeId: string; nuevoEstado: ChequeEstado; cuentaId?: string }
     }
   | { type: 'RESET' }
 
@@ -61,31 +56,9 @@ function reducer(state: TreasuryState, action: Action): TreasuryState {
   switch (action.type) {
     case 'ADD_CAJA': {
       const p = action.payload
-      const cajaId = uid('cm')
-      if (isBankSettled(p.medioPago) && p.cuentaId) {
-        const linkId = uid('lnk')
-        const caja: CajaMovement = { ...p, id: cajaId, linkId }
-        const bank: BankMovement = {
-          id: uid('bm'),
-          cuentaId: p.cuentaId,
-          fecha: p.fecha,
-          tipo: p.tipo,
-          concepto: p.concepto,
-          categoria: p.categoria,
-          medioPago: p.medioPago,
-          monto: p.monto,
-          linkId,
-          origen: 'caja',
-        }
-        return {
-          ...state,
-          cajaMovements: [caja, ...state.cajaMovements],
-          bankMovements: [bank, ...state.bankMovements],
-        }
-      }
       return {
         ...state,
-        cajaMovements: [{ ...p, id: cajaId }, ...state.cajaMovements],
+        cajaMovements: [{ ...p, id: uid('cm') }, ...state.cajaMovements],
       }
     }
 
@@ -101,7 +74,7 @@ function reducer(state: TreasuryState, action: Action): TreasuryState {
       }
     }
 
-    case 'ADD_BANK_MOV':
+    case 'ADD_BANK':
       return {
         ...state,
         bankMovements: [
@@ -121,7 +94,7 @@ function reducer(state: TreasuryState, action: Action): TreasuryState {
         } else if (mov.origen === 'cheque') {
           cheques = cheques.map((c) =>
             c.bankMovLinkId === mov.linkId
-              ? { ...c, estado: 'en_cartera', bankMovLinkId: undefined, cuentaDepositoId: undefined }
+              ? { ...c, estado: 'en_cartera' as ChequeEstado, bankMovLinkId: undefined, cuentaDepositoId: undefined }
               : c,
           )
         }
@@ -143,13 +116,14 @@ function reducer(state: TreasuryState, action: Action): TreasuryState {
     case 'ADD_CHEQUE':
       return {
         ...state,
-        cheques: [{ ...action.payload, id: uid('chq') }, ...state.cheques],
+        cheques: [{ ...action.payload, id: uid('chq'), estado: 'en_cartera' }, ...state.cheques],
       }
 
-    case 'SET_CHEQUE_ESTADO': {
-      const cheque = state.cheques.find((c) => c.id === action.id)
+    case 'CHEQUE_TRANSITION': {
+      const { chequeId, nuevoEstado, cuentaId } = action.payload
+      const cheque = state.cheques.find((c) => c.id === chequeId)
       if (!cheque) return state
-      const next = action.estado
+      const next = nuevoEstado
       const recibido = cheque.tipo === 'recibido'
       const wasEnBanco = chequeAfectaBanco(cheque.tipo, cheque.estado)
       const willBeEnBanco = chequeAfectaBanco(cheque.tipo, next)
@@ -158,21 +132,21 @@ function reducer(state: TreasuryState, action: Action): TreasuryState {
         ...state,
         cheques: state.cheques.map((c) =>
           c.id === cheque.id
-            ? { ...c, estado: next, cuentaDepositoId: action.cuentaDepositoId ?? c.cuentaDepositoId }
+            ? { ...c, estado: next, cuentaDepositoId: cuentaId ?? c.cuentaDepositoId }
             : c,
         ),
       })
 
       if (willBeEnBanco && !wasEnBanco) {
-        const cuentaId =
-          action.cuentaDepositoId ??
+        const targetCuenta =
+          cuentaId ??
           (recibido ? cheque.cuentaDepositoId : cheque.cuentaOrigenId) ??
           defaultDepositAccount(state)
-        if (!cuentaId) return setEstadoSolo()
+        if (!targetCuenta) return setEstadoSolo()
         const linkId = uid('lnk')
         const bank: BankMovement = {
           id: uid('bm'),
-          cuentaId,
+          cuentaId: targetCuenta,
           fecha: todayISO(),
           tipo: recibido ? 'ingreso' : 'egreso',
           concepto: recibido
@@ -191,7 +165,7 @@ function reducer(state: TreasuryState, action: Action): TreasuryState {
             c.id === cheque.id
               ? {
                   ...c, estado: next, bankMovLinkId: linkId,
-                  ...(recibido ? { cuentaDepositoId: cuentaId } : { cuentaOrigenId: cuentaId }),
+                  ...(recibido ? { cuentaDepositoId: targetCuenta } : { cuentaOrigenId: targetCuenta }),
                 }
               : c,
           ),
@@ -301,28 +275,39 @@ export function useChequeTotals() {
   }, [state.cheques])
 }
 
-export function useChequeResumen(tipo: 'recibido' | 'emitido') {
+export function useChequeResumen() {
   const { state } = useTreasury()
   return useMemo(() => {
-    const within = state.cheques.filter((c) => c.tipo === tipo)
-    const byEstado = (estado: Cheque['estado']) => within.filter((c) => c.estado === estado)
+    const recibidos = state.cheques.filter((c) => c.tipo === 'recibido')
+    const emitidos = state.cheques.filter((c) => c.tipo === 'emitido')
+    const enCarteraRec = recibidos.filter((c) => c.estado === 'en_cartera')
+    const enCarteraEmi = emitidos.filter((c) => c.estado === 'en_cartera')
+    const allEnCartera = state.cheques.filter((c) => c.estado === 'en_cartera')
+    const proximo = [...allEnCartera].sort((a, b) =>
+      a.fechaCobro < b.fechaCobro ? -1 : 1,
+    )[0] ?? null
+
     return {
-      total: within.length,
-      enCarteraValor: sumMonto(byEstado('en_cartera')), enCarteraCount: byEstado('en_cartera').length,
-      depositadosValor: sumMonto(byEstado('depositado')), depositadosCount: byEstado('depositado').length,
-      cobradosValor: sumMonto(byEstado('cobrado')), cobradosCount: byEstado('cobrado').length,
-      rechazadosValor: sumMonto(byEstado('rechazado')), rechazadosCount: byEstado('rechazado').length,
+      enCarteraRecibido: sumMonto(enCarteraRec),
+      countRecibidoCartera: enCarteraRec.length,
+      enCarteraEmitido: sumMonto(enCarteraEmi),
+      countEmitidoCartera: enCarteraEmi.length,
+      proximoVencimiento: proximo,
+      countRecibido: recibidos.length,
+      countEmitido: emitidos.length,
     }
-  }, [state.cheques, tipo])
+  }, [state.cheques])
 }
 
 export function useVencimientos() {
   const { state } = useTreasury()
-  return useMemo(
-    () => state.cheques.filter((c) => c.estado === 'en_cartera').map((c) => ({
-      cheque: c,
-      flujo: (c.tipo === 'emitido' ? 'egreso' : 'ingreso') as 'ingreso' | 'egreso',
-    })),
-    [state.cheques],
-  )
+  const today = todayISO()
+  return useMemo(() => {
+    const enCartera = state.cheques.filter((c) => c.estado === 'en_cartera')
+    return {
+      porCobrar: enCartera.filter((c) => c.tipo === 'recibido' && c.fechaCobro >= today),
+      porPagar: enCartera.filter((c) => c.tipo === 'emitido' && c.fechaCobro >= today),
+      vencidos: enCartera.filter((c) => c.fechaCobro < today),
+    }
+  }, [state.cheques, today])
 }

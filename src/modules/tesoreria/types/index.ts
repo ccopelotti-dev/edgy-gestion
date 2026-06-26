@@ -90,7 +90,8 @@ export type ChequeEstado =
   | 'cobrado'
   | 'rechazado'
 
-export const CHEQUE_ESTADOS_POR_TIPO: Record<
+/** Label display for each estado per tipo */
+export const CHEQUE_ESTADO_LABELS: Record<
   ChequeKind,
   { value: ChequeEstado; label: string }[]
 > = {
@@ -107,12 +108,31 @@ export const CHEQUE_ESTADOS_POR_TIPO: Record<
   ],
 }
 
+/** Transitions allowed from each estado, per tipo */
+export const CHEQUE_ESTADOS_POR_TIPO: Record<
+  ChequeKind,
+  Record<ChequeEstado, ChequeEstado[]>
+> = {
+  recibido: {
+    en_cartera: ['depositado', 'rechazado'],
+    depositado: ['cobrado', 'en_cartera'],
+    cobrado: [],
+    rechazado: [],
+  },
+  emitido: {
+    en_cartera: ['cobrado', 'rechazado'],
+    depositado: [],
+    cobrado: [],
+    rechazado: [],
+  },
+}
+
 export function chequeEstadoLabel(
   estado: ChequeEstado,
   tipo: ChequeKind,
 ): string {
   return (
-    CHEQUE_ESTADOS_POR_TIPO[tipo].find((e) => e.value === estado)?.label ??
+    CHEQUE_ESTADO_LABELS[tipo].find((e) => e.value === estado)?.label ??
     estado
   )
 }
