@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  edgy-gestion:
+    build: .
+    ports:
+      - "5180:80"
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
