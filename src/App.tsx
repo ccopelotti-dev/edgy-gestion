@@ -44,7 +44,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route index element={<DashboardHome />} />
         </Route>
-        <Route path="/m/:slug/*" element={<DashboardLayout />}>
+       <Route path="/m/:slug/*" element={<DashboardLayout />}>
           <Route index element={<ModuloRoute />} />
         </Route>
       </Routes>
