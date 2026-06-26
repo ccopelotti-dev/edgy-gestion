@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Wallet,
@@ -11,16 +11,18 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useTreasury } from './data/store'
 
-const tabs = [
-  { to: '.', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: 'caja', label: 'Caja', icon: Wallet, end: false },
-  { to: 'bancos', label: 'Bancos', icon: Landmark, end: false },
-  { to: 'cheques', label: 'Cheques', icon: FileCheck, end: false },
-  { to: 'vencimientos', label: 'Vencimientos', icon: CalendarClock, end: false },
-]
-
 export function TesoreriaLayout() {
   const { dispatch } = useTreasury()
+  const { pathname } = useLocation()
+  const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
+
+  const tabs = [
+    { to: base, label: 'Dashboard', icon: LayoutDashboard, end: true },
+    { to: `${base}/caja`, label: 'Caja', icon: Wallet, end: false },
+    { to: `${base}/bancos`, label: 'Bancos', icon: Landmark, end: false },
+    { to: `${base}/cheques`, label: 'Cheques', icon: FileCheck, end: false },
+    { to: `${base}/vencimientos`, label: 'Vencimientos', icon: CalendarClock, end: false },
+  ]
 
   return (
     <div className="flex flex-col gap-6">
