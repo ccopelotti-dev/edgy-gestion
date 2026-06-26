@@ -47,7 +47,12 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+ --radius-xl: calc(var(--radius) + 4px);
+  --color-brand-50: #F1EFE8;
+  --color-brand-100: #E6E2D6;
+  --color-brand-500: #1D6EEA;
+  --color-brand-600: #0C447C;
+  --color-brand-900: #0C1A2E;
 }
 
 @layer base {
