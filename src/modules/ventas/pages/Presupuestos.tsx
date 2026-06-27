@@ -35,16 +35,19 @@ import {
   formatARS,
   formatNumero,
   formatPct,
+  nowISO,
   PREFIJO_ORDEN,
 } from '../lib/format';
 import type {
   Presupuesto,
+  PresupuestoItem,
   EstadoPresupuesto,
   TipoOrden,
 } from '../types';
 import {
   ESTADO_PRESUPUESTO_LABEL,
   calcularSubtotalItem,
+  generarId,
 } from '../types';
 
 // ─── Prefijo presupuesto ────────────────────────────────────
@@ -56,7 +59,7 @@ const PREFIJO_PRESUPUESTO = 'PRE';
 export default function Presupuestos() {
   const todosPresupuestos = usePresupuestos();
   const clientes = useClientes();
-  const { ordenes } = useVentas();
+  const { ordenes, config } = useVentas();
   const dispatch = useVentasDispatch();
 
   // ── Filtros ───────────────────────────────────────────────
@@ -223,7 +226,7 @@ export default function Presupuestos() {
 
       {/* Tabla de presupuestos */}
       {presupuestosFiltrados.length === 0 ? (
-        <EmptyState message="No se encontraron presupuestos con los filtros seleccionados" />
+        <EmptyState title="No se encontraron presupuestos con los filtros seleccionados" />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
@@ -259,15 +262,72 @@ export default function Presupuestos() {
       )}
 
       {/* Dialog */}
-      {dialogOpen && (
-        <PresupuestoDialog
-          presupuesto={editPresupuesto}
-          onClose={() => {
-            setDialogOpen(false);
-            setEditPresupuesto(null);
-          }}
-        />
-      )}
+      <PresupuestoDialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) setEditPresupuesto(null);
+        }}
+        clientes={clientes}
+        presupuesto={editPresupuesto ?? undefined}
+        validezDefault={config.validezPresupuestoDias}
+        onSave={(data) => {
+          const now = nowISO();
+          const items: PresupuestoItem[] = data.items.map((it) => ({
+            ...it,
+            id: generarId(),
+          }));
+          const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
+          const total = subtotal * (1 - data.descuentoGeneral / 100);
+          const fechaVencimiento = (() => {
+            const d = new Date(data.fecha);
+            d.setDate(d.getDate() + data.validezDias);
+            return d.toISOString().split('T')[0];
+          })();
+
+          if (editPresupuesto) {
+            dispatch({
+              type: 'UPDATE_PRESUPUESTO',
+              payload: {
+                ...editPresupuesto,
+                clienteId: data.clienteId,
+                fecha: data.fecha,
+                validezDias: data.validezDias,
+                fechaVencimiento,
+                items,
+                subtotal,
+                descuentoGeneral: data.descuentoGeneral,
+                total,
+                condiciones: data.condiciones || undefined,
+                notas: data.notas || undefined,
+                updatedAt: now,
+              },
+            });
+          } else {
+            dispatch({
+              type: 'ADD_PRESUPUESTO',
+              payload: {
+                id: generarId(),
+                clienteId: data.clienteId,
+                fecha: data.fecha,
+                validezDias: data.validezDias,
+                fechaVencimiento,
+                estado: 'borrador',
+                items,
+                subtotal,
+                descuentoGeneral: data.descuentoGeneral,
+                total,
+                condiciones: data.condiciones || undefined,
+                notas: data.notas || undefined,
+                createdAt: now,
+                updatedAt: now,
+              },
+            });
+          }
+          setDialogOpen(false);
+          setEditPresupuesto(null);
+        }}
+      />
     </div>
   );
 }
@@ -316,7 +376,7 @@ function PresupuestoRow({
           {p.validezDias} {p.validezDias === 1 ? 'día' : 'días'}
         </td>
         <td className="px-4 py-3 text-right">
-          <Amount value={p.total} className="font-semibold" />
+          <Amount value={p.total} />
         </td>
         <td className="px-4 py-3">
           <EstadoPresupuestoBadge estado={p.estado} />
@@ -371,7 +431,7 @@ function PresupuestoRow({
                             {item.descuento > 0 ? formatPct(item.descuento) : '—'}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            <Amount value={item.subtotal} className="font-medium" />
+                            <Amount value={item.subtotal} />
                           </td>
                         </tr>
                       ))}

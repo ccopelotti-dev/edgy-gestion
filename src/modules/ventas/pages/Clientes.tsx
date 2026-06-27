@@ -126,11 +126,29 @@ export default function Clientes() {
     setDialogOpen(true);
   };
 
-  const handleSaveCliente = (cliente: Cliente) => {
+  const handleSaveCliente = (data: Omit<Cliente, 'id' | 'saldoCuentaCorriente' | 'activo' | 'createdAt' | 'updatedAt'>) => {
+    const now = new Date().toISOString();
     if (editCliente) {
-      dispatch({ type: 'UPDATE_CLIENTE', payload: cliente });
+      dispatch({
+        type: 'UPDATE_CLIENTE',
+        payload: {
+          ...editCliente,
+          ...data,
+          updatedAt: now,
+        },
+      });
     } else {
-      dispatch({ type: 'ADD_CLIENTE', payload: cliente });
+      dispatch({
+        type: 'ADD_CLIENTE',
+        payload: {
+          ...data,
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+          saldoCuentaCorriente: 0,
+          activo: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
     }
     setDialogOpen(false);
     setEditCliente(null);
@@ -214,7 +232,7 @@ export default function Clientes() {
 
       {/* Tabla de clientes */}
       {clientesFiltrados.length === 0 ? (
-        <EmptyState message="No se encontraron clientes con los filtros seleccionados" />
+        <EmptyState title="No se encontraron clientes con los filtros seleccionados" />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
@@ -251,26 +269,50 @@ export default function Clientes() {
       )}
 
       {/* Dialogs */}
-      {dialogOpen && (
-        <ClienteDialog
-          cliente={editCliente}
-          onSave={handleSaveCliente}
-          onClose={() => {
-            setDialogOpen(false);
-            setEditCliente(null);
-          }}
-        />
-      )}
+      <ClienteDialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) setEditCliente(null);
+        }}
+        cliente={editCliente ?? undefined}
+        onSave={handleSaveCliente}
+      />
 
-      {cobroDialogOpen && cobroClienteId && (
-        <CobroDialog
-          clienteId={cobroClienteId}
-          onClose={() => {
-            setCobroDialogOpen(false);
-            setCobroClienteId(null);
-          }}
-        />
-      )}
+      {cobroDialogOpen && cobroClienteId && (() => {
+        const cobroCliente = clientes.find((c) => c.id === cobroClienteId);
+        if (!cobroCliente) return null;
+        const comprobantesCliente = comprobantes.filter(
+          (c) => c.clienteId === cobroClienteId && (c.estado === 'emitido' || c.estado === 'cobrado_parcial'),
+        );
+        return (
+          <CobroDialog
+            open={cobroDialogOpen}
+            onOpenChange={(open) => {
+              setCobroDialogOpen(open);
+              if (!open) setCobroClienteId(null);
+            }}
+            cliente={cobroCliente}
+            comprobantesCliente={comprobantesCliente}
+            onSave={(data) => {
+              dispatch({
+                type: 'ADD_COBRO',
+                payload: {
+                  id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+                  clienteId: cobroClienteId,
+                  fecha: data.fecha,
+                  monto: data.monto,
+                  medioPago: data.medioPago,
+                  imputaciones: data.imputaciones,
+                  createdAt: new Date().toISOString(),
+                },
+              });
+              setCobroDialogOpen(false);
+              setCobroClienteId(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -357,14 +399,7 @@ function ClienteRow({
             }}
             className="hover:underline"
           >
-            <Amount
-              value={cliente.saldoCuentaCorriente}
-              className={
-                cliente.saldoCuentaCorriente > 0
-                  ? 'font-semibold text-red-600'
-                  : 'text-gray-700'
-              }
-            />
+            <Amount value={cliente.saldoCuentaCorriente} />
           </button>
         </td>
         <td className="px-4 py-3 text-gray-600">{cliente.telefono || '—'}</td>
@@ -479,10 +514,7 @@ function ClienteRow({
                                 <Amount value={comp.total} />
                               </td>
                               <td className="px-3 py-2 text-right">
-                                <Amount
-                                  value={comp.saldoPendiente}
-                                  className="font-semibold text-red-600"
-                                />
+                                <Amount value={comp.saldoPendiente} />
                               </td>
                               <td className="px-3 py-2">
                                 <span className="text-xs text-amber-700">
@@ -535,13 +567,10 @@ function ClienteRow({
                               {formatDate(cobro.fecha)}
                             </td>
                             <td className="px-3 py-2">
-                              <MedioPagoBadge medioPago={cobro.medioPago} />
+                              <MedioPagoBadge medio={cobro.medioPago} />
                             </td>
                             <td className="px-3 py-2 text-right">
-                              <Amount
-                                value={cobro.monto}
-                                className="font-semibold text-emerald-700"
-                              />
+                              <Amount value={cobro.monto} />
                             </td>
                             <td className="px-3 py-2 text-xs text-gray-500">
                               {cobro.imputaciones.length}{' '}

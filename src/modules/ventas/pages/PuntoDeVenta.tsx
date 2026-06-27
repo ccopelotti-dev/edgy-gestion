@@ -275,7 +275,7 @@ export default function PuntoDeVenta() {
 
           {/* Tabla de items */}
           {lineas.length === 0 ? (
-            <EmptyState message="Agregue productos para comenzar la venta" />
+            <EmptyState title="Agregue productos para comenzar la venta" />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
               <table className="w-full text-sm">

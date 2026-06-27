@@ -155,7 +155,7 @@ export default function Dashboard() {
           </div>
 
           {stats.topClientes.length === 0 ? (
-            <EmptyState message="Sin datos de clientes en el período" />
+            <EmptyState title="Sin datos de clientes en el período" />
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -194,7 +194,7 @@ export default function Dashboard() {
           </div>
 
           {stats.topProductos.length === 0 ? (
-            <EmptyState message="Sin datos de productos en el período" />
+            <EmptyState title="Sin datos de productos en el período" />
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -238,7 +238,7 @@ export default function Dashboard() {
         </div>
 
         {ultimosComprobantes.length === 0 ? (
-          <EmptyState message="No hay comprobantes registrados" />
+          <EmptyState title="No hay comprobantes registrados" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -290,7 +290,7 @@ export default function Dashboard() {
         </div>
 
         {alertasCobro.length === 0 ? (
-          <EmptyState message="No hay deudas pendientes" />
+          <EmptyState title="No hay deudas pendientes" />
         ) : (
           <div className="space-y-2">
             {alertasCobro.map((c) => {
@@ -317,7 +317,7 @@ export default function Dashboard() {
                     </span>
                     <div className="text-right">
                       <p className="text-xs text-gray-500">Pendiente</p>
-                      <Amount value={c.saldoPendiente} className="text-sm font-semibold text-red-600" />
+                      <Amount value={c.saldoPendiente} size="sm" />
                     </div>
                   </div>
                 </div>
