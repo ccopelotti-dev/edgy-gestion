@@ -1,7 +1,4 @@
-// ============================================================
 // Módulo Ventas — Estado inicial vacío
-// ============================================================
-
 import type { VentasState, VentasConfig } from '../types';
 
 const config: VentasConfig = {
