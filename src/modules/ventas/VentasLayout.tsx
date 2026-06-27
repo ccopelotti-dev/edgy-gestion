@@ -4,12 +4,20 @@
 // ============================================================
 
 import { NavLink, Outlet } from 'react-router-dom';
+import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Users, ShoppingCart, FileText,
   ClipboardList, Receipt, Banknote, Plug,
 } from 'lucide-react';
 
-const tabs = [
+interface TabDef {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+}
+
+const tabs: TabDef[] = [
   { to: '',               label: 'Dashboard',     icon: LayoutDashboard, end: true },
   { to: 'clientes',       label: 'Clientes',      icon: Users },
   { to: 'punto-de-venta', label: 'Punto de Venta', icon: ShoppingCart },
@@ -18,7 +26,7 @@ const tabs = [
   { to: 'comprobantes',   label: 'Comprobantes',  icon: Receipt },
   { to: 'cobranzas',      label: 'Cobranzas',     icon: Banknote },
   { to: 'integraciones',  label: 'Integraciones', icon: Plug },
-] as const;
+];
 
 export default function VentasLayout() {
   return (

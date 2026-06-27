@@ -15,13 +15,13 @@ import {
   FileText,
 } from 'lucide-react';
 
-import { useDashboardStats, useComprobantes, useClientes } from '../../data/store';
+import { useDashboardStats, useComprobantes, useClientes } from '../data/store';
 import {
   KpiCard,
   EstadoComprobanteBadge,
   Amount,
   EmptyState,
-} from '../../components/ventas/display';
+} from '../components/ventas/display';
 import {
   formatARS,
   formatDate,
@@ -29,9 +29,9 @@ import {
   PREFIJO_COMPROBANTE,
   daysUntil,
   formatQty,
-} from '../../lib/format';
-import type { Comprobante } from '../../types';
-import { TIPO_COMPROBANTE_LABEL } from '../../types';
+} from '../lib/format';
+import type { Comprobante } from '../types';
+import { TIPO_COMPROBANTE_LABEL } from '../types';
 
 // ─── Tipos internos ─────────────────────────────────────────
 

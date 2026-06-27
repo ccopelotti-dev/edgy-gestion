@@ -26,14 +26,14 @@ import {
   useCobros,
   useVentas,
   useVentasDispatch,
-} from '../../data/store';
+} from '../data/store';
 import {
   EstadoComprobanteBadge,
   MedioPagoBadge,
   Amount,
   EmptyState,
-} from '../../components/ventas/display';
-import { ClienteDialog, CobroDialog } from '../../components/ventas/dialogs';
+} from '../components/ventas/display';
+import { ClienteDialog, CobroDialog } from '../components/ventas/dialogs';
 import {
   formatCuit,
   formatDate,
@@ -41,14 +41,14 @@ import {
   formatNumero,
   PREFIJO_COMPROBANTE,
   daysUntil,
-} from '../../lib/format';
-import type { Cliente, CategoriaCliente } from '../../types';
+} from '../lib/format';
+import type { Cliente, CategoriaCliente } from '../types';
 import {
   CONDICION_IVA_LABEL,
   TIPO_DOCUMENTO_LABEL,
   TIPO_COMPROBANTE_LABEL,
   MEDIO_PAGO_LABEL,
-} from '../../types';
+} from '../types';
 
 // ─── Componente principal ───────────────────────────────────
 

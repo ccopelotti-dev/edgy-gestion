@@ -17,8 +17,8 @@ import {
   useClientes,
   useVentas,
   useVentasDispatch,
-} from '../../data/store';
-import { Amount, EmptyState } from '../../components/ventas/display';
+} from '../data/store';
+import { Amount, EmptyState } from '../components/ventas/display';
 import {
   formatARS,
   formatDateTime,
@@ -26,7 +26,7 @@ import {
   PREFIJO_COMPROBANTE,
   nowISO,
   todayISO,
-} from '../../lib/format';
+} from '../lib/format';
 import {
   calcularSubtotalItem,
   calcularTotalConIva,
@@ -37,7 +37,7 @@ import {
   type MedioPago,
   type ModoEmision,
   type ComprobanteItem,
-} from '../../types';
+} from '../types';
 
 // ─── Tipos locales ──────────────────────────────────────────
 

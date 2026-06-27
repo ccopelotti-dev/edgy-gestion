@@ -24,15 +24,15 @@ import {
   useVentas,
   useVentasDispatch,
   useCobros,
-} from '../../data/store';
+} from '../data/store';
 import {
   KpiCard,
   EstadoComprobanteBadge,
   MedioPagoBadge,
   Amount,
   EmptyState,
-} from '../../components/ventas/display';
-import { ComprobanteDialog, CobroDialog } from '../../components/ventas/dialogs';
+} from '../components/ventas/display';
+import { ComprobanteDialog, CobroDialog } from '../components/ventas/dialogs';
 import {
   formatDate,
   formatARS,
@@ -41,7 +41,7 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE,
   PREFIJO_ORDEN,
-} from '../../lib/format';
+} from '../lib/format';
 import type {
   Comprobante,
   ComprobanteItem,
@@ -52,12 +52,12 @@ import type {
   ImputacionCobro,
   Cliente,
   Cobro,
-} from '../../types';
+} from '../types';
 import {
   TIPO_COMPROBANTE_LABEL,
   ESTADO_COMPROBANTE_LABEL,
   generarId,
-} from '../../types';
+} from '../types';
 
 // ─── Modo emision labels ────────────────────────────────────
 

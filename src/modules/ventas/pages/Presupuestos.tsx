@@ -23,29 +23,29 @@ import {
   useClientes,
   useVentas,
   useVentasDispatch,
-} from '../../data/store';
+} from '../data/store';
 import {
   EstadoPresupuestoBadge,
   Amount,
   EmptyState,
-} from '../../components/ventas/display';
-import { PresupuestoDialog } from '../../components/ventas/dialogs';
+} from '../components/ventas/display';
+import { PresupuestoDialog } from '../components/ventas/dialogs';
 import {
   formatDate,
   formatARS,
   formatNumero,
   formatPct,
   PREFIJO_ORDEN,
-} from '../../lib/format';
+} from '../lib/format';
 import type {
   Presupuesto,
   EstadoPresupuesto,
   TipoOrden,
-} from '../../types';
+} from '../types';
 import {
   ESTADO_PRESUPUESTO_LABEL,
   calcularSubtotalItem,
-} from '../../types';
+} from '../types';
 
 // ─── Prefijo presupuesto ────────────────────────────────────
 

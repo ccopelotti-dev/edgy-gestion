@@ -6,8 +6,8 @@ import { useState, useMemo, Fragment } from 'react';
 import { useVentas, useVentasDispatch, useCobros } from '../data/store';
 import { CobroDialog } from '../components/ventas/dialogs';
 import { MedioPagoBadge, Amount, EmptyState, KpiCard } from '../components/ventas/display';
-import { formatARS, formatDate, formatNumero, todayISO } from '../lib/format';
-import type { Cobro, Cliente, Comprobante } from '../types';
+import { formatARS, formatDate, formatNumero, todayISO, nowISO } from '../lib/format';
+import type { Cobro, Cliente, Comprobante, MedioPago, ImputacionCobro } from '../types';
 import { MEDIO_PAGO_LABEL, generarId } from '../types';
 import {
   Receipt, Search, Plus, ChevronDown, ChevronRight,
@@ -79,10 +79,19 @@ export default function Cobranzas() {
     setDialogOpen(true);
   }
 
-  function handleSaveCobro(data: Omit<Cobro, 'id' | 'numero' | 'createdAt'>) {
+  function handleSaveCobro(data: { fecha: string; monto: number; medioPago: MedioPago; imputaciones: ImputacionCobro[]; notas?: string }) {
     dispatch({
       type: 'ADD_COBRO',
-      payload: { ...data, id: generarId(), numero: 0, createdAt: '' },
+      payload: {
+        id: generarId(),
+        clienteId: dialogCliente!.id,
+        fecha: data.fecha,
+        monto: data.monto,
+        medioPago: data.medioPago,
+        imputaciones: data.imputaciones,
+        notas: data.notas,
+        createdAt: nowISO(),
+      },
     });
     setDialogOpen(false);
     setDialogCliente(null);

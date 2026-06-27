@@ -25,15 +25,15 @@ import {
   useClientes,
   useVentas,
   useVentasDispatch,
-} from '../../data/store';
+} from '../data/store';
 import {
   KpiCard,
   EstadoOrdenBadge,
   TipoOrdenBadge,
   Amount,
   EmptyState,
-} from '../../components/ventas/display';
-import { ComprobanteDialog } from '../../components/ventas/dialogs';
+} from '../components/ventas/display';
+import { ComprobanteDialog } from '../components/ventas/dialogs';
 import {
   formatDate,
   formatARS,
@@ -43,7 +43,7 @@ import {
   nowISO,
   PREFIJO_ORDEN,
   PREFIJO_COMPROBANTE,
-} from '../../lib/format';
+} from '../lib/format';
 import type {
   Orden,
   OrdenItem,
@@ -53,13 +53,13 @@ import type {
   ModoEmision,
   MedioPago,
   ComprobanteItem,
-} from '../../types';
+} from '../types';
 import {
   TIPO_ORDEN_LABEL_CORTO,
   ESTADO_ORDEN_LABEL,
   calcularSubtotalItem,
   generarId,
-} from '../../types';
+} from '../types';
 
 // ─── Componente principal ───────────────────────────────────
 
