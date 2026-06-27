@@ -1,4 +1,3 @@
-// Módulo Productos y Stock — Estado inicial vacío
 import type { ProductosStockState } from '../types'
 
 export const seedState: ProductosStockState = {
