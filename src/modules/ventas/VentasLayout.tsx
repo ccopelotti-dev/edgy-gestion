@@ -17,15 +17,17 @@ interface TabDef {
   end?: boolean;
 }
 
+const BASE = '/m/ventas';
+
 const tabs: TabDef[] = [
-  { to: '',               label: 'Dashboard',     icon: LayoutDashboard, end: true },
-  { to: 'clientes',       label: 'Clientes',      icon: Users },
-  { to: 'punto-de-venta', label: 'Punto de Venta', icon: ShoppingCart },
-  { to: 'presupuestos',   label: 'Presupuestos',  icon: FileText },
-  { to: 'ordenes',        label: 'Órdenes',       icon: ClipboardList },
-  { to: 'comprobantes',   label: 'Comprobantes',  icon: Receipt },
-  { to: 'cobranzas',      label: 'Cobranzas',     icon: Banknote },
-  { to: 'integraciones',  label: 'Integraciones', icon: Plug },
+  { to: BASE,                       label: 'Dashboard',      icon: LayoutDashboard, end: true },
+  { to: `${BASE}/clientes`,         label: 'Clientes',       icon: Users },
+  { to: `${BASE}/punto-de-venta`,   label: 'Punto de Venta', icon: ShoppingCart },
+  { to: `${BASE}/presupuestos`,     label: 'Presupuestos',   icon: FileText },
+  { to: `${BASE}/ordenes`,          label: 'Órdenes',        icon: ClipboardList },
+  { to: `${BASE}/comprobantes`,     label: 'Comprobantes',   icon: Receipt },
+  { to: `${BASE}/cobranzas`,        label: 'Cobranzas',      icon: Banknote },
+  { to: `${BASE}/integraciones`,    label: 'Integraciones',  icon: Plug },
 ];
 
 export default function VentasLayout() {

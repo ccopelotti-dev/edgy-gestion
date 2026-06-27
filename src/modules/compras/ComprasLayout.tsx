@@ -20,12 +20,14 @@ interface TabDef {
   end?: boolean;
 }
 
+const BASE = '/m/compras';
+
 const tabs: TabDef[] = [
-  { to: '',              label: 'Dashboard',          icon: LayoutDashboard, end: true },
-  { to: 'proveedores',   label: 'Proveedores',        icon: Building2 },
-  { to: 'cotizaciones',  label: 'Cotizaciones',       icon: FileSearch },
-  { to: 'ordenes-compra', label: 'Ordenes de Compra', icon: ClipboardList },
-  { to: 'comprobantes',  label: 'Comprobantes',       icon: Receipt },
+  { to: BASE,                       label: 'Dashboard',          icon: LayoutDashboard, end: true },
+  { to: `${BASE}/proveedores`,      label: 'Proveedores',        icon: Building2 },
+  { to: `${BASE}/cotizaciones`,     label: 'Cotizaciones',       icon: FileSearch },
+  { to: `${BASE}/ordenes-compra`,   label: 'Ordenes de Compra',  icon: ClipboardList },
+  { to: `${BASE}/comprobantes`,     label: 'Comprobantes',       icon: Receipt },
 ];
 
 export default function ComprasLayout() {
