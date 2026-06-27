@@ -1,0 +1,51 @@
+// ============================================================
+// Módulo Compras — Helpers de formato
+// (Misma API que Ventas para consistencia)
+// ============================================================
+
+export function formatARS(amount: number): string {
+  const abs = Math.abs(amount);
+  const formatted = abs.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return amount < 0 ? `-$ ${formatted}` : `$ ${formatted}`;
+}
+
+export function formatDate(isoDate: string): string {
+  if (!isoDate) return '—';
+  const d = new Date(isoDate + (isoDate.includes('T') ? '' : 'T00:00:00'));
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+export function formatDateTime(isoDate: string): string {
+  if (!isoDate) return '—';
+  const d = new Date(isoDate);
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+export function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function nowISO(): string {
+  return new Date().toISOString();
+}
+
+export function daysUntil(isoDate: string): number {
+  const target = new Date(isoDate + 'T00:00:00');
+  const today = new Date(todayISO() + 'T00:00:00');
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+export function formatNumero(prefijo: string, numero: number): string {
+  return `${prefijo}-${numero.toString().padStart(5, '0')}`;
+}
+
+export const PREFIJO_COMPROBANTE_COMPRA: Record<string, string> = {
+  factura: 'FC',
+  nota_credito: 'NCC',
+  nota_debito: 'NDC',
+};
+
+export function formatCuit(cuit: string): string {
+  if (!cuit || cuit.length !== 11) return cuit || '—';
+  return `${cuit.slice(0, 2)}-${cuit.slice(2, 10)}-${cuit.slice(10)}`;
+}

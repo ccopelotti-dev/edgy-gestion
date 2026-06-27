@@ -1,0 +1,500 @@
+// ============================================================
+// Modulo Compras — Ordenes de Compra
+// Edgy Gestion · Gestion de ordenes de compra
+// ============================================================
+
+import { useState, useMemo } from 'react';
+import {
+  Search,
+  Plus,
+  ChevronDown,
+  ChevronUp,
+  PackageCheck,
+  Package,
+  XCircle,
+  FileText,
+  ClipboardList,
+} from 'lucide-react';
+
+import {
+  useOrdenesCompra,
+  useProveedores,
+  useCotizaciones,
+  useComprobantesCompra,
+  useCompras,
+  useComprasDispatch,
+} from '../data/store';
+import {
+  EstadoOCBadge,
+  Amount,
+  EmptyState,
+} from '../components/compras/display';
+import { ComprobanteCompraDialog } from '../components/compras/dialogs';
+import {
+  formatDate,
+  formatARS,
+  formatNumero,
+  todayISO,
+  nowISO,
+  PREFIJO_COMPROBANTE_COMPRA,
+} from '../lib/format';
+import type { EstadoOrdenCompra } from '../types';
+import {
+  ESTADO_OC_LABEL,
+  generarId,
+  calcularSubtotalItem,
+} from '../types';
+
+// ─── Componente principal ───────────────────────────────────
+
+export default function OrdenesCompra() {
+  const ordenesCompra = useOrdenesCompra();
+  const proveedores = useProveedores();
+  const cotizaciones = useCotizaciones();
+  const comprobantes = useComprobantesCompra();
+  const dispatch = useComprasDispatch();
+
+  // ── Filtros ───────────────────────────────────────────────
+
+  const [busqueda, setBusqueda] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState<EstadoOrdenCompra | ''>('');
+
+  // ── Estado de UI ──────────────────────────────────────────
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
+
+  // ── Inline form state ─────────────────────────────────────
+
+  const [formProveedorId, setFormProveedorId] = useState('');
+  const [formFecha, setFormFecha] = useState(todayISO());
+  const [formFechaEntrega, setFormFechaEntrega] = useState('');
+  const [formNotas, setFormNotas] = useState('');
+  const [formItems, setFormItems] = useState([
+    { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0 },
+  ]);
+
+  // ── Datos filtrados ───────────────────────────────────────
+
+  const ordenesFiltradas = useMemo(() => {
+    const q = busqueda.toLowerCase().trim();
+    return ordenesCompra.filter((o) => {
+      if (filtroEstado && o.estado !== filtroEstado) return false;
+      if (q) {
+        const prov = proveedores.find((p) => p.id === o.proveedorId);
+        const matchProv = prov?.nombre.toLowerCase().includes(q);
+        const matchNum = String(o.numero).includes(q);
+        if (!matchProv && !matchNum) return false;
+      }
+      return true;
+    });
+  }, [ordenesCompra, busqueda, filtroEstado, proveedores]);
+
+  // ── Helpers ───────────────────────────────────────────────
+
+  const nombreProveedor = (proveedorId: string) =>
+    proveedores.find((p) => p.id === proveedorId)?.nombre ?? 'Desconocido';
+
+  const cotNumero = (cotizacionId?: string) => {
+    if (!cotizacionId) return null;
+    const cot = cotizaciones.find((c) => c.id === cotizacionId);
+    return cot ? formatNumero('COT', cot.numero) : null;
+  };
+
+  const comprobantesDeOC = (ocId: string) =>
+    comprobantes.filter((c) => c.ordenCompraId === ocId);
+
+  // ── Inline form handlers ──────────────────────────────────
+
+  const resetForm = () => {
+    setFormProveedorId('');
+    setFormFecha(todayISO());
+    setFormFechaEntrega('');
+    setFormNotas('');
+    setFormItems([{ key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0 }]);
+    setShowForm(false);
+  };
+
+  const addFormItem = () => {
+    setFormItems((prev) => [...prev, { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0 }]);
+  };
+
+  const updateFormItem = (index: number, field: string, value: string | number) => {
+    setFormItems((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+  };
+
+  const removeFormItem = (index: number) => {
+    if (formItems.length > 1) setFormItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSubmitOC = () => {
+    if (!formProveedorId || formItems.some((it) => !it.descripcion.trim())) return;
+
+    const now = nowISO();
+    const items = formItems.map((it) => ({
+      id: generarId(),
+      descripcion: it.descripcion.trim(),
+      cantidad: it.cantidad,
+      precioUnitario: it.precioUnitario,
+      descuento: it.descuento,
+      subtotal: calcularSubtotalItem(it.cantidad, it.precioUnitario, it.descuento),
+    }));
+    const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
+
+    dispatch({
+      type: 'ADD_ORDEN_COMPRA',
+      payload: {
+        id: generarId(),
+        proveedorId: formProveedorId,
+        fecha: formFecha,
+        fechaEntrega: formFechaEntrega || undefined,
+        estado: 'pendiente',
+        items,
+        subtotal,
+        total: subtotal,
+        notas: formNotas || undefined,
+        comprobanteIds: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    resetForm();
+  };
+
+  // ── OC action handlers ────────────────────────────────────
+
+  const cambiarEstado = (id: string, nuevoEstado: EstadoOrdenCompra) => {
+    dispatch({ type: 'CAMBIAR_ESTADO_OC', payload: { id, nuevoEstado } });
+  };
+
+  const handleSaveComprobante = (data: {
+    tipo: any;
+    proveedorId: string;
+    fecha: string;
+    fechaVencimiento: string;
+    medioPago: any;
+    items: any[];
+  }) => {
+    const now = nowISO();
+    const subtotal = data.items.reduce((s: number, i: any) => s + i.subtotal, 0);
+    const montoIva = data.items.reduce((s: number, i: any) => s + i.montoIva, 0);
+    const total = subtotal + montoIva;
+
+    dispatch({
+      type: 'ADD_COMPROBANTE_COMPRA',
+      payload: {
+        id: generarId(),
+        tipo: data.tipo,
+        proveedorId: data.proveedorId,
+        fecha: data.fecha,
+        fechaVencimiento: data.fechaVencimiento || undefined,
+        items: data.items.map((it: any) => ({ ...it, id: generarId() })),
+        subtotal,
+        montoIva,
+        total,
+        estado: 'pendiente',
+        medioPago: data.medioPago,
+        montoPagado: 0,
+        saldoPendiente: total,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  };
+
+  // ── Render ────────────────────────────────────────────────
+
+  const estados: EstadoOrdenCompra[] = ['pendiente', 'parcial', 'recibida', 'cancelada'];
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 flex-1">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900"
+              placeholder="Buscar por proveedor o numero..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+            />
+          </div>
+          <select
+            className="rounded-lg border border-gray-300 py-2 px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20"
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value as EstadoOrdenCompra | '')}
+          >
+            <option value="">Todos los estados</option>
+            {estados.map((e) => (
+              <option key={e} value={e}>{ESTADO_OC_LABEL[e]}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          Nueva OC
+        </button>
+      </div>
+
+      {/* Inline form */}
+      {showForm && (
+        <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-gray-900">Nueva Orden de Compra</h3>
+
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor *</label>
+              <select
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20"
+                value={formProveedorId}
+                onChange={(e) => setFormProveedorId(e.target.value)}
+              >
+                <option value="">Seleccionar...</option>
+                {proveedores.filter((p) => p.activo).map((p) => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
+              <input className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20" type="date" value={formFecha} onChange={(e) => setFormFecha(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fecha entrega</label>
+              <input className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20" type="date" value={formFechaEntrega} onChange={(e) => setFormFechaEntrega(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notas</label>
+              <input className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20" value={formNotas} onChange={(e) => setFormNotas(e.target.value)} />
+            </div>
+          </div>
+
+          {/* Items editor */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-700">Items</span>
+              <button onClick={addFormItem} className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1">
+                <Plus className="h-3.5 w-3.5" /> Agregar
+              </button>
+            </div>
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600">
+                    <th className="text-left px-3 py-2 font-medium">Descripcion</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">Cant.</th>
+                    <th className="text-right px-3 py-2 font-medium w-24">Precio</th>
+                    <th className="text-right px-3 py-2 font-medium w-16">Dto.%</th>
+                    <th className="text-right px-3 py-2 font-medium w-24">Subtotal</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {formItems.map((item, idx) => {
+                    const sub = calcularSubtotalItem(item.cantidad, item.precioUnitario, item.descuento);
+                    return (
+                      <tr key={item.key} className="border-t border-gray-100">
+                        <td className="px-2 py-1.5">
+                          <input className="w-full border-0 bg-transparent text-sm focus:outline-none" placeholder="Descripcion" value={item.descripcion} onChange={(e) => updateFormItem(idx, 'descripcion', e.target.value)} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={1} value={item.cantidad} onChange={(e) => updateFormItem(idx, 'cantidad', Number(e.target.value))} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} step={0.01} value={item.precioUnitario} onChange={(e) => updateFormItem(idx, 'precioUnitario', Number(e.target.value))} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} max={100} value={item.descuento} onChange={(e) => updateFormItem(idx, 'descuento', Number(e.target.value))} />
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-gray-700 font-medium">{formatARS(sub)}</td>
+                        <td className="px-1 py-1.5">
+                          <button onClick={() => removeFormItem(idx)} disabled={formItems.length <= 1} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-30">
+                            <XCircle className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <button onClick={resetForm} className="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors">
+              Cancelar
+            </button>
+            <button
+              onClick={handleSubmitOC}
+              disabled={!formProveedorId || formItems.some((it) => !it.descripcion.trim())}
+              className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Crear OC
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      {ordenesFiltradas.length === 0 ? (
+        <EmptyState
+          icon={<ClipboardList className="h-10 w-10" />}
+          title="No hay ordenes de compra"
+          description="Cree una orden de compra o apruebe una cotizacion."
+        />
+      ) : (
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-left text-gray-500">
+                <th className="px-4 py-3 font-medium w-8" />
+                <th className="px-4 py-3 font-medium">Numero</th>
+                <th className="px-4 py-3 font-medium">Proveedor</th>
+                <th className="px-4 py-3 font-medium">Fecha</th>
+                <th className="px-4 py-3 font-medium">Entrega</th>
+                <th className="px-4 py-3 text-right font-medium">Total</th>
+                <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3 font-medium">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ordenesFiltradas.map((oc) => {
+                const isExpanded = expandedId === oc.id;
+                const linkedCot = cotNumero(oc.cotizacionId);
+                const comps = comprobantesDeOC(oc.id);
+
+                return (
+                  <tbody key={oc.id}>
+                    <tr
+                      className="border-t border-gray-100 hover:bg-gray-50/50 cursor-pointer"
+                      onClick={() => setExpandedId(isExpanded ? null : oc.id)}
+                    >
+                      <td className="px-4 py-3 text-gray-400">
+                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">{formatNumero('OC', oc.numero)}</td>
+                      <td className="px-4 py-3 text-gray-900">{nombreProveedor(oc.proveedorId)}</td>
+                      <td className="px-4 py-3 text-gray-600">{formatDate(oc.fecha)}</td>
+                      <td className="px-4 py-3 text-gray-600">{oc.fechaEntrega ? formatDate(oc.fechaEntrega) : '—'}</td>
+                      <td className="px-4 py-3 text-right"><Amount value={oc.total} /></td>
+                      <td className="px-4 py-3"><EstadoOCBadge estado={oc.estado} /></td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          {oc.estado === 'pendiente' && (
+                            <>
+                              <button onClick={() => cambiarEstado(oc.id, 'parcial')} className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg" title="Marcar parcial">
+                                <Package className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => cambiarEstado(oc.id, 'recibida')} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Marcar recibida">
+                                <PackageCheck className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => setComprobanteDialogOpen(true)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
+                                <FileText className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => cambiarEstado(oc.id, 'cancelada')} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Cancelar">
+                                <XCircle className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          )}
+                          {oc.estado === 'parcial' && (
+                            <>
+                              <button onClick={() => cambiarEstado(oc.id, 'recibida')} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Marcar recibida">
+                                <PackageCheck className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => setComprobanteDialogOpen(true)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
+                                <FileText className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          )}
+                          {oc.estado === 'recibida' && comps.length === 0 && (
+                            <button onClick={() => setComprobanteDialogOpen(true)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
+                              <FileText className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* Expanded detail */}
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={8} className="bg-gray-50/50 px-8 py-4">
+                          {/* Items */}
+                          <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
+                          <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-gray-50 text-gray-600">
+                                  <th className="text-left px-3 py-2 font-medium">Descripcion</th>
+                                  <th className="text-right px-3 py-2 font-medium">Cant.</th>
+                                  <th className="text-right px-3 py-2 font-medium">Precio</th>
+                                  <th className="text-right px-3 py-2 font-medium">Dto.%</th>
+                                  <th className="text-right px-3 py-2 font-medium">Subtotal</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {oc.items.map((item) => (
+                                  <tr key={item.id} className="border-t border-gray-100">
+                                    <td className="px-3 py-2">{item.descripcion}</td>
+                                    <td className="px-3 py-2 text-right">{item.cantidad}</td>
+                                    <td className="px-3 py-2 text-right">{formatARS(item.precioUnitario)}</td>
+                                    <td className="px-3 py-2 text-right">{item.descuento}%</td>
+                                    <td className="px-3 py-2 text-right font-medium">{formatARS(item.subtotal)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Linked cotizacion */}
+                          {linkedCot && (
+                            <p className="text-sm text-gray-600 mb-2">
+                              Cotizacion vinculada: <span className="font-mono text-xs font-medium">{linkedCot}</span>
+                            </p>
+                          )}
+
+                          {/* Linked comprobantes */}
+                          {comps.length > 0 && (
+                            <div className="mb-2">
+                              <h4 className="font-semibold text-gray-900 text-sm mb-1">Comprobantes vinculados</h4>
+                              <div className="space-y-1">
+                                {comps.map((c) => (
+                                  <div key={c.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm border border-gray-100">
+                                    <span className="font-mono text-xs">{formatNumero(PREFIJO_COMPROBANTE_COMPRA[c.tipo], c.numero)}</span>
+                                    <span className="text-gray-500">{formatDate(c.fecha)}</span>
+                                    <Amount value={c.total} size="sm" />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {oc.notas && (
+                            <p className="text-sm text-gray-500 italic">Notas: {oc.notas}</p>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Comprobante Dialog */}
+      <ComprobanteCompraDialog
+        open={comprobanteDialogOpen}
+        onOpenChange={setComprobanteDialogOpen}
+        proveedores={proveedores.filter((p) => p.activo)}
+        onSave={handleSaveComprobante}
+      />
+    </div>
+  );
+}
