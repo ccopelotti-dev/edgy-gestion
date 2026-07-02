@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Search, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, ImageOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useProductosStock } from '../data/store'
@@ -143,6 +143,7 @@ export default function Productos() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
+                <th className="px-4 py-3 font-medium"></th>
                 <th className="px-4 py-3 font-medium">Codigo</th>
                 <th className="px-4 py-3 font-medium">Nombre</th>
                 <th className="px-4 py-3 font-medium">Categoria</th>
@@ -156,6 +157,19 @@ export default function Productos() {
             <tbody>
               {filtered.map((p) => (
                 <tr key={p.id} className="border-b last:border-0 hover:bg-muted/50">
+                  <td className="px-4 py-3">
+                    {p.imagenes && p.imagenes.length > 0 ? (
+                      <img
+                        src={p.imagenes[0]}
+                        alt={p.nombre}
+                        className="h-10 w-10 rounded-md border object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                        <ImageOff className="h-4 w-4" />
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs">{p.codigo}</td>
                   <td className="px-4 py-3 font-medium">{p.nombre}</td>
                   <td className="px-4 py-3 text-muted-foreground">

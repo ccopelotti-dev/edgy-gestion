@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -10,8 +10,13 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ImagePlus, X, Loader2, Star } from 'lucide-react'
 import { formatARS } from '../../lib/format'
+import {
+  subirImagenProducto,
+  eliminarImagenProducto,
+  TIPOS_IMAGEN_ACEPTADOS,
+} from '../../lib/imagenes'
 import type {
   Producto,
   Insumo,
@@ -22,7 +27,7 @@ import type {
   UnidadMedida,
   MotivoAjuste,
 } from '../../types'
-import { ALICUOTAS_IVA, UNIDADES, MOTIVOS_AJUSTE } from '../../types'
+import { ALICUOTAS_IVA, UNIDADES, MOTIVOS_AJUSTE, MAX_IMAGENES_PRODUCTO } from '../../types'
 
 // ─── Shared input class ───────────────────────────────────────────────────────
 
@@ -54,6 +59,7 @@ const emptyProducto: ProductoFormData = {
   controlaStock: true,
   disponible: true,
   estado: 'activo',
+  imagenes: [],
 }
 
 export function ProductoDialog({
@@ -64,12 +70,26 @@ export function ProductoDialog({
   editData,
 }: ProductoDialogProps) {
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
+  const [subiendo, setSubiendo] = useState(false)
+  const [errorImagen, setErrorImagen] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Carpeta estable para esta sesión de edición (id real si ya existe, o un
+  // id temporal si el producto todavía se está creando).
+  const carpetaIdRef = useRef<string>('')
+  // Fotos subidas durante esta apertura del diálogo que todavía no son parte
+  // del producto guardado — si se cancela, se borran del bucket.
+  const subidasEnEstaSesionRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     if (open) {
+      carpetaIdRef.current =
+        editData?.id ?? `nuevo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      subidasEnEstaSesionRef.current = new Set()
+      setErrorImagen('')
       if (editData) {
         const { id, stock, createdAt, tieneFormula, ...rest } = editData
-        setForm(rest)
+        setForm({ ...rest, imagenes: rest.imagenes ?? [] })
       } else {
         setForm(emptyProducto)
       }
@@ -80,8 +100,62 @@ export function ProductoDialog({
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  async function handleFilesSelected(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setErrorImagen('')
+
+    const disponibles = MAX_IMAGENES_PRODUCTO - form.imagenes.length
+    if (disponibles <= 0) {
+      setErrorImagen(`Máximo ${MAX_IMAGENES_PRODUCTO} fotos por producto.`)
+      return
+    }
+
+    const aProcesar = Array.from(files).slice(0, disponibles)
+    setSubiendo(true)
+    try {
+      for (const file of aProcesar) {
+        try {
+          const { url } = await subirImagenProducto(file, carpetaIdRef.current)
+          subidasEnEstaSesionRef.current.add(url)
+          setForm((prev) => ({ ...prev, imagenes: [...prev.imagenes, url] }))
+        } catch (err) {
+          setErrorImagen(err instanceof Error ? err.message : 'No se pudo subir una foto.')
+        }
+      }
+    } finally {
+      setSubiendo(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  function handleRemoveImagen(url: string) {
+    update(
+      'imagenes',
+      form.imagenes.filter((u) => u !== url),
+    )
+    if (subidasEnEstaSesionRef.current.has(url)) {
+      subidasEnEstaSesionRef.current.delete(url)
+      void eliminarImagenProducto(url)
+    }
+  }
+
+  function handleHacerPrincipal(url: string) {
+    const resto = form.imagenes.filter((u) => u !== url)
+    update('imagenes', [url, ...resto])
+  }
+
+  function handleCancelar() {
+    // Limpiar fotos subidas en esta sesión que no se van a guardar.
+    for (const url of subidasEnEstaSesionRef.current) {
+      void eliminarImagenProducto(url)
+    }
+    subidasEnEstaSesionRef.current = new Set()
+    onOpenChange(false)
+  }
+
   function handleSave() {
     if (!form.nombre.trim()) return
+    subidasEnEstaSesionRef.current = new Set()
     onSave({
       ...form,
       codigo: form.codigo.trim() || `PROD-${Date.now().toString(36).toUpperCase()}`,
@@ -94,7 +168,13 @@ export function ProductoDialog({
   )
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) handleCancelar()
+        else onOpenChange(v)
+      }}
+    >
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editData ? 'Editar producto' : 'Nuevo producto'}</DialogTitle>
@@ -106,6 +186,78 @@ export function ProductoDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
+          {/* Galería de fotos */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">
+              Fotos del producto ({form.imagenes.length}/{MAX_IMAGENES_PRODUCTO})
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {form.imagenes.map((url, idx) => (
+                <div
+                  key={url}
+                  className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted"
+                >
+                  <img src={url} alt="" className="h-full w-full object-cover" />
+                  {idx === 0 && (
+                    <span className="absolute left-1 top-1 rounded-full bg-black/60 p-0.5">
+                      <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                    </span>
+                  )}
+                  <div className="absolute inset-0 hidden items-center justify-center gap-1 bg-black/50 group-hover:flex">
+                    {idx !== 0 && (
+                      <button
+                        type="button"
+                        title="Hacer principal"
+                        onClick={() => handleHacerPrincipal(url)}
+                        className="rounded-full bg-white/90 p-1 hover:bg-white"
+                      >
+                        <Star className="h-3.5 w-3.5 text-yellow-500" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Quitar foto"
+                      onClick={() => handleRemoveImagen(url)}
+                      className="rounded-full bg-white/90 p-1 hover:bg-white"
+                    >
+                      <X className="h-3.5 w-3.5 text-red-500" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {form.imagenes.length < MAX_IMAGENES_PRODUCTO && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={subiendo}
+                  className="flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed text-muted-foreground hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+                >
+                  {subiendo ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>
+                      <ImagePlus className="h-5 w-5" />
+                      <span className="text-[10px]">Agregar</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={TIPOS_IMAGEN_ACEPTADOS.join(',')}
+              multiple
+              className="hidden"
+              onChange={(e) => handleFilesSelected(e.target.files)}
+            />
+            {errorImagen && <p className="text-xs text-red-500">{errorImagen}</p>}
+            <p className="text-xs text-muted-foreground">
+              La primera foto es la principal (se usa en el Catálogo). JPG, PNG o WEBP, hasta 5 MB c/u.
+            </p>
+          </div>
+
           {/* Nombre */}
           <div className="grid gap-1.5">
             <label className="text-sm font-medium">Nombre *</label>
@@ -251,10 +403,10 @@ export function ProductoDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={handleCancelar}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!form.nombre.trim()}>
+          <Button onClick={handleSave} disabled={!form.nombre.trim() || subiendo}>
             {editData ? 'Guardar cambios' : 'Crear producto'}
           </Button>
         </DialogFooter>

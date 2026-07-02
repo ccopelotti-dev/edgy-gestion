@@ -7,6 +7,7 @@ import { ProductosStockProvider } from './data/store'
 import { ProductosStockLayout } from './ProductosStockLayout'
 import Dashboard from './pages/Dashboard'
 import Productos from './pages/Productos'
+import Catalogo from './pages/Catalogo'
 import Insumos from './pages/Insumos'
 import FormularProducto from './pages/FormularProducto'
 import Stock from './pages/Stock'
@@ -21,6 +22,7 @@ export default function ProductosStockModule() {
         <Route element={<ProductosStockLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="productos" element={<Productos />} />
+          <Route path="catalogo" element={<Catalogo />} />
           <Route path="insumos" element={<Insumos />} />
           <Route path="formular" element={<FormularProducto />} />
           <Route path="stock" element={<Stock />} />

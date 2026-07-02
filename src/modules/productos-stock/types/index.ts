@@ -97,8 +97,17 @@ export interface Producto {
   estado: EstadoProducto
   /** Si tiene fórmula, el costo se calcula automáticamente */
   tieneFormula: boolean
+  /**
+   * Galería de fotos del producto, para el catálogo visual.
+   * URLs públicas (Supabase Storage, bucket "productos-imagenes").
+   * El primer elemento es la foto principal.
+   */
+  imagenes: string[]
   createdAt: string
 }
+
+/** Cantidad máxima de fotos permitidas por producto en la galería. */
+export const MAX_IMAGENES_PRODUCTO = 6
 
 // ─── Insumo ─────────────────────────────────────────────────────────────────────
 

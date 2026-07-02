@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Package,
+  Images,
   Boxes,
   FlaskConical,
   BarChart3,
@@ -22,6 +23,7 @@ export function ProductosStockLayout() {
   const tabs = [
     { to: base, label: 'Dashboard', icon: LayoutDashboard, end: true },
     { to: `${base}/productos`, label: 'Productos', icon: Package, end: false },
+    { to: `${base}/catalogo`, label: 'Catálogo', icon: Images, end: false },
     { to: `${base}/insumos`, label: 'Insumos', icon: Boxes, end: false },
     { to: `${base}/formular`, label: 'Formular Producto', icon: FlaskConical, end: false },
     { to: `${base}/stock`, label: 'Stock', icon: BarChart3, end: false },
