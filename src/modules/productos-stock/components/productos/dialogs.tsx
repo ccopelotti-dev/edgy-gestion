@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type KeyboardEvent } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -10,17 +10,19 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2, ImagePlus, X, Loader2, Star } from 'lucide-react'
+import { Plus, Trash2, ImagePlus, X, Loader2, Star, Wand2 } from 'lucide-react'
 import { formatARS } from '../../lib/format'
 import {
   subirImagenProducto,
   eliminarImagenProducto,
   TIPOS_IMAGEN_ACEPTADOS,
 } from '../../lib/imagenes'
+import { generarCodigoInterno } from '../../lib/etiqueta'
 import type {
   Producto,
   Insumo,
-  Categoria,
+  Rubro,
+  SubRubro,
   Recepcion,
   LineaRecepcion,
   AlicuotaIVA,
@@ -42,14 +44,18 @@ interface ProductoDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSave: (data: ProductoFormData) => void
-  categorias: Categoria[]
+  rubros: Rubro[]
+  subRubros: SubRubro[]
+  /** Productos existentes, para validar que el código de barras no se repita. */
+  productos: Producto[]
   editData?: Producto
 }
 
 const emptyProducto: ProductoFormData = {
   nombre: '',
   codigo: '',
-  categoriaId: '',
+  rubroId: '',
+  subRubroId: undefined,
   descripcion: '',
   precioVenta: 0,
   costo: 0,
@@ -60,18 +66,22 @@ const emptyProducto: ProductoFormData = {
   disponible: true,
   estado: 'activo',
   imagenes: [],
+  codigoBarras: undefined,
 }
 
 export function ProductoDialog({
   open,
   onOpenChange,
   onSave,
-  categorias,
+  rubros,
+  subRubros,
+  productos,
   editData,
 }: ProductoDialogProps) {
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
   const [subiendo, setSubiendo] = useState(false)
   const [errorImagen, setErrorImagen] = useState('')
+  const [errorCodigoBarras, setErrorCodigoBarras] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Carpeta estable para esta sesión de edición (id real si ya existe, o un
@@ -155,17 +165,31 @@ export function ProductoDialog({
 
   function handleSave() {
     if (!form.nombre.trim()) return
+
+    const codigoBarrasLimpio = form.codigoBarras?.trim() || undefined
+    if (codigoBarrasLimpio) {
+      const yaUsado = productos.some(
+        (p) => p.id !== editData?.id && p.codigoBarras === codigoBarrasLimpio,
+      )
+      if (yaUsado) {
+        setErrorCodigoBarras('Ese código de barras ya lo tiene otro producto.')
+        return
+      }
+    }
+
+    setErrorCodigoBarras('')
     subidasEnEstaSesionRef.current = new Set()
     onSave({
       ...form,
       codigo: form.codigo.trim() || `PROD-${Date.now().toString(36).toUpperCase()}`,
+      codigoBarras: codigoBarrasLimpio,
+      subRubroId: form.subRubroId || undefined,
     })
     onOpenChange(false)
   }
 
-  const catsFiltradas = categorias.filter(
-    (c) => c.tipo === 'producto' || c.tipo === 'ambos',
-  )
+  const rubrosFiltrados = rubros.filter((r) => r.tipo === 'producto' || r.tipo === 'ambos')
+  const subRubrosFiltrados = subRubros.filter((sr) => sr.rubroId === form.rubroId)
 
   return (
     <Dialog
@@ -280,21 +304,77 @@ export function ProductoDialog({
             />
           </div>
 
-          {/* Categoria */}
+          {/* Codigo de barras */}
           <div className="grid gap-1.5">
-            <label className="text-sm font-medium">Categoria</label>
-            <select
-              className={inputClass}
-              value={form.categoriaId}
-              onChange={(e) => update('categoriaId', e.target.value)}
-            >
-              <option value="">Sin categoria</option>
-              {catsFiltradas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
+            <label className="text-sm font-medium">Código de barras / QR</label>
+            <div className="flex gap-2">
+              <input
+                className={inputClass}
+                value={form.codigoBarras ?? ''}
+                onChange={(e) => {
+                  update('codigoBarras', e.target.value)
+                  setErrorCodigoBarras('')
+                }}
+                placeholder="Escaneá con el lector, o generá uno interno"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => {
+                  update('codigoBarras', generarCodigoInterno())
+                  setErrorCodigoBarras('')
+                }}
+              >
+                <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                Generar
+              </Button>
+            </div>
+            {errorCodigoBarras && <p className="text-xs text-red-500">{errorCodigoBarras}</p>}
+            <p className="text-muted-foreground text-xs">
+              Si el producto ya viene con código de fábrica, escaneálo acá con el lector. Si es un
+              producto propio sin código, usá "Generar" y después imprimí la etiqueta desde la
+              tabla de Productos.
+            </p>
+          </div>
+
+          {/* Rubro y Sub-rubro */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Rubro</label>
+              <select
+                className={inputClass}
+                value={form.rubroId}
+                onChange={(e) => {
+                  update('rubroId', e.target.value)
+                  update('subRubroId', undefined)
+                }}
+              >
+                <option value="">Sin rubro</option>
+                {rubrosFiltrados.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Sub-rubro</label>
+              <select
+                className={inputClass}
+                value={form.subRubroId ?? ''}
+                onChange={(e) => update('subRubroId', e.target.value || undefined)}
+                disabled={!form.rubroId || subRubrosFiltrados.length === 0}
+              >
+                <option value="">Sin sub-rubro</option>
+                {subRubrosFiltrados.map((sr) => (
+                  <option key={sr.id} value={sr.id}>
+                    {sr.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Descripcion */}
@@ -423,13 +503,15 @@ interface InsumoDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSave: (data: InsumoFormData) => void
-  categorias: Categoria[]
+  rubros: Rubro[]
+  subRubros: SubRubro[]
   editData?: Insumo
 }
 
 const emptyInsumo: InsumoFormData = {
   nombre: '',
-  categoriaId: '',
+  rubroId: '',
+  subRubroId: undefined,
   unidad: 'unidad',
   stockMinimo: 0,
   costo: 0,
@@ -440,7 +522,8 @@ export function InsumoDialog({
   open,
   onOpenChange,
   onSave,
-  categorias,
+  rubros,
+  subRubros,
   editData,
 }: InsumoDialogProps) {
   const [form, setForm] = useState<InsumoFormData>(emptyInsumo)
@@ -462,13 +545,12 @@ export function InsumoDialog({
 
   function handleSave() {
     if (!form.nombre.trim()) return
-    onSave(form)
+    onSave({ ...form, subRubroId: form.subRubroId || undefined })
     onOpenChange(false)
   }
 
-  const catsFiltradas = categorias.filter(
-    (c) => c.tipo === 'insumo' || c.tipo === 'ambos',
-  )
+  const rubrosFiltrados = rubros.filter((r) => r.tipo === 'insumo' || r.tipo === 'ambos')
+  const subRubrosFiltrados = subRubros.filter((sr) => sr.rubroId === form.rubroId)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -494,21 +576,42 @@ export function InsumoDialog({
             />
           </div>
 
-          {/* Categoria */}
-          <div className="grid gap-1.5">
-            <label className="text-sm font-medium">Categoria</label>
-            <select
-              className={inputClass}
-              value={form.categoriaId}
-              onChange={(e) => update('categoriaId', e.target.value)}
-            >
-              <option value="">Sin categoria</option>
-              {catsFiltradas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
+          {/* Rubro y Sub-rubro */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Rubro</label>
+              <select
+                className={inputClass}
+                value={form.rubroId}
+                onChange={(e) => {
+                  update('rubroId', e.target.value)
+                  update('subRubroId', undefined)
+                }}
+              >
+                <option value="">Sin rubro</option>
+                {rubrosFiltrados.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Sub-rubro</label>
+              <select
+                className={inputClass}
+                value={form.subRubroId ?? ''}
+                onChange={(e) => update('subRubroId', e.target.value || undefined)}
+                disabled={!form.rubroId || subRubrosFiltrados.length === 0}
+              >
+                <option value="">Sin sub-rubro</option>
+                {subRubrosFiltrados.map((sr) => (
+                  <option key={sr.id} value={sr.id}>
+                    {sr.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Unidad */}
@@ -608,6 +711,8 @@ export function RecepcionDialog({
   const [numeroRemito, setNumeroRemito] = useState('')
   const [notas, setNotas] = useState('')
   const [lineas, setLineas] = useState<LineaForm[]>([])
+  const [codigoEscaneado, setCodigoEscaneado] = useState('')
+  const [errorEscaneo, setErrorEscaneo] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -615,8 +720,46 @@ export function RecepcionDialog({
       setNumeroRemito('')
       setNotas('')
       setLineas([])
+      setCodigoEscaneado('')
+      setErrorEscaneo('')
     }
   }, [open])
+
+  // Pensado para un lector de codigo de barras USB/Bluetooth: el lector
+  // "tipea" el codigo y aprieta Enter solo, como si fuera un teclado -- no
+  // hace falta ninguna integracion especial, solo escuchar el Enter de este
+  // input. Si el producto ya tiene una linea cargada, suma 1 a la cantidad
+  // en vez de duplicar la linea.
+  function handleEscanear(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter') return
+    const codigo = codigoEscaneado.trim()
+    if (!codigo) return
+
+    const producto = productos.find((p) => p.codigoBarras === codigo)
+    if (!producto) {
+      setErrorEscaneo(`No se encontró ningún producto con el código "${codigo}".`)
+      return
+    }
+
+    setErrorEscaneo('')
+    setLineas((prev) => {
+      const idx = prev.findIndex((l) => l.itemTipo === 'producto' && l.itemId === producto.id)
+      if (idx >= 0) {
+        return prev.map((l, i) => (i === idx ? { ...l, cantidad: l.cantidad + 1 } : l))
+      }
+      return [
+        ...prev,
+        {
+          key: `${Date.now()}-${Math.random()}`,
+          itemTipo: 'producto',
+          itemId: producto.id,
+          cantidad: 1,
+          costoUnitario: producto.costo,
+        },
+      ]
+    })
+    setCodigoEscaneado('')
+  }
 
   function addLinea() {
     setLineas((prev) => [
@@ -706,13 +849,30 @@ export function RecepcionDialog({
             />
           </div>
 
+          {/* Escaneo rapido */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Buscar por código de barras</label>
+            <input
+              className={inputClass}
+              value={codigoEscaneado}
+              onChange={(e) => {
+                setCodigoEscaneado(e.target.value)
+                setErrorEscaneo('')
+              }}
+              onKeyDown={handleEscanear}
+              placeholder="Escaneá con el lector o tipeá el código y apretá Enter"
+              autoFocus
+            />
+            {errorEscaneo && <p className="text-xs text-red-500">{errorEscaneo}</p>}
+          </div>
+
           {/* Lineas */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium">Lineas de recepcion</label>
               <Button variant="outline" size="sm" onClick={addLinea}>
                 <Plus className="h-4 w-4 mr-1" />
-                Agregar linea
+                Agregar linea manual
               </Button>
             </div>
 

@@ -47,7 +47,7 @@ interface ControlItem {
   tipo: 'producto' | 'insumo'
   stock: number
   unidadAbrev: string
-  categoriaId: string
+  rubroId: string
   ultimoControl: string | null
   estado: ControlStatus
 }
@@ -60,7 +60,7 @@ export default function ControlStock() {
   // Dialog states - Regla
   const [reglaDialogOpen, setReglaDialogOpen] = useState(false)
   const [reglaNombre, setReglaNombre] = useState('')
-  const [reglaCategoriaId, setReglaCategoriaId] = useState('')
+  const [reglaRubroId, setReglaRubroId] = useState('')
   const [reglaFrecuencia, setReglaFrecuencia] = useState(30)
 
   // Dialog states - Registro control
@@ -79,7 +79,7 @@ export default function ControlStock() {
 
       // Find applicable rule
       const rule = state.reglasControl.find(
-        (r) => !r.categoriaId || r.categoriaId === p.categoriaId,
+        (r) => !r.rubroId || r.rubroId === p.rubroId,
       )
 
       // Find last control registro
@@ -103,7 +103,7 @@ export default function ControlStock() {
         tipo: 'producto',
         stock: p.stock,
         unidadAbrev: unidadAbrev(p.unidadVenta),
-        categoriaId: p.categoriaId,
+        rubroId: p.rubroId,
         ultimoControl: lastRegistro?.fecha ?? null,
         estado,
       })
@@ -112,7 +112,7 @@ export default function ControlStock() {
     // All insumos
     for (const i of state.insumos) {
       const rule = state.reglasControl.find(
-        (r) => !r.categoriaId || r.categoriaId === i.categoriaId,
+        (r) => !r.rubroId || r.rubroId === i.rubroId,
       )
 
       const lastRegistro = state.registrosControl
@@ -135,7 +135,7 @@ export default function ControlStock() {
         tipo: 'insumo',
         stock: i.stock,
         unidadAbrev: unidadAbrev(i.unidad),
-        categoriaId: i.categoriaId,
+        rubroId: i.rubroId,
         ultimoControl: lastRegistro?.fecha ?? null,
         estado,
       })
@@ -144,10 +144,10 @@ export default function ControlStock() {
     return items
   }, [state.productos, state.insumos, state.reglasControl, state.registrosControl, today])
 
-  // Categories map for display
-  const categoriasMap = useMemo(
-    () => new Map(state.categorias.map((c) => [c.id, c.nombre])),
-    [state.categorias],
+  // Rubros map for display
+  const rubrosMap = useMemo(
+    () => new Map(state.rubros.map((r) => [r.id, r.nombre])),
+    [state.rubros],
   )
 
   // Handlers
@@ -157,13 +157,13 @@ export default function ControlStock() {
       type: 'ADD_REGLA_CONTROL',
       payload: {
         nombre: reglaNombre.trim(),
-        categoriaId: reglaCategoriaId || undefined,
+        rubroId: reglaRubroId || undefined,
         frecuenciaDias: reglaFrecuencia,
       },
     })
     setReglaDialogOpen(false)
     setReglaNombre('')
-    setReglaCategoriaId('')
+    setReglaRubroId('')
     setReglaFrecuencia(30)
   }
 
@@ -177,7 +177,7 @@ export default function ControlStock() {
 
     // Find applicable rule
     const rule = state.reglasControl.find(
-      (r) => !r.categoriaId || r.categoriaId === controlItem.categoriaId,
+      (r) => !r.rubroId || r.rubroId === controlItem.rubroId,
     )
     if (!rule) return
 
@@ -249,7 +249,7 @@ export default function ControlStock() {
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
                   <th className="px-4 py-3 font-medium">Nombre</th>
-                  <th className="px-4 py-3 font-medium">Categoria</th>
+                  <th className="px-4 py-3 font-medium">Rubro</th>
                   <th className="px-4 py-3 font-medium text-right">Frecuencia</th>
                 </tr>
               </thead>
@@ -258,9 +258,9 @@ export default function ControlStock() {
                   <tr key={r.id} className="border-b last:border-0">
                     <td className="px-4 py-3 font-medium">{r.nombre}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {r.categoriaId
-                        ? categoriasMap.get(r.categoriaId) ?? 'Categoria eliminada'
-                        : 'Todas'}
+                      {r.rubroId
+                        ? rubrosMap.get(r.rubroId) ?? 'Rubro eliminado'
+                        : 'Todos'}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       Cada {r.frecuenciaDias} dias
@@ -361,7 +361,7 @@ export default function ControlStock() {
           <DialogHeader>
             <DialogTitle>Nueva regla de control</DialogTitle>
             <DialogDescription>
-              Define la frecuencia de conteo fisico para una o todas las categorias.
+              Define la frecuencia de conteo fisico para un rubro o para todos.
             </DialogDescription>
           </DialogHeader>
 
@@ -377,21 +377,21 @@ export default function ControlStock() {
             </div>
 
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Categoria (opcional)</label>
+              <label className="text-sm font-medium">Rubro (opcional)</label>
               <select
                 className={inputClass}
-                value={reglaCategoriaId}
-                onChange={(e) => setReglaCategoriaId(e.target.value)}
+                value={reglaRubroId}
+                onChange={(e) => setReglaRubroId(e.target.value)}
               >
-                <option value="">Todas las categorias</option>
-                {state.categorias.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
+                <option value="">Todos los rubros</option>
+                {state.rubros.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.nombre}
                   </option>
                 ))}
               </select>
               <p className="text-xs text-muted-foreground">
-                Si no seleccionas categoria, la regla aplica a todos los items.
+                Si no seleccionas rubro, la regla aplica a todos los items.
               </p>
             </div>
 

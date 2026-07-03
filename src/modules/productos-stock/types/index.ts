@@ -68,12 +68,23 @@ export const ALICUOTAS_IVA: { value: AlicuotaIVA; label: string }[] = [
   { value: 27, label: '27%' },
 ]
 
-// ─── Categorías ─────────────────────────────────────────────────────────────────
+// ─── Rubros y Sub-rubros ────────────────────────────────────────────────────────
+// Reemplaza a la vieja "Categoria" (un solo nivel). Rubro y Sub-rubro son
+// compartidos entre Producto e Insumo (mismo campo `tipo`, igual que antes).
+// Un Sub-rubro siempre pertenece a un Rubro (rubroId obligatorio) y es opcional
+// para el producto/insumo (podés clasificar solo por Rubro si todavia no hace
+// falta el detalle del Sub-rubro).
 
-export interface Categoria {
+export interface Rubro {
   id: string
   nombre: string
   tipo: 'producto' | 'insumo' | 'ambos'
+}
+
+export interface SubRubro {
+  id: string
+  rubroId: string
+  nombre: string
 }
 
 // ─── Producto ───────────────────────────────────────────────────────────────────
@@ -85,7 +96,8 @@ export interface Producto {
   codigo: string
   nombre: string
   descripcion: string
-  categoriaId: string
+  rubroId: string
+  subRubroId?: string
   precioVenta: number
   costo: number
   iva: AlicuotaIVA
@@ -103,6 +115,13 @@ export interface Producto {
    * El primer elemento es la foto principal.
    */
   imagenes: string[]
+  /**
+   * Código que lee el lector (de fábrica: EAN-13/UPC-A: 8-14 dígitos, o
+   * interno: generado por Edgy para productos propios sin código de fábrica).
+   * Opcional y único por cliente cuando está cargado — ver validación de
+   * unicidad en el reducer (ADD_PRODUCTO/UPDATE_PRODUCTO).
+   */
+  codigoBarras?: string
   createdAt: string
 }
 
@@ -114,7 +133,8 @@ export const MAX_IMAGENES_PRODUCTO = 6
 export interface Insumo {
   id: string
   nombre: string
-  categoriaId: string
+  rubroId: string
+  subRubroId?: string
   unidad: UnidadMedida
   stock: number
   stockMinimo: number
@@ -237,7 +257,7 @@ export interface Transferencia {
 export interface ReglaControl {
   id: string
   nombre: string
-  categoriaId?: string // null = todas las categorías
+  rubroId?: string // null = todos los rubros
   frecuenciaDias: number
   createdAt: string
 }
@@ -258,7 +278,8 @@ export interface RegistroControl {
 export interface ProductosStockState {
   productos: Producto[]
   insumos: Insumo[]
-  categorias: Categoria[]
+  rubros: Rubro[]
+  subRubros: SubRubro[]
   formulas: Formula[]
   movimientos: MovimientoStock[]
   recepciones: Recepcion[]

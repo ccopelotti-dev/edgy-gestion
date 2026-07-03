@@ -10,7 +10,8 @@ import type {
   ProductosStockState,
   Producto,
   Insumo,
-  Categoria,
+  Rubro,
+  SubRubro,
   Formula,
   MovimientoStock,
   Recepcion,
@@ -41,7 +42,12 @@ type Action =
   | { type: 'ADD_INSUMO'; payload: Omit<Insumo, 'id' | 'createdAt'> }
   | { type: 'UPDATE_INSUMO'; payload: Insumo }
   | { type: 'DELETE_INSUMO'; payload: string }
-  | { type: 'ADD_CATEGORIA'; payload: Omit<Categoria, 'id'> }
+  | { type: 'ADD_RUBRO'; payload: Omit<Rubro, 'id'> }
+  | { type: 'UPDATE_RUBRO'; payload: Rubro }
+  | { type: 'DELETE_RUBRO'; payload: string }
+  | { type: 'ADD_SUBRUBRO'; payload: Omit<SubRubro, 'id'> }
+  | { type: 'UPDATE_SUBRUBRO'; payload: SubRubro }
+  | { type: 'DELETE_SUBRUBRO'; payload: string }
   | { type: 'ADD_FORMULA'; payload: Omit<Formula, 'id' | 'createdAt'> }
   | { type: 'UPDATE_FORMULA'; payload: Formula }
   | { type: 'DELETE_FORMULA'; payload: string }
@@ -122,11 +128,42 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         insumos: state.insumos.filter((i) => i.id !== action.payload),
       }
 
-    // ── Categorias ────────────────────────────────────────────────────────────
-    case 'ADD_CATEGORIA': {
-      const nueva: Categoria = { ...action.payload, id: uid() }
-      return { ...state, categorias: [...state.categorias, nueva] }
+    // ── Rubros y Sub-rubros ───────────────────────────────────────────────────
+    case 'ADD_RUBRO': {
+      const nuevo: Rubro = { ...action.payload, id: uid() }
+      return { ...state, rubros: [...state.rubros, nuevo] }
     }
+    case 'UPDATE_RUBRO':
+      return {
+        ...state,
+        rubros: state.rubros.map((r) => (r.id === action.payload.id ? action.payload : r)),
+      }
+    case 'DELETE_RUBRO':
+      // Al borrar un rubro se borran tambien sus sub-rubros (no tiene sentido
+      // un sub-rubro huerfano). Los productos/insumos que ya lo tenian
+      // asignado quedan con un rubroId que ya no existe -- la UI lo muestra
+      // como "Rubro eliminado" en vez de romper.
+      return {
+        ...state,
+        rubros: state.rubros.filter((r) => r.id !== action.payload),
+        subRubros: state.subRubros.filter((sr) => sr.rubroId !== action.payload),
+      }
+    case 'ADD_SUBRUBRO': {
+      const nuevo: SubRubro = { ...action.payload, id: uid() }
+      return { ...state, subRubros: [...state.subRubros, nuevo] }
+    }
+    case 'UPDATE_SUBRUBRO':
+      return {
+        ...state,
+        subRubros: state.subRubros.map((sr) =>
+          sr.id === action.payload.id ? action.payload : sr,
+        ),
+      }
+    case 'DELETE_SUBRUBRO':
+      return {
+        ...state,
+        subRubros: state.subRubros.filter((sr) => sr.id !== action.payload),
+      }
 
     // ── Fórmulas ──────────────────────────────────────────────────────────────
     case 'ADD_FORMULA': {
@@ -369,7 +406,7 @@ function init(): ProductosStockState {
     if (raw) {
       const parsed = JSON.parse(raw) as ProductosStockState
       // Validar que tenga las claves esperadas
-      if (parsed.productos && parsed.insumos && parsed.categorias) {
+      if (parsed.productos && parsed.insumos && parsed.rubros) {
         return parsed
       }
     }
@@ -412,25 +449,33 @@ export function useProductosStock() {
 
 // ─── Hooks derivados ───────────────────────────────────────────────────────────
 
-export function useProductosPorCategoria(catId?: string) {
+export function useProductosPorRubro(rubroId?: string) {
   const { state } = useProductosStock()
   return useMemo(
     () =>
-      catId
-        ? state.productos.filter((p) => p.categoriaId === catId)
+      rubroId
+        ? state.productos.filter((p) => p.rubroId === rubroId)
         : state.productos,
-    [state.productos, catId],
+    [state.productos, rubroId],
   )
 }
 
-export function useInsumosPorCategoria(catId?: string) {
+export function useInsumosPorRubro(rubroId?: string) {
   const { state } = useProductosStock()
   return useMemo(
     () =>
-      catId
-        ? state.insumos.filter((i) => i.categoriaId === catId)
+      rubroId
+        ? state.insumos.filter((i) => i.rubroId === rubroId)
         : state.insumos,
-    [state.insumos, catId],
+    [state.insumos, rubroId],
+  )
+}
+
+export function useSubRubrosDeRubro(rubroId?: string) {
+  const { state } = useProductosStock()
+  return useMemo(
+    () => (rubroId ? state.subRubros.filter((sr) => sr.rubroId === rubroId) : []),
+    [state.subRubros, rubroId],
   )
 }
 

@@ -6,6 +6,7 @@ import { Routes, Route } from 'react-router-dom'
 import { ProductosStockProvider } from './data/store'
 import { ProductosStockLayout } from './ProductosStockLayout'
 import Dashboard from './pages/Dashboard'
+import Rubros from './pages/Rubros'
 import Productos from './pages/Productos'
 import Catalogo from './pages/Catalogo'
 import Insumos from './pages/Insumos'
@@ -21,6 +22,7 @@ export default function ProductosStockModule() {
       <Routes>
         <Route element={<ProductosStockLayout />}>
           <Route index element={<Dashboard />} />
+          <Route path="rubros" element={<Rubros />} />
           <Route path="productos" element={<Productos />} />
           <Route path="catalogo" element={<Catalogo />} />
           <Route path="insumos" element={<Insumos />} />

@@ -1,7 +1,8 @@
 import type { ProductosStockState } from '../types'
 
 export const seedState: ProductosStockState = {
-  categorias: [],
+  rubros: [],
+  subRubros: [],
   productos: [],
   insumos: [],
   formulas: [],

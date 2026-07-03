@@ -31,19 +31,16 @@ export default function Catalogo() {
   const { state } = useProductosStock()
 
   const [search, setSearch] = useState('')
-  const [categoriaFilter, setCategoriaFilter] = useState('')
+  const [rubroFilter, setRubroFilter] = useState('')
   const [incluirNoDisponibles, setIncluirNoDisponibles] = useState(false)
   const [productoAbierto, setProductoAbierto] = useState<Producto | null>(null)
   const [indiceImagen, setIndiceImagen] = useState(0)
 
-  const categoriasMap = useMemo(
-    () => new Map(state.categorias.map((c) => [c.id, c])),
-    [state.categorias],
-  )
+  const rubrosMap = useMemo(() => new Map(state.rubros.map((r) => [r.id, r])), [state.rubros])
 
-  const categoriasProducto = useMemo(
-    () => state.categorias.filter((c) => c.tipo === 'producto' || c.tipo === 'ambos'),
-    [state.categorias],
+  const rubrosProducto = useMemo(
+    () => state.rubros.filter((r) => r.tipo === 'producto' || r.tipo === 'ambos'),
+    [state.rubros],
   )
 
   const productos = useMemo(() => {
@@ -51,8 +48,8 @@ export default function Catalogo() {
     if (!incluirNoDisponibles) {
       list = list.filter((p) => p.disponible && p.estado === 'activo')
     }
-    if (categoriaFilter) {
-      list = list.filter((p) => p.categoriaId === categoriaFilter)
+    if (rubroFilter) {
+      list = list.filter((p) => p.rubroId === rubroFilter)
     }
     if (search.trim()) {
       const q = search.toLowerCase()
@@ -63,7 +60,7 @@ export default function Catalogo() {
       )
     }
     return list
-  }, [state.productos, search, categoriaFilter, incluirNoDisponibles])
+  }, [state.productos, search, rubroFilter, incluirNoDisponibles])
 
   function abrirProducto(p: Producto) {
     setProductoAbierto(p)
@@ -103,13 +100,13 @@ export default function Catalogo() {
         </div>
         <select
           className={cn(inputClass, 'w-full sm:w-48')}
-          value={categoriaFilter}
-          onChange={(e) => setCategoriaFilter(e.target.value)}
+          value={rubroFilter}
+          onChange={(e) => setRubroFilter(e.target.value)}
         >
-          <option value="">Todas las categorias</option>
-          {categoriasProducto.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nombre}
+          <option value="">Todos los rubros</option>
+          {rubrosProducto.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.nombre}
             </option>
           ))}
         </select>
@@ -173,7 +170,7 @@ export default function Catalogo() {
                 <div className="flex flex-1 flex-col gap-1 p-3">
                   <p className="line-clamp-2 text-sm font-medium leading-tight">{p.nombre}</p>
                   <p className="text-xs text-muted-foreground">
-                    {categoriasMap.get(p.categoriaId)?.nombre ?? 'Sin categoria'}
+                    {rubrosMap.get(p.rubroId)?.nombre ?? 'Sin rubro'}
                   </p>
                   <div className="mt-auto pt-1">
                     <Amount value={p.precioVenta} className="text-sm font-semibold" />
@@ -193,7 +190,7 @@ export default function Catalogo() {
               <DialogHeader>
                 <DialogTitle>{productoAbierto.nombre}</DialogTitle>
                 <DialogDescription>
-                  {categoriasMap.get(productoAbierto.categoriaId)?.nombre ?? 'Sin categoria'}
+                  {rubrosMap.get(productoAbierto.rubroId)?.nombre ?? 'Sin rubro'}
                 </DialogDescription>
               </DialogHeader>
 

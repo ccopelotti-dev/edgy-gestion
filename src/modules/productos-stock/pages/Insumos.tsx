@@ -39,7 +39,7 @@ export default function Insumos() {
   const { state, dispatch } = useProductosStock()
 
   const [search, setSearch] = useState('')
-  const [categoriaFilter, setCategoriaFilter] = useState('')
+  const [rubroFilter, setRubroFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingInsumo, setEditingInsumo] = useState<Insumo | undefined>()
 
@@ -67,29 +67,30 @@ export default function Insumos() {
     return { total, sinStock, bajoMinimo, valorInventario }
   }, [state.insumos])
 
-  // Categorias for insumos
-  const categoriasInsumo = useMemo(
-    () => state.categorias.filter((c) => c.tipo === 'insumo' || c.tipo === 'ambos'),
-    [state.categorias],
+  // Rubros for insumos
+  const rubrosInsumo = useMemo(
+    () => state.rubros.filter((r) => r.tipo === 'insumo' || r.tipo === 'ambos'),
+    [state.rubros],
   )
 
-  const categoriasMap = useMemo(
-    () => new Map(state.categorias.map((c) => [c.id, c])),
-    [state.categorias],
+  const rubrosMap = useMemo(() => new Map(state.rubros.map((r) => [r.id, r])), [state.rubros])
+  const subRubrosMap = useMemo(
+    () => new Map(state.subRubros.map((sr) => [sr.id, sr])),
+    [state.subRubros],
   )
 
   // Filtered insumos
   const filtered = useMemo(() => {
     let list = state.insumos
-    if (categoriaFilter) {
-      list = list.filter((i) => i.categoriaId === categoriaFilter)
+    if (rubroFilter) {
+      list = list.filter((i) => i.rubroId === rubroFilter)
     }
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter((i) => i.nombre.toLowerCase().includes(q))
     }
     return list
-  }, [state.insumos, search, categoriaFilter])
+  }, [state.insumos, search, rubroFilter])
 
   function handleOpenNew() {
     setEditingInsumo(undefined)
@@ -213,13 +214,13 @@ export default function Insumos() {
         </div>
         <select
           className={cn(inputClass, 'w-full sm:w-48')}
-          value={categoriaFilter}
-          onChange={(e) => setCategoriaFilter(e.target.value)}
+          value={rubroFilter}
+          onChange={(e) => setRubroFilter(e.target.value)}
         >
-          <option value="">Todas las categorias</option>
-          {categoriasInsumo.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nombre}
+          <option value="">Todos los rubros</option>
+          {rubrosInsumo.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.nombre}
             </option>
           ))}
         </select>
@@ -246,7 +247,7 @@ export default function Insumos() {
             <thead>
               <tr className="border-b text-left text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Nombre</th>
-                <th className="px-4 py-3 font-medium">Categoria</th>
+                <th className="px-4 py-3 font-medium">Rubro</th>
                 <th className="px-4 py-3 font-medium text-right">Stock</th>
                 <th className="px-4 py-3 font-medium text-right">Minimo</th>
                 <th className="px-4 py-3 font-medium text-right">Costo</th>
@@ -259,7 +260,12 @@ export default function Insumos() {
                 <tr key={i.id} className="border-b last:border-0 hover:bg-muted/50">
                   <td className="px-4 py-3 font-medium">{i.nombre}</td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {categoriasMap.get(i.categoriaId)?.nombre ?? '-'}
+                    {(() => {
+                      const rubro = rubrosMap.get(i.rubroId)
+                      const subRubro = i.subRubroId ? subRubrosMap.get(i.subRubroId) : undefined
+                      if (!rubro) return '-'
+                      return subRubro ? `${rubro.nombre} / ${subRubro.nombre}` : rubro.nombre
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <span className="tabular-nums mr-1">
@@ -328,7 +334,8 @@ export default function Insumos() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onSave={handleSave}
-        categorias={state.categorias}
+        rubros={state.rubros}
+        subRubros={state.subRubros}
         editData={editingInsumo}
       />
 
