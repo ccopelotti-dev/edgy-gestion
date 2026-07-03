@@ -38,11 +38,11 @@ export function ModulosListado() {
         <h1 className="text-lg font-medium text-gray-900">Módulos</h1>
         <p className="text-sm text-gray-500">{slugs.length} módulos existentes en el código.</p>
         <p className="mt-2 max-w-2xl text-sm text-gray-500">
-          "Entrar" te lleva a <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">/m/&lt;slug&gt;</code>,
-          la misma ruta que usa cualquier cliente. Para que cargue datos en vez de mostrar
-          "no hay un negocio configurado", tu usuario tiene que estar vinculado a un cliente
-          que tenga ese módulo activo (por ejemplo el cliente de prueba, desde{' '}
-          <Link to="/panel/clientes" className="text-brand-500 hover:underline">Clientes</Link>).
+          "Entrar" abre una vista previa de staff: el módulo real, pero sin cliente
+          asociado, así que se ve vacío -- sirve para revisar qué pantallas y funciones
+          tiene. Para probarlo con datos de un cliente de verdad, activalo desde{' '}
+          <Link to="/panel/clientes" className="text-brand-500 hover:underline">Clientes</Link>{' '}
+          y entrá con la sesión de ese cliente.
         </p>
       </div>
 
@@ -59,7 +59,7 @@ export function ModulosListado() {
           const info = DESCRIPCION_MODULOS[slug]
           const Icono = iconoDeModulo(slug)
           return (
-            <Link key={slug} to={`/m/${slug}`}>
+            <Link key={slug} to={`/panel/modulos/${slug}`}>
               <Card className="flex h-full items-start gap-3 p-4 transition-shadow hover:shadow-md">
                 <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md bg-brand-500/10 text-brand-500">
                   <Icono size={18} />

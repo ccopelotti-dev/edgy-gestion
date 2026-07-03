@@ -8,6 +8,7 @@ import { NuevoProyecto } from '@/pages/onboarding/NuevoProyecto'
 import { ClientesListado } from '@/pages/panel/ClientesListado'
 import { ClienteDetalle } from '@/pages/panel/ClienteDetalle'
 import { ModulosListado } from '@/pages/panel/ModulosListado'
+import { ModuloPreview } from '@/pages/panel/ModuloPreview'
 import { CompletarCuenta } from '@/pages/CompletarCuenta'
 import { Ingresar } from '@/pages/Ingresar'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="clientes" element={<ClientesListado />} />
             <Route path="clientes/:id" element={<ClienteDetalle />} />
             <Route path="modulos" element={<ModulosListado />} />
+            <Route path="modulos/:slug/*" element={<ModuloPreview />} />
           </Route>
         </Route>
         <Route path="/dashboard" element={<DashboardLayout />}>
