@@ -14,7 +14,6 @@ import Presupuestos from './pages/Presupuestos';
 import Ordenes from './pages/Ordenes';
 import Comprobantes from './pages/Comprobantes';
 import Cobranzas from './pages/Cobranzas';
-import Integraciones from './pages/Integraciones';
 
 export default function VentasModule() {
   return (
@@ -28,7 +27,6 @@ export default function VentasModule() {
           <Route path="ordenes" element={<Ordenes />} />
           <Route path="comprobantes" element={<Comprobantes />} />
           <Route path="cobranzas" element={<Cobranzas />} />
-          <Route path="integraciones" element={<Integraciones />} />
         </Route>
       </Routes>
     </VentasProvider>

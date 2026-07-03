@@ -7,7 +7,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Users, ShoppingCart, FileText,
-  ClipboardList, Receipt, Banknote, Plug,
+  ClipboardList, Receipt, Banknote,
 } from 'lucide-react';
 
 interface TabDef {
@@ -19,6 +19,10 @@ interface TabDef {
 
 const BASE = '/m/ventas';
 
+// Nota: "Integraciones" se mudó al módulo Configuración -- no es un
+// concepto propio de Ventas (fiscal + canales de venta + subsistemas
+// entre módulos, a nivel de cliente completo). Ver Configuración >
+// Integraciones.
 const tabs: TabDef[] = [
   { to: BASE,                       label: 'Dashboard',      icon: LayoutDashboard, end: true },
   { to: `${BASE}/clientes`,         label: 'Clientes',       icon: Users },
@@ -27,7 +31,6 @@ const tabs: TabDef[] = [
   { to: `${BASE}/ordenes`,          label: 'Órdenes',        icon: ClipboardList },
   { to: `${BASE}/comprobantes`,     label: 'Comprobantes',   icon: Receipt },
   { to: `${BASE}/cobranzas`,        label: 'Cobranzas',      icon: Banknote },
-  { to: `${BASE}/integraciones`,    label: 'Integraciones',  icon: Plug },
 ];
 
 export default function VentasLayout() {
