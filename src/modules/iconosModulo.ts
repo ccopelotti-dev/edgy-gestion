@@ -11,6 +11,10 @@ import {
   Banknote,
   CircleDashed,
   Settings,
+  BarChart3,
+  Wrench,
+  Briefcase,
+  Calculator,
   type LucideIcon,
 } from 'lucide-react'
 
