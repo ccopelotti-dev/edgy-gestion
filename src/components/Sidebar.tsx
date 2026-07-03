@@ -16,6 +16,36 @@ interface SidebarProps {
 // grupo pegado al fondo.
 const SLUGS_PIE = ['utilidades', 'configuracion']
 
+// Orden fijo del resto de los íconos (arriba hacia abajo), independiente
+// del orden en que vengan de cliente_modulos. Servicios va justo debajo
+// de Productos y stock, arriba de Ventas. Cualquier slug que no esté acá
+// (módulo nuevo que todavía no se agregó a esta lista) cae al final, en
+// vez de desaparecer.
+const ORDEN_PRINCIPALES = [
+  'tesoreria',
+  'productos-stock',
+  'servicios',
+  'ventas',
+  'compras',
+  'mesas-salon',
+  'comandas-cocina',
+  'menu-qr',
+  'delivery-whatsapp',
+  'caja-turno',
+  'reportes',
+  'contable',
+]
+
+function ordenarPrincipales(modulos: ModuloActivo[]): ModuloActivo[] {
+  return [...modulos].sort((a, b) => {
+    const ia = ORDEN_PRINCIPALES.indexOf(a.slug)
+    const ib = ORDEN_PRINCIPALES.indexOf(b.slug)
+    const posA = ia === -1 ? ORDEN_PRINCIPALES.length : ia
+    const posB = ib === -1 ? ORDEN_PRINCIPALES.length : ib
+    return posA - posB
+  })
+}
+
 /** Rail vertical de íconos, pintado por completo en el color de marca
  * del cliente — el ícono del módulo activo se resalta con el color de
  * contraste que mejor se vea contra ese color (blanco o gris oscuro,
@@ -26,7 +56,7 @@ export function Sidebar({ colorMarca, modulos }: SidebarProps) {
   const inactivoOpacidad = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.55)' : 'rgba(32,31,27,0.55)'
   const activoFondo = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.18)' : 'rgba(32,31,27,0.12)'
 
-  const principales = modulos.filter((m) => !SLUGS_PIE.includes(m.slug))
+  const principales = ordenarPrincipales(modulos.filter((m) => !SLUGS_PIE.includes(m.slug)))
   const deSistema = SLUGS_PIE
     .map((slug) => modulos.find((m) => m.slug === slug))
     .filter((m): m is ModuloActivo => !!m)
