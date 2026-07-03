@@ -31,6 +31,7 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   reportes: BarChart3,
   utilidades: Wrench,
   servicios: Briefcase,
+  contable: Calculator,
 }
 
 export function iconoDeModulo(slug: string): LucideIcon {

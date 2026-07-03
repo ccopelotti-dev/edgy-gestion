@@ -14,4 +14,5 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   'reportes': lazy(() => import('./reportes')),
   'utilidades': lazy(() => import('./utilidades')),
   'servicios': lazy(() => import('./servicios')),
+  'contable': lazy(() => import('./contable')),
 }
