@@ -7,6 +7,7 @@ import { ModuloRoute } from '@/pages/ModuloRoute'
 import { NuevoProyecto } from '@/pages/onboarding/NuevoProyecto'
 import { ClientesListado } from '@/pages/panel/ClientesListado'
 import { ClienteDetalle } from '@/pages/panel/ClienteDetalle'
+import { ModulosListado } from '@/pages/panel/ModulosListado'
 import { CompletarCuenta } from '@/pages/CompletarCuenta'
 import { Ingresar } from '@/pages/Ingresar'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="nuevo-cliente" element={<NuevoProyecto />} />
             <Route path="clientes" element={<ClientesListado />} />
             <Route path="clientes/:id" element={<ClienteDetalle />} />
+            <Route path="modulos" element={<ModulosListado />} />
           </Route>
         </Route>
         <Route path="/dashboard" element={<DashboardLayout />}>

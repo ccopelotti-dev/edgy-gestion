@@ -10,6 +10,7 @@ interface ItemMenu {
 const ITEMS: ItemMenu[] = [
   { to: '/panel/nuevo-cliente', label: 'Nuevo Cliente', disponible: true },
   { to: '/panel/clientes', label: 'Clientes', disponible: true },
+  { to: '/panel/modulos', label: 'Módulos', disponible: true },
   { to: '/panel/metricas', label: 'Métricas', disponible: false },
 ]
 
