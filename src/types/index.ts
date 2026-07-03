@@ -98,7 +98,7 @@ export const MODULOS_SUGERIDOS: Record<TipoNegocio, string[]> = {
   comercio: ['productos-stock', 'ventas', 'compras'],
   logistica: ['rutas', 'rendicion', 'gps'],
   produccion: ['produccion-servicios', 'productos-stock'],
-  servicios: ['servicios-contratados', 'clientes'],
+  servicios: ['servicios', 'clientes'],
   agro: ['rutas', 'gps', 'rendicion'],
 }
 
