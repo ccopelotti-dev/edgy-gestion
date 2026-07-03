@@ -29,6 +29,7 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   'caja-turno': Banknote,
   configuracion: Settings,
   reportes: BarChart3,
+  utilidades: Wrench,
 }
 
 export function iconoDeModulo(slug: string): LucideIcon {
