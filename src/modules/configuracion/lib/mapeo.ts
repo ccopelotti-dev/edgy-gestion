@@ -1,0 +1,61 @@
+// Mapeo entre las filas de Supabase (snake_case) y los tipos del
+// módulo (camelCase). Centralizado acá para no repetir el mapeo en
+// cada hook/página.
+import type { DatosEmpresa, PuntoVenta } from '../types'
+
+export function filaAEmpresa(fila: Record<string, any>): DatosEmpresa {
+  return {
+    id: fila.id,
+    nombre: fila.nombre,
+    tipoNegocio: fila.tipo_negocio,
+    titular: fila.titular,
+    direccion: fila.direccion,
+    telefono: fila.telefono,
+    cuit: fila.cuit,
+    logoUrl: fila.logo_url,
+    colorMarca: fila.color_marca,
+    slug: fila.slug,
+    estado: fila.estado,
+    categoriaImpositiva: fila.categoria_impositiva,
+    personeria: fila.personeria,
+    inicioActividades: fila.inicio_actividades,
+    provincia: fila.provincia,
+    localidad: fila.localidad,
+    codigoPostal: fila.codigo_postal,
+  }
+}
+
+// Solo mapea los campos editables desde Configuración > Empresa. Los
+// protegidos (slug, estado, cuit, tipo_negocio) ni siquiera se
+// consideran acá — están además bloqueados por un trigger en Supabase
+// (proteger_columnas_sensibles_clientes, migración 0009), esto es
+// defensa en profundidad, no la única barrera.
+export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unknown> {
+  const fila: Record<string, unknown> = {}
+  if ('nombre' in cambios) fila.nombre = cambios.nombre
+  if ('titular' in cambios) fila.titular = cambios.titular
+  if ('direccion' in cambios) fila.direccion = cambios.direccion
+  if ('telefono' in cambios) fila.telefono = cambios.telefono
+  if ('categoriaImpositiva' in cambios) fila.categoria_impositiva = cambios.categoriaImpositiva
+  if ('personeria' in cambios) fila.personeria = cambios.personeria
+  if ('inicioActividades' in cambios) fila.inicio_actividades = cambios.inicioActividades
+  if ('provincia' in cambios) fila.provincia = cambios.provincia
+  if ('localidad' in cambios) fila.localidad = cambios.localidad
+  if ('codigoPostal' in cambios) fila.codigo_postal = cambios.codigoPostal
+  return fila
+}
+
+export function filaAPuntoVenta(fila: Record<string, any>): PuntoVenta {
+  return {
+    id: fila.id,
+    clienteId: fila.cliente_id,
+    numero: fila.numero,
+    alias: fila.alias,
+    direccion: fila.direccion,
+    activo: fila.activo,
+    porDefecto: fila.por_defecto,
+    paraIntegraciones: fila.para_integraciones,
+    fechaBaja: fila.fecha_baja,
+    createdAt: fila.created_at,
+  }
+}

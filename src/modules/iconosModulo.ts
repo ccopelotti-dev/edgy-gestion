@@ -10,6 +10,7 @@ import {
   Truck,
   Banknote,
   CircleDashed,
+  Settings,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -26,6 +27,7 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   'menu-qr': QrCode,
   'delivery-whatsapp': Truck,
   'caja-turno': Banknote,
+  configuracion: Settings,
 }
 
 export function iconoDeModulo(slug: string): LucideIcon {
