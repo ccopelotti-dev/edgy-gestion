@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { Building2, Receipt } from 'lucide-react'
+import { Building2, Receipt, Plug } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export function ConfiguracionLayout() {
@@ -9,6 +9,7 @@ export function ConfiguracionLayout() {
   const tabs = [
     { to: base, label: 'Empresa', icon: Building2, end: true },
     { to: `${base}/puntos-venta`, label: 'Facturación', icon: Receipt, end: false },
+    { to: `${base}/integraciones`, label: 'Integraciones', icon: Plug, end: false },
   ]
 
   return (
