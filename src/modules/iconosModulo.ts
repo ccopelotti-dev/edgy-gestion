@@ -28,6 +28,7 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   'delivery-whatsapp': Truck,
   'caja-turno': Banknote,
   configuracion: Settings,
+  reportes: BarChart3,
 }
 
 export function iconoDeModulo(slug: string): LucideIcon {
