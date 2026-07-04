@@ -803,7 +803,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     subRubroId: r.sub_rubro_id ?? undefined,
     precioVenta: Number(r.precio_venta),
     costo: Number(r.costo),
-    iva: Number(r.iva),
+    iva: Number(r.iva) as Producto['iva'],
     unidadVenta: r.unidad_venta,
     stock: Number(r.stock),
     stockMinimo: Number(r.stock_minimo),
@@ -1117,5 +1117,4 @@ export function useCostoFormulado(productoId: string) {
       formula.cantidadProducida > 0 ? total / formula.cantidadProducida : total
 
     return { insumos, manoDeObra, costosOperativos, total, costoUnitario }
-  }, [state.formulas, productoId])
-}
+  }, [state.formul
