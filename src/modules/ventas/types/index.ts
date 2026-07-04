@@ -393,5 +393,5 @@ export function calcularTotalItems(
 
 // Genera un ID único simple
 export function generarId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  return crypto.randomUUID();
 }
