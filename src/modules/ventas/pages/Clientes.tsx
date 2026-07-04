@@ -48,6 +48,7 @@ import {
   TIPO_DOCUMENTO_LABEL,
   TIPO_COMPROBANTE_LABEL,
   MEDIO_PAGO_LABEL,
+  generarId,
 } from '../types';
 
 // ─── Componente principal ───────────────────────────────────
@@ -142,7 +143,7 @@ export default function Clientes() {
         type: 'ADD_CLIENTE',
         payload: {
           ...data,
-          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+          id: generarId(),
           saldoCuentaCorriente: 0,
           activo: true,
           createdAt: now,
@@ -298,7 +299,7 @@ export default function Clientes() {
               dispatch({
                 type: 'ADD_COBRO',
                 payload: {
-                  id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+                  id: generarId(),
                   clienteId: cobroClienteId,
                   fecha: data.fecha,
                   monto: data.monto,
