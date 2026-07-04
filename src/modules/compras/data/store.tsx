@@ -1,16 +1,20 @@
 // ============================================================
-// Módulo Ventas — State Management
+// Módulo Compras — State Management
 // Edgy Gestión · Context + useReducer + Supabase (antes localStorage)
 //
-// Mismo patrón que Tesorería/Compras: el reducer y la firma pública
-// (VentasAction, useVentas, useVentasDispatch, hooks de dominio) son
-// IDÉNTICOS a la versión anterior. El estado inicial se trae de
-// Supabase y cada dispatch además persiste el registro resuelto
-// (con `numero` ya asignado) en las tablas reales.
+// El reducer y la firma pública (ComprasAction, useCompras,
+// useComprasDispatch, y todos los hooks de dominio) son IDÉNTICOS
+// a la versión anterior — ningún diálogo ni página cambia una sola
+// línea. Lo único nuevo es: (1) el estado inicial se trae de
+// Supabase en vez de localStorage, y (2) cada dispatch además
+// persiste el registro resuelto (ya con `numero` asignado) en las
+// tablas reales.
 //
-// "Consumidor Final" (CONSUMIDOR_FINAL_ID) es un cliente virtual que
-// NO se persiste en Supabase (no existe como fila real) — se agrega
-// siempre en memoria al leer el estado, igual que en el seed original.
+// Importante: los ids de proveedores/cotizaciones/OC/comprobantes/
+// pagos/items ya vienen resueltos por el llamador vía generarId()
+// (ver types/index.ts) ANTES de llegar acá. Para que estos ids sean
+// compatibles con las columnas uuid de Supabase, generarId() se
+// actualizó para devolver crypto.randomUUID() (ver diff en types).
 // ============================================================
 
 import {
@@ -19,132 +23,118 @@ import {
   useReducer,
   useEffect,
   useMemo,
+  useState,
   type ReactNode,
   type Dispatch,
 } from 'react';
 
 import type {
-  VentasState,
-  VentasConfig,
-  CategoriaCliente,
-  Cliente,
-  Presupuesto,
-  Orden,
-  Comprobante,
-  Cobro,
-  TipoOrden,
-  EstadoOrden,
-  EstadoPresupuesto,
-  EstadoComprobante,
-  TipoComprobante,
-  OrdenItem,
-  ImputacionCobro,
-  PresupuestoItem,
-  ComprobanteItem,
+  ComprasState,
+  ComprasConfig,
+  Proveedor,
+  PedidoCotizacion,
+  OrdenCompra,
+  ComprobanteCompra,
+  PagoCompra,
+  EstadoCotizacion,
+  EstadoOrdenCompra,
+  EstadoComprobanteCompra,
+  TipoComprobanteCompra,
+  ItemCompra,
+  ItemComprobanteCompra,
 } from '../types';
 
-import { generarId, CONSUMIDOR_FINAL_ID, clienteConsumidorFinal } from '../types';
+import { generarId } from '../types';
 import { SEED_STATE } from './seed';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 
 // ─── Action Types (idénticos a la versión anterior) ───────────
 
-type VentasAction =
-  | { type: 'ADD_CATEGORIA'; payload: CategoriaCliente }
-  | { type: 'UPDATE_CATEGORIA'; payload: CategoriaCliente }
-  | { type: 'DELETE_CATEGORIA'; payload: { id: string } }
-  | { type: 'ADD_CLIENTE'; payload: Cliente }
-  | { type: 'UPDATE_CLIENTE'; payload: Cliente }
-  | { type: 'TOGGLE_CLIENTE_ACTIVO'; payload: { id: string } }
-  | { type: 'AJUSTAR_SALDO_CLIENTE'; payload: { clienteId: string; delta: number } }
-  | { type: 'ADD_PRESUPUESTO'; payload: Omit<Presupuesto, 'numero'> }
-  | { type: 'UPDATE_PRESUPUESTO'; payload: Presupuesto }
-  | { type: 'CAMBIAR_ESTADO_PRESUPUESTO'; payload: { id: string; nuevoEstado: EstadoPresupuesto } }
-  | { type: 'CONVERTIR_PRESUPUESTO_A_ORDEN'; payload: { presupuestoId: string; tipoOrden: TipoOrden } }
-  | { type: 'ADD_ORDEN'; payload: Omit<Orden, 'numero'> }
-  | { type: 'UPDATE_ORDEN'; payload: Orden }
-  | { type: 'CAMBIAR_ESTADO_ORDEN'; payload: { id: string; nuevoEstado: EstadoOrden } }
-  | { type: 'REGISTRAR_ENTREGA_PARCIAL'; payload: { ordenId: string; items: { id: string; cantidadEntregada: number }[] } }
-  | { type: 'ADD_COMPROBANTE'; payload: Omit<Comprobante, 'numero'> }
-  | { type: 'ANULAR_COMPROBANTE'; payload: { id: string } }
-  | { type: 'ACTUALIZAR_COBRO_COMPROBANTE'; payload: { comprobanteId: string; montoCobrado: number } }
-  | { type: 'ADD_COBRO'; payload: Omit<Cobro, 'numero'> }
-  | { type: 'UPDATE_CONFIG'; payload: Partial<VentasConfig> }
-  | { type: 'SET_STATE'; payload: VentasState };
+type ComprasAction =
+  | { type: 'ADD_PROVEEDOR'; payload: Proveedor }
+  | { type: 'UPDATE_PROVEEDOR'; payload: Proveedor }
+  | { type: 'TOGGLE_PROVEEDOR_ACTIVO'; payload: { id: string } }
+  | { type: 'AJUSTAR_SALDO_PROVEEDOR'; payload: { proveedorId: string; delta: number } }
+  | { type: 'ADD_COTIZACION'; payload: Omit<PedidoCotizacion, 'numero'> }
+  | { type: 'UPDATE_COTIZACION'; payload: PedidoCotizacion }
+  | { type: 'CAMBIAR_ESTADO_COTIZACION'; payload: { id: string; nuevoEstado: EstadoCotizacion } }
+  | { type: 'CONVERTIR_COTIZACION_A_OC'; payload: { cotizacionId: string } }
+  | { type: 'ADD_ORDEN_COMPRA'; payload: Omit<OrdenCompra, 'numero'> }
+  | { type: 'UPDATE_ORDEN_COMPRA'; payload: OrdenCompra }
+  | { type: 'CAMBIAR_ESTADO_OC'; payload: { id: string; nuevoEstado: EstadoOrdenCompra } }
+  | { type: 'ADD_COMPROBANTE_COMPRA'; payload: Omit<ComprobanteCompra, 'numero'> }
+  | { type: 'ANULAR_COMPROBANTE_COMPRA'; payload: { id: string } }
+  | { type: 'ACTUALIZAR_PAGO_COMPROBANTE'; payload: { comprobanteId: string; montoPagado: number } }
+  | { type: 'ADD_PAGO'; payload: Omit<PagoCompra, 'numero'> }
+  | { type: 'UPDATE_CONFIG'; payload: Partial<ComprasConfig> }
+  | { type: 'SET_STATE'; payload: ComprasState };
 
 // ─── Reducer (misma lógica exacta que la versión localStorage) ─
 
-function ventasReducer(state: VentasState, action: VentasAction): VentasState {
+function comprasReducer(state: ComprasState, action: ComprasAction): ComprasState {
   const now = new Date().toISOString();
 
   switch (action.type) {
     case 'SET_STATE':
       return action.payload;
 
-    case 'ADD_CATEGORIA':
-      return { ...state, categorias: [...state.categorias, action.payload] };
+    case 'ADD_PROVEEDOR':
+      return { ...state, proveedores: [...state.proveedores, action.payload] };
 
-    case 'UPDATE_CATEGORIA':
-      return { ...state, categorias: state.categorias.map((c) => (c.id === action.payload.id ? action.payload : c)) };
-
-    case 'DELETE_CATEGORIA':
+    case 'UPDATE_PROVEEDOR':
       return {
         ...state,
-        categorias: state.categorias.filter((c) => c.id !== action.payload.id),
-        clientes: state.clientes.map((cl) =>
-          cl.categoriaId === action.payload.id ? { ...cl, categoriaId: undefined, updatedAt: now } : cl,
+        proveedores: state.proveedores.map((p) => (p.id === action.payload.id ? action.payload : p)),
+      };
+
+    case 'TOGGLE_PROVEEDOR_ACTIVO':
+      return {
+        ...state,
+        proveedores: state.proveedores.map((p) =>
+          p.id === action.payload.id ? { ...p, activo: !p.activo, updatedAt: now } : p,
         ),
       };
 
-    case 'ADD_CLIENTE':
-      return { ...state, clientes: [...state.clientes, action.payload] };
-
-    case 'UPDATE_CLIENTE':
-      return { ...state, clientes: state.clientes.map((c) => (c.id === action.payload.id ? action.payload : c)) };
-
-    case 'TOGGLE_CLIENTE_ACTIVO':
+    case 'AJUSTAR_SALDO_PROVEEDOR':
       return {
         ...state,
-        clientes: state.clientes.map((c) => (c.id === action.payload.id ? { ...c, activo: !c.activo, updatedAt: now } : c)),
-      };
-
-    case 'AJUSTAR_SALDO_CLIENTE':
-      return {
-        ...state,
-        clientes: state.clientes.map((c) =>
-          c.id === action.payload.clienteId
-            ? { ...c, saldoCuentaCorriente: c.saldoCuentaCorriente + action.payload.delta, updatedAt: now }
-            : c,
+        proveedores: state.proveedores.map((p) =>
+          p.id === action.payload.proveedorId
+            ? { ...p, saldoCuentaCorriente: p.saldoCuentaCorriente + action.payload.delta, updatedAt: now }
+            : p,
         ),
       };
 
-    case 'ADD_PRESUPUESTO': {
-      const numero = state.nextNumeroPresupuesto;
-      const presupuesto: Presupuesto = { ...action.payload, numero } as Presupuesto;
-      return { ...state, presupuestos: [...state.presupuestos, presupuesto], nextNumeroPresupuesto: numero + 1 };
+    case 'ADD_COTIZACION': {
+      const numero = state.nextNumeroCotizacion;
+      const cotizacion: PedidoCotizacion = { ...action.payload, numero } as PedidoCotizacion;
+      return { ...state, cotizaciones: [...state.cotizaciones, cotizacion], nextNumeroCotizacion: numero + 1 };
     }
 
-    case 'UPDATE_PRESUPUESTO':
-      return { ...state, presupuestos: state.presupuestos.map((p) => (p.id === action.payload.id ? action.payload : p)) };
-
-    case 'CAMBIAR_ESTADO_PRESUPUESTO':
+    case 'UPDATE_COTIZACION':
       return {
         ...state,
-        presupuestos: state.presupuestos.map((p) =>
-          p.id === action.payload.id ? { ...p, estado: action.payload.nuevoEstado, updatedAt: now } : p,
+        cotizaciones: state.cotizaciones.map((c) => (c.id === action.payload.id ? action.payload : c)),
+      };
+
+    case 'CAMBIAR_ESTADO_COTIZACION':
+      return {
+        ...state,
+        cotizaciones: state.cotizaciones.map((c) =>
+          c.id === action.payload.id ? { ...c, estado: action.payload.nuevoEstado, updatedAt: now } : c,
         ),
       };
 
-    case 'CONVERTIR_PRESUPUESTO_A_ORDEN': {
-      const { presupuestoId, tipoOrden } = action.payload;
-      const presupuesto = state.presupuestos.find((p) => p.id === presupuestoId);
-      if (!presupuesto) return state;
+    case 'CONVERTIR_COTIZACION_A_OC': {
+      const { cotizacionId } = action.payload;
+      const cotizacion = state.cotizaciones.find((c) => c.id === cotizacionId);
+      if (!cotizacion) return state;
 
       const ordenId = generarId();
-      const numeroOrden = state.nextNumeroOrden[tipoOrden];
+      const numeroOC = state.nextNumeroOrdenCompra;
 
-      const ordenItems: OrdenItem[] = presupuesto.items.map((item) => ({
+      const ocItems: ItemCompra[] = cotizacion.items.map((item) => ({
         id: generarId(),
         productoId: item.productoId,
         descripcion: item.descripcion,
@@ -152,21 +142,18 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
         precioUnitario: item.precioUnitario,
         descuento: item.descuento,
         subtotal: item.subtotal,
-        cantidadEntregada: 0,
       }));
 
-      const nuevaOrden: Orden = {
+      const nuevaOC: OrdenCompra = {
         id: ordenId,
-        numero: numeroOrden,
-        tipo: tipoOrden,
-        clienteId: presupuesto.clienteId,
-        presupuestoId,
+        numero: numeroOC,
+        proveedorId: cotizacion.proveedorId,
+        cotizacionId,
         fecha: new Date().toISOString().split('T')[0],
         estado: 'pendiente',
-        items: ordenItems,
-        subtotal: presupuesto.subtotal,
-        descuentoGeneral: presupuesto.descuentoGeneral,
-        total: presupuesto.total,
+        items: ocItems,
+        subtotal: cotizacion.subtotal,
+        total: cotizacion.total,
         comprobanteIds: [],
         createdAt: now,
         updatedAt: now,
@@ -174,84 +161,53 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
 
       return {
         ...state,
-        presupuestos: state.presupuestos.map((p) =>
-          p.id === presupuestoId ? { ...p, estado: 'aprobado' as const, ordenId, updatedAt: now } : p,
+        cotizaciones: state.cotizaciones.map((c) =>
+          c.id === cotizacionId ? { ...c, estado: 'aprobado' as const, ordenCompraId: ordenId, updatedAt: now } : c,
         ),
-        ordenes: [...state.ordenes, nuevaOrden],
-        nextNumeroOrden: { ...state.nextNumeroOrden, [tipoOrden]: numeroOrden + 1 },
+        ordenesCompra: [...state.ordenesCompra, nuevaOC],
+        nextNumeroOrdenCompra: numeroOC + 1,
       };
     }
 
-    case 'ADD_ORDEN': {
-      const tipo = action.payload.tipo;
-      const numero = state.nextNumeroOrden[tipo];
-      const orden: Orden = { ...action.payload, numero } as Orden;
-      return { ...state, ordenes: [...state.ordenes, orden], nextNumeroOrden: { ...state.nextNumeroOrden, [tipo]: numero + 1 } };
+    case 'ADD_ORDEN_COMPRA': {
+      const numero = state.nextNumeroOrdenCompra;
+      const orden: OrdenCompra = { ...action.payload, numero } as OrdenCompra;
+      return { ...state, ordenesCompra: [...state.ordenesCompra, orden], nextNumeroOrdenCompra: numero + 1 };
     }
 
-    case 'UPDATE_ORDEN':
-      return { ...state, ordenes: state.ordenes.map((o) => (o.id === action.payload.id ? action.payload : o)) };
-
-    case 'CAMBIAR_ESTADO_ORDEN':
+    case 'UPDATE_ORDEN_COMPRA':
       return {
         ...state,
-        ordenes: state.ordenes.map((o) =>
-          o.id === action.payload.id
-            ? {
-                ...o,
-                estado: action.payload.nuevoEstado,
-                fechaCompletada: action.payload.nuevoEstado === 'entregado' ? now : o.fechaCompletada,
-                updatedAt: now,
-              }
-            : o,
+        ordenesCompra: state.ordenesCompra.map((o) => (o.id === action.payload.id ? action.payload : o)),
+      };
+
+    case 'CAMBIAR_ESTADO_OC':
+      return {
+        ...state,
+        ordenesCompra: state.ordenesCompra.map((o) =>
+          o.id === action.payload.id ? { ...o, estado: action.payload.nuevoEstado, updatedAt: now } : o,
         ),
       };
 
-    case 'REGISTRAR_ENTREGA_PARCIAL': {
-      const { ordenId, items: entregas } = action.payload;
-      const entregaMap = new Map(entregas.map((e) => [e.id, e.cantidadEntregada]));
-
-      return {
-        ...state,
-        ordenes: state.ordenes.map((o) => {
-          if (o.id !== ordenId) return o;
-          const updatedItems = o.items.map((item) => {
-            const nuevaCantidad = entregaMap.get(item.id);
-            return nuevaCantidad !== undefined ? { ...item, cantidadEntregada: nuevaCantidad } : item;
-          });
-          const todosEntregados = updatedItems.every((i) => i.cantidadEntregada >= i.cantidad);
-          const algunoEntregado = updatedItems.some((i) => i.cantidadEntregada > 0);
-          let nuevoEstado: EstadoOrden = o.estado;
-          if (todosEntregados) nuevoEstado = 'entregado';
-          else if (algunoEntregado) nuevoEstado = 'entregado_parcial';
-          return {
-            ...o,
-            items: updatedItems,
-            estado: nuevoEstado,
-            fechaCompletada: todosEntregados ? now : o.fechaCompletada,
-            updatedAt: now,
-          };
-        }),
-      };
-    }
-
-    case 'ADD_COMPROBANTE': {
+    case 'ADD_COMPROBANTE_COMPRA': {
       const tipo = action.payload.tipo;
       const numero = state.nextNumeroComprobante[tipo];
-      const comprobante: Comprobante = { ...action.payload, numero } as Comprobante;
+      const comprobante: ComprobanteCompra = { ...action.payload, numero } as ComprobanteCompra;
 
-      let clientesDelta: { clienteId: string; delta: number } | null = null;
+      let proveedoresDelta: { proveedorId: string; delta: number } | null = null;
       if (tipo === 'factura' && comprobante.medioPago === 'cuenta_corriente') {
-        clientesDelta = { clienteId: comprobante.clienteId, delta: comprobante.total };
+        proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: comprobante.total };
       }
       if (tipo === 'nota_credito') {
-        clientesDelta = { clienteId: comprobante.clienteId, delta: -comprobante.total };
+        proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: -comprobante.total };
       }
 
-      let ordenes = state.ordenes;
-      if (comprobante.ordenId) {
-        ordenes = ordenes.map((o) =>
-          o.id === comprobante.ordenId ? { ...o, comprobanteIds: [...o.comprobanteIds, comprobante.id], updatedAt: now } : o,
+      let ordenesCompra = state.ordenesCompra;
+      if (comprobante.ordenCompraId) {
+        ordenesCompra = ordenesCompra.map((o) =>
+          o.id === comprobante.ordenCompraId
+            ? { ...o, comprobanteIds: [...o.comprobanteIds, comprobante.id], updatedAt: now }
+            : o,
         );
       }
 
@@ -259,87 +215,87 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
         ...state,
         comprobantes: [...state.comprobantes, comprobante],
         nextNumeroComprobante: { ...state.nextNumeroComprobante, [tipo]: numero + 1 },
-        ordenes,
-        clientes: clientesDelta
-          ? state.clientes.map((c) =>
-              c.id === clientesDelta!.clienteId
-                ? { ...c, saldoCuentaCorriente: c.saldoCuentaCorriente + clientesDelta!.delta, updatedAt: now }
-                : c,
+        ordenesCompra,
+        proveedores: proveedoresDelta
+          ? state.proveedores.map((p) =>
+              p.id === proveedoresDelta!.proveedorId
+                ? { ...p, saldoCuentaCorriente: p.saldoCuentaCorriente + proveedoresDelta!.delta, updatedAt: now }
+                : p,
             )
-          : state.clientes,
+          : state.proveedores,
       };
     }
 
-    case 'ANULAR_COMPROBANTE': {
+    case 'ANULAR_COMPROBANTE_COMPRA': {
       const comprobante = state.comprobantes.find((c) => c.id === action.payload.id);
       if (!comprobante || comprobante.estado === 'anulado') return state;
 
-      let clientesDelta: { clienteId: string; delta: number } | null = null;
+      let proveedoresDelta: { proveedorId: string; delta: number } | null = null;
       if (comprobante.medioPago === 'cuenta_corriente') {
         if (comprobante.tipo === 'factura') {
-          clientesDelta = { clienteId: comprobante.clienteId, delta: -(comprobante.total - comprobante.montoCobrado) };
+          proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: -(comprobante.total - comprobante.montoPagado) };
         } else if (comprobante.tipo === 'nota_credito') {
-          clientesDelta = { clienteId: comprobante.clienteId, delta: comprobante.total };
+          proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: comprobante.total };
         }
       }
 
       return {
         ...state,
         comprobantes: state.comprobantes.map((c) =>
-          c.id === action.payload.id ? { ...c, estado: 'anulado' as EstadoComprobante, updatedAt: now } : c,
+          c.id === action.payload.id ? { ...c, estado: 'anulado' as EstadoComprobanteCompra, updatedAt: now } : c,
         ),
-        clientes: clientesDelta
-          ? state.clientes.map((c) =>
-              c.id === clientesDelta!.clienteId
-                ? { ...c, saldoCuentaCorriente: c.saldoCuentaCorriente + clientesDelta!.delta, updatedAt: now }
-                : c,
+        proveedores: proveedoresDelta
+          ? state.proveedores.map((p) =>
+              p.id === proveedoresDelta!.proveedorId
+                ? { ...p, saldoCuentaCorriente: p.saldoCuentaCorriente + proveedoresDelta!.delta, updatedAt: now }
+                : p,
             )
-          : state.clientes,
+          : state.proveedores,
       };
     }
 
-    case 'ACTUALIZAR_COBRO_COMPROBANTE': {
-      const { comprobanteId, montoCobrado } = action.payload;
+    case 'ACTUALIZAR_PAGO_COMPROBANTE': {
+      const { comprobanteId, montoPagado } = action.payload;
       return {
         ...state,
         comprobantes: state.comprobantes.map((c) => {
           if (c.id !== comprobanteId) return c;
-          const saldoPendiente = c.total - montoCobrado;
-          let estado: EstadoComprobante = c.estado;
+          const saldoPendiente = c.total - montoPagado;
+          let estado: EstadoComprobanteCompra = c.estado;
           if (c.estado !== 'anulado') {
-            if (saldoPendiente <= 0) estado = 'cobrado';
-            else if (montoCobrado > 0) estado = 'cobrado_parcial';
-            else estado = 'emitido';
+            if (saldoPendiente <= 0) estado = 'pagado';
+            else if (montoPagado > 0) estado = 'pagado_parcial';
+            else estado = 'pendiente';
           }
-          return { ...c, montoCobrado, saldoPendiente: Math.max(0, saldoPendiente), estado, updatedAt: now };
+          return { ...c, montoPagado, saldoPendiente: Math.max(0, saldoPendiente), estado, updatedAt: now };
         }),
       };
     }
 
-    case 'ADD_COBRO': {
-      const numero = state.nextNumeroCobro;
-      const cobro: Cobro = { ...action.payload, numero } as Cobro;
+    case 'ADD_PAGO': {
+      const numero = state.nextNumeroPago;
+      const pago: PagoCompra = { ...action.payload, numero } as PagoCompra;
 
       let comprobantes = [...state.comprobantes];
-      for (const imp of cobro.imputaciones) {
+      for (const imp of pago.imputaciones) {
         comprobantes = comprobantes.map((c) => {
           if (c.id !== imp.comprobanteId) return c;
-          const nuevoMontoCobrado = c.montoCobrado + imp.montoImputado;
-          const nuevoSaldoPendiente = c.total - nuevoMontoCobrado;
-          let estado: EstadoComprobante = c.estado;
+          const nuevoMontoPagado = c.montoPagado + imp.montoImputado;
+          const nuevoSaldoPendiente = c.total - nuevoMontoPagado;
+          let estado: EstadoComprobanteCompra = c.estado;
           if (c.estado !== 'anulado') {
-            if (nuevoSaldoPendiente <= 0) estado = 'cobrado';
-            else if (nuevoMontoCobrado > 0) estado = 'cobrado_parcial';
+            if (nuevoSaldoPendiente <= 0) estado = 'pagado';
+            else if (nuevoMontoPagado > 0) estado = 'pagado_parcial';
           }
-          return { ...c, montoCobrado: nuevoMontoCobrado, saldoPendiente: Math.max(0, nuevoSaldoPendiente), estado, updatedAt: now };
+          return { ...c, montoPagado: nuevoMontoPagado, saldoPendiente: Math.max(0, nuevoSaldoPendiente), estado, updatedAt: now };
         });
       }
 
-      const clientes = state.clientes.map((c) =>
-        c.id === cobro.clienteId ? { ...c, saldoCuentaCorriente: c.saldoCuentaCorriente - cobro.monto, updatedAt: now } : c,
+      const proveedores = state.proveedores.map((p) =>
+        p.id === pago.proveedorId ? { ...p, saldoCuentaCorriente: p.saldoCuentaCorriente - pago.monto, updatedAt: now } : p,
       );
 
-      return { ...state, cobros: [...state.cobros, cobro], nextNumeroCobro: numero + 1, comprobantes, clientes };
+      return { ...state, pagos: [...state.pagos, pago], nextNumeroPago: numero + 1, comprobantes, proveedores };
     }
 
     case 'UPDATE_CONFIG':
@@ -352,109 +308,40 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
 
 // ─── Mapeo dominio -> filas de Supabase ───────────────────────
 
-function categoriaToRow(c: CategoriaCliente, clienteId: string) {
-  return {
-    id: c.id,
-    cliente_id: clienteId,
-    nombre: c.nombre,
-    descuento_default: c.descuentoDefault,
-    lista_precio_id: c.listaPrecioId ?? null,
-    color: c.color ?? null,
-  };
-}
-
-function clienteVentaToRow(c: Cliente, clienteId: string) {
-  return {
-    id: c.id,
-    cliente_id: clienteId,
-    nombre: c.nombre,
-    tipo_documento: c.tipoDocumento,
-    documento: c.documento,
-    condicion_iva: c.condicionIva,
-    email: c.email ?? null,
-    telefono: c.telefono ?? null,
-    direccion: c.direccion ?? null,
-    localidad: c.localidad ?? null,
-    provincia: c.provincia ?? null,
-    categoria_id: c.categoriaId ?? null,
-    limite_credito: c.limiteCredito,
-    saldo_cuenta_corriente: c.saldoCuentaCorriente,
-    notas: c.notas ?? null,
-    activo: c.activo,
-    metadatos: c.metadatos ?? null,
-  };
-}
-
-function presupuestoItemToRow(item: PresupuestoItem, presupuestoId: string) {
-  return {
-    id: item.id,
-    presupuesto_id: presupuestoId,
-    producto_id: item.productoId ?? null,
-    descripcion: item.descripcion,
-    cantidad: item.cantidad,
-    precio_unitario: item.precioUnitario,
-    descuento: item.descuento,
-    subtotal: item.subtotal,
-  };
-}
-
-function presupuestoToRow(p: Presupuesto, clienteId: string) {
+function proveedorToRow(p: Proveedor, clienteId: string) {
   return {
     id: p.id,
     cliente_id: clienteId,
-    numero: p.numero,
-    cliente_venta_id: p.clienteId,
-    fecha: p.fecha,
-    validez_dias: p.validezDias,
-    fecha_vencimiento: p.fechaVencimiento,
-    estado: p.estado,
-    subtotal: p.subtotal,
-    descuento_general: p.descuentoGeneral,
-    total: p.total,
+    nombre: p.nombre,
+    cuit: p.cuit || null,
+    condicion_iva: p.condicionIva,
+    email: p.email ?? null,
+    telefono: p.telefono ?? null,
+    direccion: p.direccion ?? null,
+    localidad: p.localidad ?? null,
+    provincia: p.provincia ?? null,
+    contacto: p.contacto ?? null,
+    rubro: p.rubro ?? null,
     notas: p.notas ?? null,
-    condiciones: p.condiciones ?? null,
-    orden_id: p.ordenId ?? null,
+    saldo_cuenta_corriente: p.saldoCuentaCorriente,
+    activo: p.activo,
   };
 }
 
-function ordenItemToRow(item: OrdenItem, ordenId: string) {
+function itemToRow(item: ItemCompra, fkColumn: string, fkValue: string) {
   return {
     id: item.id,
-    orden_id: ordenId,
+    [fkColumn]: fkValue,
     producto_id: item.productoId ?? null,
     descripcion: item.descripcion,
     cantidad: item.cantidad,
     precio_unitario: item.precioUnitario,
     descuento: item.descuento,
     subtotal: item.subtotal,
-    cantidad_entregada: item.cantidadEntregada,
   };
 }
 
-function ordenToRow(o: Orden, clienteId: string) {
-  return {
-    id: o.id,
-    cliente_id: clienteId,
-    numero: o.numero,
-    tipo: o.tipo,
-    cliente_venta_id: o.clienteId,
-    presupuesto_id: o.presupuestoId ?? null,
-    fecha: o.fecha,
-    fecha_entrega: o.fechaEntrega ?? null,
-    fecha_completada: o.fechaCompletada ?? null,
-    estado: o.estado,
-    subtotal: o.subtotal,
-    descuento_general: o.descuentoGeneral,
-    total: o.total,
-    notas: o.notas ?? null,
-    origen_modulo: o.origenModulo ?? null,
-    origen_id: o.origenId ?? null,
-    origen_canal: o.origenCanal ?? null,
-    origen_externo_id: o.origenExternoId ?? null,
-  };
-}
-
-function comprobanteItemToRow(item: ComprobanteItem, comprobanteId: string) {
+function itemComprobanteToRow(item: ItemComprobanteCompra, comprobanteId: string) {
   return {
     id: item.id,
     comprobante_id: comprobanteId,
@@ -469,215 +356,223 @@ function comprobanteItemToRow(item: ComprobanteItem, comprobanteId: string) {
   };
 }
 
-function comprobanteToRow(c: Comprobante, clienteId: string) {
+function cotizacionToRow(c: PedidoCotizacion, clienteId: string) {
+  return {
+    id: c.id,
+    cliente_id: clienteId,
+    numero: c.numero,
+    proveedor_id: c.proveedorId,
+    fecha: c.fecha,
+    validez_dias: c.validezDias,
+    fecha_vencimiento: c.fechaVencimiento,
+    estado: c.estado,
+    subtotal: c.subtotal,
+    total: c.total,
+    notas: c.notas ?? null,
+    orden_compra_id: c.ordenCompraId ?? null,
+  };
+}
+
+function ordenCompraToRow(o: OrdenCompra, clienteId: string) {
+  return {
+    id: o.id,
+    cliente_id: clienteId,
+    numero: o.numero,
+    proveedor_id: o.proveedorId,
+    cotizacion_id: o.cotizacionId ?? null,
+    fecha: o.fecha,
+    fecha_entrega: o.fechaEntrega ?? null,
+    estado: o.estado,
+    subtotal: o.subtotal,
+    total: o.total,
+    notas: o.notas ?? null,
+  };
+}
+
+function comprobanteToRow(c: ComprobanteCompra, clienteId: string) {
   return {
     id: c.id,
     cliente_id: clienteId,
     tipo: c.tipo,
-    modo_emision: c.modoEmision,
     numero: c.numero,
-    cliente_venta_id: c.clienteId,
-    orden_id: c.ordenId ?? null,
+    proveedor_id: c.proveedorId,
+    orden_compra_id: c.ordenCompraId ?? null,
     fecha: c.fecha,
+    fecha_vencimiento: c.fechaVencimiento ?? null,
     subtotal: c.subtotal,
-    descuento_general: c.descuentoGeneral,
     monto_iva: c.montoIva,
     total: c.total,
     estado: c.estado,
     medio_pago: c.medioPago,
-    monto_cobrado: c.montoCobrado,
+    monto_pagado: c.montoPagado,
     saldo_pendiente: c.saldoPendiente,
-    afip: c.afip ?? null,
     notas: c.notas ?? null,
-    origen_modulo: c.origenModulo ?? null,
-    origen_id: c.origenId ?? null,
   };
 }
 
-function cobroToRow(c: Cobro, clienteId: string) {
+function pagoToRow(p: PagoCompra, clienteId: string) {
   return {
-    id: c.id,
+    id: p.id,
     cliente_id: clienteId,
-    numero: c.numero,
-    cliente_venta_id: c.clienteId,
-    fecha: c.fecha,
-    monto: c.monto,
-    medio_pago: c.medioPago,
-    notas: c.notas ?? null,
+    numero: p.numero,
+    proveedor_id: p.proveedorId,
+    fecha: p.fecha,
+    monto: p.monto,
+    medio_pago: p.medioPago,
+    notas: p.notas ?? null,
   };
 }
 
 function logErr(label: string) {
-  return ({ error }: { error: unknown }) => error && console.error(`Ventas · error en ${label}:`, error);
+  return ({ error }: { error: unknown }) => error && console.error(`Compras · error en ${label}:`, error);
 }
 
-function esClienteReal(clienteVentaId: string) {
-  return clienteVentaId !== CONSUMIDOR_FINAL_ID;
-}
+// ─── Sincronización con Supabase por acción ───────────────────
+// Recibe el estado YA actualizado (nextState) para poder leer los
+// registros resueltos (con `numero` asignado por el reducer).
 
-// ─── Sincronización con Supabase por acción ────────────────────
-
-function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId: string) {
+function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteId: string) {
   switch (action.type) {
-    case 'ADD_CATEGORIA':
-      supabase.from('categorias_cliente_venta').insert(categoriaToRow(action.payload, clienteId)).then(logErr('alta de categoría'));
+    case 'ADD_PROVEEDOR':
+      supabase.from('proveedores').insert(proveedorToRow(action.payload, clienteId)).then(logErr('alta de proveedor'));
       return;
 
-    case 'UPDATE_CATEGORIA':
-      supabase.from('categorias_cliente_venta').update(categoriaToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de categoría'));
+    case 'UPDATE_PROVEEDOR':
+      supabase.from('proveedores').update(proveedorToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de proveedor'));
       return;
 
-    case 'DELETE_CATEGORIA':
-      supabase.from('categorias_cliente_venta').delete().eq('id', action.payload.id).then(logErr('borrado de categoría'));
-      return;
-
-    case 'ADD_CLIENTE':
-      if (!esClienteReal(action.payload.id)) return;
-      supabase.from('clientes_venta').insert(clienteVentaToRow(action.payload, clienteId)).then(logErr('alta de cliente'));
-      return;
-
-    case 'UPDATE_CLIENTE':
-      if (!esClienteReal(action.payload.id)) return;
-      supabase.from('clientes_venta').update(clienteVentaToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de cliente'));
-      return;
-
-    case 'TOGGLE_CLIENTE_ACTIVO': {
-      if (!esClienteReal(action.payload.id)) return;
-      const c = nextState.clientes.find((x) => x.id === action.payload.id);
-      if (c) supabase.from('clientes_venta').update({ activo: c.activo }).eq('id', c.id).then(logErr('activar/desactivar cliente'));
+    case 'TOGGLE_PROVEEDOR_ACTIVO': {
+      const p = nextState.proveedores.find((x) => x.id === action.payload.id);
+      if (p) supabase.from('proveedores').update({ activo: p.activo }).eq('id', p.id).then(logErr('activar/desactivar proveedor'));
       return;
     }
 
-    case 'AJUSTAR_SALDO_CLIENTE': {
-      if (!esClienteReal(action.payload.clienteId)) return;
-      const c = nextState.clientes.find((x) => x.id === action.payload.clienteId);
-      if (c) supabase.from('clientes_venta').update({ saldo_cuenta_corriente: c.saldoCuentaCorriente }).eq('id', c.id).then(logErr('ajuste de saldo cliente'));
+    case 'AJUSTAR_SALDO_PROVEEDOR': {
+      const p = nextState.proveedores.find((x) => x.id === action.payload.proveedorId);
+      if (p) supabase.from('proveedores').update({ saldo_cuenta_corriente: p.saldoCuentaCorriente }).eq('id', p.id).then(logErr('ajuste de saldo proveedor'));
       return;
     }
 
-    case 'ADD_PRESUPUESTO': {
-      const p = nextState.presupuestos.find((x) => x.id === action.payload.id);
-      if (!p) return;
-      supabase.from('presupuestos').insert(presupuestoToRow(p, clienteId)).then(logErr('alta de presupuesto'));
-      if (p.items.length) supabase.from('presupuesto_items').insert(p.items.map((i) => presupuestoItemToRow(i, p.id))).then(logErr('items de presupuesto'));
-      return;
-    }
-
-    case 'UPDATE_PRESUPUESTO': {
-      const p = action.payload;
-      supabase.from('presupuestos').update(presupuestoToRow(p, clienteId)).eq('id', p.id).then(logErr('edición de presupuesto'));
-      supabase.from('presupuesto_items').delete().eq('presupuesto_id', p.id).then(() => {
-        if (p.items.length) supabase.from('presupuesto_items').insert(p.items.map((i) => presupuestoItemToRow(i, p.id))).then(logErr('items de presupuesto'));
-      });
-      return;
-    }
-
-    case 'CAMBIAR_ESTADO_PRESUPUESTO':
-      supabase.from('presupuestos').update({ estado: action.payload.nuevoEstado }).eq('id', action.payload.id).then(logErr('cambio de estado de presupuesto'));
-      return;
-
-    case 'CONVERTIR_PRESUPUESTO_A_ORDEN': {
-      const pres = nextState.presupuestos.find((x) => x.id === action.payload.presupuestoId);
-      const orden = nextState.ordenes.find((o) => o.presupuestoId === action.payload.presupuestoId);
-      if (pres) supabase.from('presupuestos').update({ estado: pres.estado, orden_id: pres.ordenId ?? null }).eq('id', pres.id).then(logErr('presupuesto aprobado'));
-      if (orden) {
-        supabase.from('ordenes_venta').insert(ordenToRow(orden, clienteId)).then(logErr('alta de orden (desde presupuesto)'));
-        if (orden.items.length) supabase.from('orden_venta_items').insert(orden.items.map((i) => ordenItemToRow(i, orden.id))).then(logErr('items de orden'));
+    case 'ADD_COTIZACION': {
+      const c = nextState.cotizaciones.find((x) => x.id === action.payload.id);
+      if (!c) return;
+      supabase.from('cotizaciones_compra').insert(cotizacionToRow(c, clienteId)).then(logErr('alta de cotización'));
+      if (c.items.length) {
+        supabase.from('cotizacion_compra_items').insert(c.items.map((i) => itemToRow(i, 'cotizacion_id', c.id))).then(logErr('items de cotización'));
       }
       return;
     }
 
-    case 'ADD_ORDEN': {
-      const o = nextState.ordenes.find((x) => x.id === action.payload.id);
-      if (!o) return;
-      supabase.from('ordenes_venta').insert(ordenToRow(o, clienteId)).then(logErr('alta de orden'));
-      if (o.items.length) supabase.from('orden_venta_items').insert(o.items.map((i) => ordenItemToRow(i, o.id))).then(logErr('items de orden'));
+    case 'UPDATE_COTIZACION': {
+      const c = action.payload;
+      supabase.from('cotizaciones_compra').update(cotizacionToRow(c, clienteId)).eq('id', c.id).then(logErr('edición de cotización'));
+      supabase.from('cotizacion_compra_items').delete().eq('cotizacion_id', c.id).then(() => {
+        if (c.items.length) supabase.from('cotizacion_compra_items').insert(c.items.map((i) => itemToRow(i, 'cotizacion_id', c.id))).then(logErr('items de cotización'));
+      });
       return;
     }
 
-    case 'UPDATE_ORDEN': {
+    case 'CAMBIAR_ESTADO_COTIZACION':
+      supabase.from('cotizaciones_compra').update({ estado: action.payload.nuevoEstado }).eq('id', action.payload.id).then(logErr('cambio de estado de cotización'));
+      return;
+
+    case 'CONVERTIR_COTIZACION_A_OC': {
+      const cot = nextState.cotizaciones.find((x) => x.id === action.payload.cotizacionId);
+      const oc = nextState.ordenesCompra.find((o) => o.cotizacionId === action.payload.cotizacionId);
+      if (cot) {
+        supabase.from('cotizaciones_compra').update({ estado: cot.estado, orden_compra_id: cot.ordenCompraId ?? null }).eq('id', cot.id).then(logErr('cotización aprobada'));
+      }
+      if (oc) {
+        supabase.from('ordenes_compra').insert(ordenCompraToRow(oc, clienteId)).then(logErr('alta de orden de compra (desde cotización)'));
+        if (oc.items.length) {
+          supabase.from('orden_compra_items').insert(oc.items.map((i) => itemToRow(i, 'orden_compra_id', oc.id))).then(logErr('items de orden de compra'));
+        }
+      }
+      return;
+    }
+
+    case 'ADD_ORDEN_COMPRA': {
+      const o = nextState.ordenesCompra.find((x) => x.id === action.payload.id);
+      if (!o) return;
+      supabase.from('ordenes_compra').insert(ordenCompraToRow(o, clienteId)).then(logErr('alta de orden de compra'));
+      if (o.items.length) {
+        supabase.from('orden_compra_items').insert(o.items.map((i) => itemToRow(i, 'orden_compra_id', o.id))).then(logErr('items de orden de compra'));
+      }
+      return;
+    }
+
+    case 'UPDATE_ORDEN_COMPRA': {
       const o = action.payload;
-      supabase.from('ordenes_venta').update(ordenToRow(o, clienteId)).eq('id', o.id).then(logErr('edición de orden'));
-      supabase.from('orden_venta_items').delete().eq('orden_id', o.id).then(() => {
-        if (o.items.length) supabase.from('orden_venta_items').insert(o.items.map((i) => ordenItemToRow(i, o.id))).then(logErr('items de orden'));
+      supabase.from('ordenes_compra').update(ordenCompraToRow(o, clienteId)).eq('id', o.id).then(logErr('edición de orden de compra'));
+      supabase.from('orden_compra_items').delete().eq('orden_compra_id', o.id).then(() => {
+        if (o.items.length) supabase.from('orden_compra_items').insert(o.items.map((i) => itemToRow(i, 'orden_compra_id', o.id))).then(logErr('items de orden de compra'));
       });
       return;
     }
 
-    case 'CAMBIAR_ESTADO_ORDEN': {
-      const o = nextState.ordenes.find((x) => x.id === action.payload.id);
-      if (o) supabase.from('ordenes_venta').update({ estado: o.estado, fecha_completada: o.fechaCompletada ?? null }).eq('id', o.id).then(logErr('cambio de estado de orden'));
+    case 'CAMBIAR_ESTADO_OC':
+      supabase.from('ordenes_compra').update({ estado: action.payload.nuevoEstado }).eq('id', action.payload.id).then(logErr('cambio de estado de OC'));
       return;
-    }
 
-    case 'REGISTRAR_ENTREGA_PARCIAL': {
-      const o = nextState.ordenes.find((x) => x.id === action.payload.ordenId);
-      if (!o) return;
-      supabase.from('ordenes_venta').update({ estado: o.estado, fecha_completada: o.fechaCompletada ?? null }).eq('id', o.id).then(logErr('entrega de orden'));
-      for (const item of o.items) {
-        supabase.from('orden_venta_items').update({ cantidad_entregada: item.cantidadEntregada }).eq('id', item.id).then(logErr('entrega de item de orden'));
-      }
-      return;
-    }
-
-    case 'ADD_COMPROBANTE': {
+    case 'ADD_COMPROBANTE_COMPRA': {
       const c = nextState.comprobantes.find((x) => x.id === action.payload.id);
       if (!c) return;
-      supabase.from('comprobantes_venta').insert(comprobanteToRow(c, clienteId)).then(logErr('alta de comprobante'));
-      if (c.items.length) supabase.from('comprobante_venta_items').insert(c.items.map((i) => comprobanteItemToRow(i, c.id))).then(logErr('items de comprobante'));
-      if (esClienteReal(c.clienteId)) {
-        const cli = nextState.clientes.find((x) => x.id === c.clienteId);
-        if (cli) supabase.from('clientes_venta').update({ saldo_cuenta_corriente: cli.saldoCuentaCorriente }).eq('id', cli.id).then(logErr('saldo cliente tras comprobante'));
+      supabase.from('comprobantes_compra').insert(comprobanteToRow(c, clienteId)).then(logErr('alta de comprobante de compra'));
+      if (c.items.length) {
+        supabase.from('comprobante_compra_items').insert(c.items.map((i) => itemComprobanteToRow(i, c.id))).then(logErr('items de comprobante de compra'));
+      }
+      if (c.ordenCompraId) {
+        const proveedor = nextState.proveedores.find((p) => p.id === c.proveedorId);
+        if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras comprobante'));
+      } else {
+        const proveedor = nextState.proveedores.find((p) => p.id === c.proveedorId);
+        if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras comprobante'));
       }
       return;
     }
 
-    case 'ANULAR_COMPROBANTE': {
+    case 'ANULAR_COMPROBANTE_COMPRA': {
       const c = nextState.comprobantes.find((x) => x.id === action.payload.id);
       if (!c) return;
-      supabase.from('comprobantes_venta').update({ estado: c.estado }).eq('id', c.id).then(logErr('anulación de comprobante'));
-      if (esClienteReal(c.clienteId)) {
-        const cli = nextState.clientes.find((x) => x.id === c.clienteId);
-        if (cli) supabase.from('clientes_venta').update({ saldo_cuenta_corriente: cli.saldoCuentaCorriente }).eq('id', cli.id).then(logErr('saldo cliente tras anulación'));
-      }
+      supabase.from('comprobantes_compra').update({ estado: c.estado }).eq('id', c.id).then(logErr('anulación de comprobante'));
+      const proveedor = nextState.proveedores.find((p) => p.id === c.proveedorId);
+      if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras anulación'));
       return;
     }
 
-    case 'ACTUALIZAR_COBRO_COMPROBANTE': {
+    case 'ACTUALIZAR_PAGO_COMPROBANTE': {
       const c = nextState.comprobantes.find((x) => x.id === action.payload.comprobanteId);
       if (!c) return;
       supabase
-        .from('comprobantes_venta')
-        .update({ monto_cobrado: c.montoCobrado, saldo_pendiente: c.saldoPendiente, estado: c.estado })
+        .from('comprobantes_compra')
+        .update({ monto_pagado: c.montoPagado, saldo_pendiente: c.saldoPendiente, estado: c.estado })
         .eq('id', c.id)
-        .then(logErr('actualización de cobro'));
+        .then(logErr('actualización de pago de comprobante'));
       return;
     }
 
-    case 'ADD_COBRO': {
-      const cobro = nextState.cobros.find((x) => x.id === action.payload.id);
-      if (!cobro) return;
-      supabase.from('cobros').insert(cobroToRow(cobro, clienteId)).then(logErr('alta de cobro'));
-      if (cobro.imputaciones.length) {
+    case 'ADD_PAGO': {
+      const pago = nextState.pagos.find((x) => x.id === action.payload.id);
+      if (!pago) return;
+      supabase.from('pagos_compra').insert(pagoToRow(pago, clienteId)).then(logErr('alta de pago'));
+      if (pago.imputaciones.length) {
         supabase
-          .from('cobro_imputaciones')
-          .insert(cobro.imputaciones.map((imp: ImputacionCobro) => ({ id: generarId(), cobro_id: cobro.id, comprobante_id: imp.comprobanteId, monto_imputado: imp.montoImputado })))
-          .then(logErr('imputaciones de cobro'));
+          .from('pago_compra_imputaciones')
+          .insert(pago.imputaciones.map((imp) => ({ id: generarId(), pago_id: pago.id, comprobante_id: imp.comprobanteId, monto_imputado: imp.montoImputado })))
+          .then(logErr('imputaciones de pago'));
       }
-      for (const imp of cobro.imputaciones) {
+      for (const imp of pago.imputaciones) {
         const c = nextState.comprobantes.find((x) => x.id === imp.comprobanteId);
         if (c) {
           supabase
-            .from('comprobantes_venta')
-            .update({ monto_cobrado: c.montoCobrado, saldo_pendiente: c.saldoPendiente, estado: c.estado })
+            .from('comprobantes_compra')
+            .update({ monto_pagado: c.montoPagado, saldo_pendiente: c.saldoPendiente, estado: c.estado })
             .eq('id', c.id)
-            .then(logErr('comprobante actualizado por cobro'));
+            .then(logErr('comprobante actualizado por pago'));
         }
       }
-      if (esClienteReal(cobro.clienteId)) {
-        const cli = nextState.clientes.find((x) => x.id === cobro.clienteId);
-        if (cli) supabase.from('clientes_venta').update({ saldo_cuenta_corriente: cli.saldoCuentaCorriente }).eq('id', cli.id).then(logErr('saldo cliente tras cobro'));
-      }
+      const proveedor = nextState.proveedores.find((p) => p.id === pago.proveedorId);
+      if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras pago'));
       return;
     }
 
@@ -688,19 +583,7 @@ function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId:
 
 // ─── Fetch inicial desde Supabase ──────────────────────────────
 
-function presupuestoItemFromRow(r: any): PresupuestoItem {
-  return {
-    id: r.id,
-    productoId: r.producto_id,
-    descripcion: r.descripcion,
-    cantidad: Number(r.cantidad),
-    precioUnitario: Number(r.precio_unitario),
-    descuento: Number(r.descuento),
-    subtotal: Number(r.subtotal),
-  };
-}
-
-function ordenItemFromRow(r: any): OrdenItem {
+function itemFromRow(r: any): ItemCompra {
   return {
     id: r.id,
     productoId: r.producto_id ?? undefined,
@@ -709,253 +592,197 @@ function ordenItemFromRow(r: any): OrdenItem {
     precioUnitario: Number(r.precio_unitario),
     descuento: Number(r.descuento),
     subtotal: Number(r.subtotal),
-    cantidadEntregada: Number(r.cantidad_entregada),
   };
 }
 
-function comprobanteItemFromRow(r: any): ComprobanteItem {
-  return {
-    id: r.id,
-    productoId: r.producto_id ?? undefined,
-    descripcion: r.descripcion,
-    cantidad: Number(r.cantidad),
-    precioUnitario: Number(r.precio_unitario),
-    descuento: Number(r.descuento),
-    alicuotaIva: Number(r.alicuota_iva),
-    subtotal: Number(r.subtotal),
-    montoIva: Number(r.monto_iva),
-  };
+function itemComprobanteFromRow(r: any): ItemComprobanteCompra {
+  return { ...itemFromRow(r), alicuotaIva: Number(r.alicuota_iva), montoIva: Number(r.monto_iva) };
 }
 
-async function fetchVentasState(): Promise<VentasState> {
-  const [
-    categoriasRes,
-    clientesRes,
-    presupuestosRes,
-    presItemsRes,
-    ordenesRes,
-    ordenItemsRes,
-    comprobantesRes,
-    compItemsRes,
-    cobrosRes,
-    impRes,
-  ] = await Promise.all([
-    supabase.from('categorias_cliente_venta').select('*').order('created_at'),
-    supabase.from('clientes_venta').select('*').order('created_at'),
-    supabase.from('presupuestos').select('*').order('numero'),
-    supabase.from('presupuesto_items').select('*'),
-    supabase.from('ordenes_venta').select('*').order('numero'),
-    supabase.from('orden_venta_items').select('*'),
-    supabase.from('comprobantes_venta').select('*').order('numero'),
-    supabase.from('comprobante_venta_items').select('*'),
-    supabase.from('cobros').select('*').order('numero'),
-    supabase.from('cobro_imputaciones').select('*'),
-  ]);
+async function fetchComprasState(): Promise<ComprasState> {
+  const [proveedoresRes, cotizacionesRes, cotItemsRes, ordenesRes, ocItemsRes, comprobantesRes, compItemsRes, pagosRes, impRes] =
+    await Promise.all([
+      supabase.from('proveedores').select('*').order('created_at'),
+      supabase.from('cotizaciones_compra').select('*').order('numero'),
+      supabase.from('cotizacion_compra_items').select('*'),
+      supabase.from('ordenes_compra').select('*').order('numero'),
+      supabase.from('orden_compra_items').select('*'),
+      supabase.from('comprobantes_compra').select('*').order('numero'),
+      supabase.from('comprobante_compra_items').select('*'),
+      supabase.from('pagos_compra').select('*').order('numero'),
+      supabase.from('pago_compra_imputaciones').select('*'),
+    ]);
 
-  const categorias: CategoriaCliente[] = (categoriasRes.data ?? []).map((r: any) => ({
+  const proveedores: Proveedor[] = (proveedoresRes.data ?? []).map((r: any) => ({
     id: r.id,
     nombre: r.nombre,
-    descuentoDefault: Number(r.descuento_default),
-    listaPrecioId: r.lista_precio_id ?? undefined,
-    color: r.color ?? undefined,
-    createdAt: r.created_at,
-  }));
-
-  const clientesReales: Cliente[] = (clientesRes.data ?? []).map((r: any) => ({
-    id: r.id,
-    nombre: r.nombre,
-    tipoDocumento: r.tipo_documento,
-    documento: r.documento,
+    cuit: r.cuit ?? '',
     condicionIva: r.condicion_iva,
     email: r.email ?? undefined,
     telefono: r.telefono ?? undefined,
     direccion: r.direccion ?? undefined,
     localidad: r.localidad ?? undefined,
     provincia: r.provincia ?? undefined,
-    categoriaId: r.categoria_id ?? undefined,
-    limiteCredito: Number(r.limite_credito),
-    saldoCuentaCorriente: Number(r.saldo_cuenta_corriente),
+    contacto: r.contacto ?? undefined,
+    rubro: r.rubro ?? undefined,
     notas: r.notas ?? undefined,
+    saldoCuentaCorriente: Number(r.saldo_cuenta_corriente),
     activo: r.activo,
-    metadatos: r.metadatos ?? undefined,
     createdAt: r.created_at,
-    updatedAt: r.updated_at,
+    updatedAt: r.created_at,
   }));
-  // "Consumidor Final" es virtual: nunca se persiste, siempre se agrega en memoria.
-  const clientes: Cliente[] = [clienteConsumidorFinal, ...clientesReales];
 
-  const presItemsByPres = new Map<string, PresupuestoItem[]>();
-  for (const r of presItemsRes.data ?? []) {
-    const arr = presItemsByPres.get(r.presupuesto_id) ?? [];
-    arr.push(presupuestoItemFromRow(r));
-    presItemsByPres.set(r.presupuesto_id, arr);
+  const cotItemsByCot = new Map<string, ItemCompra[]>();
+  for (const r of cotItemsRes.data ?? []) {
+    const arr = cotItemsByCot.get(r.cotizacion_id) ?? [];
+    arr.push(itemFromRow(r));
+    cotItemsByCot.set(r.cotizacion_id, arr);
   }
 
-  const presupuestos: Presupuesto[] = (presupuestosRes.data ?? []).map((r: any) => ({
+  const cotizaciones: PedidoCotizacion[] = (cotizacionesRes.data ?? []).map((r: any) => ({
     id: r.id,
     numero: r.numero,
-    clienteId: r.cliente_venta_id,
+    proveedorId: r.proveedor_id,
     fecha: r.fecha,
     validezDias: r.validez_dias,
     fechaVencimiento: r.fecha_vencimiento,
     estado: r.estado,
-    items: presItemsByPres.get(r.id) ?? [],
+    items: cotItemsByCot.get(r.id) ?? [],
     subtotal: Number(r.subtotal),
-    descuentoGeneral: Number(r.descuento_general),
     total: Number(r.total),
     notas: r.notas ?? undefined,
-    condiciones: r.condiciones ?? undefined,
-    ordenId: r.orden_id ?? undefined,
+    ordenCompraId: r.orden_compra_id ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
 
-  const ordenItemsByOrden = new Map<string, OrdenItem[]>();
-  for (const r of ordenItemsRes.data ?? []) {
-    const arr = ordenItemsByOrden.get(r.orden_id) ?? [];
-    arr.push(ordenItemFromRow(r));
-    ordenItemsByOrden.set(r.orden_id, arr);
+  const ocItemsByOc = new Map<string, ItemCompra[]>();
+  for (const r of ocItemsRes.data ?? []) {
+    const arr = ocItemsByOc.get(r.orden_compra_id) ?? [];
+    arr.push(itemFromRow(r));
+    ocItemsByOc.set(r.orden_compra_id, arr);
   }
 
   const comprobantesRaw = comprobantesRes.data ?? [];
-  const comprobanteIdsPorOrden = new Map<string, string[]>();
+  const comprobanteIdsPorOc = new Map<string, string[]>();
   for (const r of comprobantesRaw) {
-    if (!r.orden_id) continue;
-    const arr = comprobanteIdsPorOrden.get(r.orden_id) ?? [];
+    if (!r.orden_compra_id) continue;
+    const arr = comprobanteIdsPorOc.get(r.orden_compra_id) ?? [];
     arr.push(r.id);
-    comprobanteIdsPorOrden.set(r.orden_id, arr);
+    comprobanteIdsPorOc.set(r.orden_compra_id, arr);
   }
 
-  const ordenes: Orden[] = (ordenesRes.data ?? []).map((r: any) => ({
+  const ordenesCompra: OrdenCompra[] = (ordenesRes.data ?? []).map((r: any) => ({
     id: r.id,
     numero: r.numero,
-    tipo: r.tipo,
-    clienteId: r.cliente_venta_id,
-    presupuestoId: r.presupuesto_id ?? undefined,
+    proveedorId: r.proveedor_id,
+    cotizacionId: r.cotizacion_id ?? undefined,
     fecha: r.fecha,
     fechaEntrega: r.fecha_entrega ?? undefined,
-    fechaCompletada: r.fecha_completada ?? undefined,
     estado: r.estado,
-    items: ordenItemsByOrden.get(r.id) ?? [],
+    items: ocItemsByOc.get(r.id) ?? [],
     subtotal: Number(r.subtotal),
-    descuentoGeneral: Number(r.descuento_general),
     total: Number(r.total),
     notas: r.notas ?? undefined,
-    origenModulo: r.origen_modulo ?? undefined,
-    origenId: r.origen_id ?? undefined,
-    origenCanal: r.origen_canal ?? undefined,
-    origenExternoId: r.origen_externo_id ?? undefined,
-    comprobanteIds: comprobanteIdsPorOrden.get(r.id) ?? [],
+    comprobanteIds: comprobanteIdsPorOc.get(r.id) ?? [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
 
-  const compItemsByComp = new Map<string, ComprobanteItem[]>();
+  const compItemsByComp = new Map<string, ItemComprobanteCompra[]>();
   for (const r of compItemsRes.data ?? []) {
     const arr = compItemsByComp.get(r.comprobante_id) ?? [];
-    arr.push(comprobanteItemFromRow(r));
+    arr.push(itemComprobanteFromRow(r));
     compItemsByComp.set(r.comprobante_id, arr);
   }
 
-  const comprobantes: Comprobante[] = comprobantesRaw.map((r: any) => ({
+  const comprobantes: ComprobanteCompra[] = comprobantesRaw.map((r: any) => ({
     id: r.id,
     tipo: r.tipo,
-    modoEmision: r.modo_emision,
     numero: r.numero,
-    clienteId: r.cliente_venta_id,
-    ordenId: r.orden_id ?? undefined,
+    proveedorId: r.proveedor_id,
+    ordenCompraId: r.orden_compra_id ?? undefined,
     fecha: r.fecha,
+    fechaVencimiento: r.fecha_vencimiento ?? undefined,
     items: compItemsByComp.get(r.id) ?? [],
     subtotal: Number(r.subtotal),
-    descuentoGeneral: Number(r.descuento_general),
     montoIva: Number(r.monto_iva),
     total: Number(r.total),
     estado: r.estado,
     medioPago: r.medio_pago,
-    montoCobrado: Number(r.monto_cobrado),
+    montoPagado: Number(r.monto_pagado),
     saldoPendiente: Number(r.saldo_pendiente),
-    afip: r.afip ?? undefined,
     notas: r.notas ?? undefined,
-    origenModulo: r.origen_modulo ?? undefined,
-    origenId: r.origen_id ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
 
-  const impByCobro = new Map<string, ImputacionCobro[]>();
+  const impByPago = new Map<string, { comprobanteId: string; montoImputado: number }[]>();
   for (const r of impRes.data ?? []) {
-    const arr = impByCobro.get(r.cobro_id) ?? [];
+    const arr = impByPago.get(r.pago_id) ?? [];
     arr.push({ comprobanteId: r.comprobante_id, montoImputado: Number(r.monto_imputado) });
-    impByCobro.set(r.cobro_id, arr);
+    impByPago.set(r.pago_id, arr);
   }
 
-  const cobros: Cobro[] = (cobrosRes.data ?? []).map((r: any) => ({
+  const pagos: PagoCompra[] = (pagosRes.data ?? []).map((r: any) => ({
     id: r.id,
     numero: r.numero,
-    clienteId: r.cliente_venta_id,
+    proveedorId: r.proveedor_id,
     fecha: r.fecha,
     monto: Number(r.monto),
     medioPago: r.medio_pago,
-    imputaciones: impByCobro.get(r.id) ?? [],
+    imputaciones: impByPago.get(r.id) ?? [],
     notas: r.notas ?? undefined,
     createdAt: r.created_at,
   }));
 
   const maxNumero = (arr: { numero: number }[]) => arr.reduce((max, x) => Math.max(max, x.numero), 0);
-  const nextNumeroOrden: Record<TipoOrden, number> = {
-    pedido: maxNumero(ordenes.filter((o) => o.tipo === 'pedido')) + 1,
-    produccion: maxNumero(ordenes.filter((o) => o.tipo === 'produccion')) + 1,
-    servicio: maxNumero(ordenes.filter((o) => o.tipo === 'servicio')) + 1,
-  };
-  const nextNumeroComprobante: Record<TipoComprobante, number> = {
+  const nextNumeroComprobante: Record<TipoComprobanteCompra, number> = {
     factura: maxNumero(comprobantes.filter((c) => c.tipo === 'factura')) + 1,
-    recibo: maxNumero(comprobantes.filter((c) => c.tipo === 'recibo')) + 1,
     nota_credito: maxNumero(comprobantes.filter((c) => c.tipo === 'nota_credito')) + 1,
     nota_debito: maxNumero(comprobantes.filter((c) => c.tipo === 'nota_debito')) + 1,
   };
 
   return {
-    categorias,
-    clientes,
-    presupuestos,
-    ordenes,
+    proveedores,
+    cotizaciones,
+    ordenesCompra,
     comprobantes,
-    cobros,
-    nextNumeroPresupuesto: maxNumero(presupuestos) + 1,
-    nextNumeroOrden,
+    pagos,
+    nextNumeroCotizacion: maxNumero(cotizaciones) + 1,
+    nextNumeroOrdenCompra: maxNumero(ordenesCompra) + 1,
     nextNumeroComprobante,
-    nextNumeroCobro: maxNumero(cobros) + 1,
+    nextNumeroPago: maxNumero(pagos) + 1,
     config: SEED_STATE.config,
   };
 }
 
 // ─── Context ─────────────────────────────────────────────────
 
-const VentasContext = createContext<VentasState | null>(null);
-const VentasDispatchContext = createContext<Dispatch<VentasAction> | null>(null);
+const ComprasContext = createContext<ComprasState | null>(null);
+const ComprasDispatchContext = createContext<Dispatch<ComprasAction> | null>(null);
 
-const emptyState: VentasState = {
-  categorias: [],
-  clientes: [clienteConsumidorFinal],
-  presupuestos: [],
-  ordenes: [],
+const emptyState: ComprasState = {
+  proveedores: [],
+  cotizaciones: [],
+  ordenesCompra: [],
   comprobantes: [],
-  cobros: [],
-  nextNumeroPresupuesto: 1,
-  nextNumeroOrden: { pedido: 1, produccion: 1, servicio: 1 },
-  nextNumeroComprobante: { factura: 1, recibo: 1, nota_credito: 1, nota_debito: 1 },
-  nextNumeroCobro: 1,
+  pagos: [],
+  nextNumeroCotizacion: 1,
+  nextNumeroOrdenCompra: 1,
+  nextNumeroComprobante: { factura: 1, nota_credito: 1, nota_debito: 1 },
+  nextNumeroPago: 1,
   config: SEED_STATE.config,
 };
 
-export function VentasProvider({ children }: { children: ReactNode }) {
+export function ComprasProvider({ children }: { children: ReactNode }) {
   const { cliente } = useClienteActual();
-  const [state, rawDispatch] = useReducer(ventasReducer, emptyState);
+  const [state, rawDispatch] = useReducer(comprasReducer, emptyState);
 
   useEffect(() => {
     let activo = true;
     if (!cliente?.id) return;
-    fetchVentasState().then((data) => {
+    fetchComprasState().then((data) => {
       if (activo) rawDispatch({ type: 'SET_STATE', payload: data });
     });
     return () => {
@@ -963,9 +790,9 @@ export function VentasProvider({ children }: { children: ReactNode }) {
     };
   }, [cliente?.id]);
 
-  const dispatch = useMemo<Dispatch<VentasAction>>(() => {
-    return (action: VentasAction) => {
-      const nextState = ventasReducer(state, action);
+  const dispatch = useMemo<Dispatch<ComprasAction>>(() => {
+    return (action: ComprasAction) => {
+      const nextState = comprasReducer(state, action);
       rawDispatch(action);
       if (cliente?.id) syncToSupabase(action, nextState, cliente.id);
     };
@@ -973,161 +800,132 @@ export function VentasProvider({ children }: { children: ReactNode }) {
   }, [state, cliente?.id]);
 
   return (
-    <VentasContext.Provider value={state}>
-      <VentasDispatchContext.Provider value={dispatch}>{children}</VentasDispatchContext.Provider>
-    </VentasContext.Provider>
+    <ComprasContext.Provider value={state}>
+      <ComprasDispatchContext.Provider value={dispatch}>{children}</ComprasDispatchContext.Provider>
+    </ComprasContext.Provider>
   );
 }
 
 // ─── Hooks base (idénticos a la versión anterior) ─────────────
 
-export function useVentas(): VentasState {
-  const ctx = useContext(VentasContext);
-  if (!ctx) throw new Error('useVentas debe usarse dentro de <VentasProvider>');
+export function useCompras(): ComprasState {
+  const ctx = useContext(ComprasContext);
+  if (!ctx) throw new Error('useCompras debe usarse dentro de <ComprasProvider>');
   return ctx;
 }
 
-export function useVentasDispatch(): Dispatch<VentasAction> {
-  const ctx = useContext(VentasDispatchContext);
-  if (!ctx) throw new Error('useVentasDispatch debe usarse dentro de <VentasProvider>');
+export function useComprasDispatch(): Dispatch<ComprasAction> {
+  const ctx = useContext(ComprasDispatchContext);
+  if (!ctx) throw new Error('useComprasDispatch debe usarse dentro de <ComprasProvider>');
   return ctx;
 }
 
-export function useClientes(): Cliente[] {
-  const { clientes } = useVentas();
-  return clientes;
+export function useProveedores(): Proveedor[] {
+  const { proveedores } = useCompras();
+  return proveedores;
 }
 
-export function useCliente(id: string): Cliente | undefined {
-  const { clientes } = useVentas();
-  return useMemo(() => clientes.find((c) => c.id === id), [clientes, id]);
+export function useProveedor(id: string): Proveedor | undefined {
+  const { proveedores } = useCompras();
+  return useMemo(() => proveedores.find((p) => p.id === id), [proveedores, id]);
 }
 
-interface FiltroPresupuestos {
-  estado?: EstadoPresupuesto;
-  clienteId?: string;
+interface FiltroCotizaciones {
+  estado?: EstadoCotizacion;
+  proveedorId?: string;
 }
 
-export function usePresupuestos(filtro?: FiltroPresupuestos): Presupuesto[] {
-  const { presupuestos } = useVentas();
+export function useCotizaciones(filtro?: FiltroCotizaciones): PedidoCotizacion[] {
+  const { cotizaciones } = useCompras();
   return useMemo(() => {
-    if (!filtro) return presupuestos;
-    return presupuestos.filter((p) => {
-      if (filtro.estado && p.estado !== filtro.estado) return false;
-      if (filtro.clienteId && p.clienteId !== filtro.clienteId) return false;
+    if (!filtro) return cotizaciones;
+    return cotizaciones.filter((c) => {
+      if (filtro.estado && c.estado !== filtro.estado) return false;
+      if (filtro.proveedorId && c.proveedorId !== filtro.proveedorId) return false;
       return true;
     });
-  }, [presupuestos, filtro?.estado, filtro?.clienteId]);
+  }, [cotizaciones, filtro?.estado, filtro?.proveedorId]);
 }
 
-interface FiltroOrdenes {
-  tipo?: TipoOrden;
-  estado?: EstadoOrden;
-  clienteId?: string;
+interface FiltroOrdenesCompra {
+  estado?: EstadoOrdenCompra;
+  proveedorId?: string;
 }
 
-export function useOrdenes(filtro?: FiltroOrdenes): Orden[] {
-  const { ordenes } = useVentas();
+export function useOrdenesCompra(filtro?: FiltroOrdenesCompra): OrdenCompra[] {
+  const { ordenesCompra } = useCompras();
   return useMemo(() => {
-    if (!filtro) return ordenes;
-    return ordenes.filter((o) => {
-      if (filtro.tipo && o.tipo !== filtro.tipo) return false;
+    if (!filtro) return ordenesCompra;
+    return ordenesCompra.filter((o) => {
       if (filtro.estado && o.estado !== filtro.estado) return false;
-      if (filtro.clienteId && o.clienteId !== filtro.clienteId) return false;
+      if (filtro.proveedorId && o.proveedorId !== filtro.proveedorId) return false;
       return true;
     });
-  }, [ordenes, filtro?.tipo, filtro?.estado, filtro?.clienteId]);
+  }, [ordenesCompra, filtro?.estado, filtro?.proveedorId]);
 }
 
-interface FiltroComprobantes {
-  tipo?: TipoComprobante;
-  estado?: EstadoComprobante;
-  clienteId?: string;
+interface FiltroComprobantesCompra {
+  tipo?: TipoComprobanteCompra;
+  estado?: EstadoComprobanteCompra;
+  proveedorId?: string;
 }
 
-export function useComprobantes(filtro?: FiltroComprobantes): Comprobante[] {
-  const { comprobantes } = useVentas();
+export function useComprobantesCompra(filtro?: FiltroComprobantesCompra): ComprobanteCompra[] {
+  const { comprobantes } = useCompras();
   return useMemo(() => {
     if (!filtro) return comprobantes;
     return comprobantes.filter((c) => {
       if (filtro.tipo && c.tipo !== filtro.tipo) return false;
       if (filtro.estado && c.estado !== filtro.estado) return false;
-      if (filtro.clienteId && c.clienteId !== filtro.clienteId) return false;
+      if (filtro.proveedorId && c.proveedorId !== filtro.proveedorId) return false;
       return true;
     });
-  }, [comprobantes, filtro?.tipo, filtro?.estado, filtro?.clienteId]);
+  }, [comprobantes, filtro?.tipo, filtro?.estado, filtro?.proveedorId]);
 }
 
-export function useCobros(clienteId?: string): Cobro[] {
-  const { cobros } = useVentas();
+export function usePagos(proveedorId?: string): PagoCompra[] {
+  const { pagos } = useCompras();
   return useMemo(() => {
-    if (!clienteId) return cobros;
-    return cobros.filter((c) => c.clienteId === clienteId);
-  }, [cobros, clienteId]);
+    if (!proveedorId) return pagos;
+    return pagos.filter((p) => p.proveedorId === proveedorId);
+  }, [pagos, proveedorId]);
 }
 
-interface DashboardStats {
-  ventasDelMes: number;
-  ventasSemana: number;
-  ventasHoy: number;
-  pendienteCobro: number;
-  unidadesVendidas: number;
-  topClientes: { clienteId: string; nombre: string; total: number }[];
-  topProductos: { descripcion: string; cantidad: number; total: number }[];
+interface DashboardComprasStats {
+  comprasDelMes: number;
+  pendientePago: number;
+  proveedoresActivos: number;
+  ordenesAbiertas: number;
+  topProveedores: { proveedorId: string; nombre: string; total: number }[];
 }
 
-export function useDashboardStats(): DashboardStats {
-  const { comprobantes, clientes } = useVentas();
-
+export function useDashboardCompras(): DashboardComprasStats {
+  const { comprobantes, proveedores, ordenesCompra } = useCompras();
   return useMemo(() => {
     const ahora = new Date();
     const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-    const hace7Dias = new Date(ahora);
-    hace7Dias.setDate(hace7Dias.getDate() - 7);
-    const hoyStr = ahora.toISOString().split('T')[0];
-
     const facturas = comprobantes.filter((c) => c.tipo === 'factura' && c.estado !== 'anulado');
     const facturasMes = facturas.filter((c) => new Date(c.fecha) >= inicioMes);
-    const facturasSemana = facturas.filter((c) => new Date(c.fecha) >= hace7Dias);
-    const facturasHoy = facturas.filter((c) => c.fecha === hoyStr);
-
-    const ventasDelMes = facturasMes.reduce((sum, c) => sum + c.total, 0);
-    const ventasSemana = facturasSemana.reduce((sum, c) => sum + c.total, 0);
-    const ventasHoy = facturasHoy.reduce((sum, c) => sum + c.total, 0);
-
-    const pendienteCobro = comprobantes
-      .filter((c) => c.estado === 'emitido' || c.estado === 'cobrado_parcial')
+    const comprasDelMes = facturasMes.reduce((sum, c) => sum + c.total, 0);
+    const pendientePago = comprobantes
+      .filter((c) => c.estado === 'pendiente' || c.estado === 'pagado_parcial')
       .reduce((sum, c) => sum + c.saldoPendiente, 0);
-
-    const unidadesVendidas = facturasMes.reduce((sum, c) => sum + c.items.reduce((s, item) => s + item.cantidad, 0), 0);
-
-    const clienteTotals = new Map<string, number>();
+    const proveedoresActivos = proveedores.filter((p) => p.activo).length;
+    const ordenesAbiertas = ordenesCompra.filter((o) => o.estado === 'pendiente' || o.estado === 'parcial').length;
+    const proveedorTotals = new Map<string, number>();
     for (const f of facturasMes) {
-      clienteTotals.set(f.clienteId, (clienteTotals.get(f.clienteId) || 0) + f.total);
+      proveedorTotals.set(f.proveedorId, (proveedorTotals.get(f.proveedorId) || 0) + f.total);
     }
-    const topClientes = Array.from(clienteTotals.entries())
-      .map(([clienteId, total]) => {
-        const cliente = clientes.find((c) => c.id === clienteId);
-        return { clienteId, nombre: cliente?.nombre ?? 'Desconocido', total };
+    const topProveedores = Array.from(proveedorTotals.entries())
+      .map(([proveedorId, total]) => {
+        const proveedor = proveedores.find((p) => p.id === proveedorId);
+        return { proveedorId, nombre: proveedor?.nombre ?? 'Desconocido', total };
       })
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
 
-    const productoMap = new Map<string, { cantidad: number; total: number }>();
-    for (const f of facturasMes) {
-      for (const item of f.items) {
-        const key = item.descripcion;
-        const prev = productoMap.get(key) || { cantidad: 0, total: 0 };
-        productoMap.set(key, { cantidad: prev.cantidad + item.cantidad, total: prev.total + item.subtotal });
-      }
-    }
-    const topProductos = Array.from(productoMap.entries())
-      .map(([descripcion, { cantidad, total }]) => ({ descripcion, cantidad, total }))
-      .sort((a, b) => b.cantidad - a.cantidad)
-      .slice(0, 5);
-
-    return { ventasDelMes, ventasSemana, ventasHoy, pendienteCobro, unidadesVendidas, topClientes, topProductos };
-  }, [comprobantes, clientes]);
+    return { comprasDelMes, pendientePago, proveedoresActivos, ordenesAbiertas, topProveedores };
+  }, [comprobantes, proveedores, ordenesCompra]);
 }
 
-export type { VentasAction };
+export type { ComprasAction };
