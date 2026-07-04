@@ -230,5 +230,5 @@ export function calcularSubtotalItem(cantidad: number, precio: number, descuento
 }
 
 export function generarId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  return crypto.randomUUID();
 }
