@@ -1117,4 +1117,5 @@ export function useCostoFormulado(productoId: string) {
       formula.cantidadProducida > 0 ? total / formula.cantidadProducida : total
 
     return { insumos, manoDeObra, costosOperativos, total, costoUnitario }
-  }, [state.formul
+  }, [state.formulas, productoId])
+}
