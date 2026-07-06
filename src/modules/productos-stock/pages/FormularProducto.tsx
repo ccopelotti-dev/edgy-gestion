@@ -305,37 +305,49 @@ export default function FormularProducto() {
   }
 
   // Line operations
+  //
+  // IMPORTANTE: estas tres funciones usan la forma funcional de setFormula
+  // (setFormula(prev => ...)) en vez de leer `formula` directamente del
+  // closure. Con clicks rápidos y consecutivos en "Agregar" (o ediciones
+  // rápidas), React puede procesar varias llamadas a setFormula antes de
+  // volver a renderizar; si cada llamada arma el nuevo estado a partir de la
+  // variable `formula` capturada en el render viejo, cada actualización pisa
+  // a la anterior en vez de acumularse — el resultado son líneas duplicadas,
+  // líneas fantasma sin insumo, o clicks que no agregan nada. Usando `prev`
+  // cada actualización parte siempre del estado más reciente, sin importar
+  // cuántos clicks lleguen seguidos.
   function addLine(tipo: TipoLineaFormula) {
-    if (!formula) return
-    const newLine: LocalLinea = {
-      id: lineUid(),
-      tipo,
-      insumoId: '',
-      descripcion: '',
-      cantidad: 0,
-      unidad: tipo === 'mano_de_obra' ? 'hora' : 'unidad',
-      costoUnitario: 0,
-    }
-    setFormula({ ...formula, lineas: [...formula.lineas, newLine] })
+    setFormula((prev) => {
+      if (!prev) return prev
+      const newLine: LocalLinea = {
+        id: lineUid(),
+        tipo,
+        insumoId: '',
+        descripcion: '',
+        cantidad: 0,
+        unidad: tipo === 'mano_de_obra' ? 'hora' : 'unidad',
+        costoUnitario: 0,
+      }
+      return { ...prev, lineas: [...prev.lineas, newLine] }
+    })
     setDirty(true)
   }
 
   function updateLine(id: string, updates: Partial<LocalLinea>) {
-    if (!formula) return
-    setFormula({
-      ...formula,
-      lineas: formula.lineas.map((l) =>
-        l.id === id ? { ...l, ...updates } : l,
-      ),
+    setFormula((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        lineas: prev.lineas.map((l) => (l.id === id ? { ...l, ...updates } : l)),
+      }
     })
     setDirty(true)
   }
 
   function deleteLine(id: string) {
-    if (!formula) return
-    setFormula({
-      ...formula,
-      lineas: formula.lineas.filter((l) => l.id !== id),
+    setFormula((prev) => {
+      if (!prev) return prev
+      return { ...prev, lineas: prev.lineas.filter((l) => l.id !== id) }
     })
     setDirty(true)
   }
@@ -489,10 +501,10 @@ export default function FormularProducto() {
                   step={1}
                   value={formula.cantidadProducida || ''}
                   onChange={(e) => {
-                    setFormula({
-                      ...formula,
-                      cantidadProducida: parseFloat(e.target.value) || 1,
-                    })
+                    const nuevaCantidad = parseFloat(e.target.value) || 1
+                    setFormula((prev) =>
+                      prev ? { ...prev, cantidadProducida: nuevaCantidad } : prev,
+                    )
                     setDirty(true)
                   }}
                 />
@@ -500,10 +512,10 @@ export default function FormularProducto() {
                   className={cn(inputClass, 'w-32')}
                   value={formula.unidadProducida}
                   onChange={(e) => {
-                    setFormula({
-                      ...formula,
-                      unidadProducida: e.target.value as UnidadMedida,
-                    })
+                    const nuevaUnidad = e.target.value as UnidadMedida
+                    setFormula((prev) =>
+                      prev ? { ...prev, unidadProducida: nuevaUnidad } : prev,
+                    )
                     setDirty(true)
                   }}
                 >
@@ -615,7 +627,8 @@ export default function FormularProducto() {
               className={cn(inputClass, 'min-h-[80px] resize-y')}
               value={formula.notas}
               onChange={(e) => {
-                setFormula({ ...formula, notas: e.target.value })
+                const nuevasNotas = e.target.value
+                setFormula((prev) => (prev ? { ...prev, notas: nuevasNotas } : prev))
                 setDirty(true)
               }}
               placeholder="Notas sobre la formula, instrucciones de preparacion, observaciones..."
