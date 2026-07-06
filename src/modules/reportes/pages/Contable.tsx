@@ -1,21 +1,26 @@
 'use client'
 
 import { Calculator } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '../components/reportes/display'
 
-// A diferencia de Financiero/Gestión (módulos que existen pero siguen en
-// localStorage), Contable ni siquiera existe todavía como módulo -- no
-// tiene sentido inventar filas de ejemplo para un Balance General o un
-// Estado de Resultado antes de que el modelo de datos real (plan de
-// cuentas, asientos) esté definido. Se activa esta pestaña recién cuando
-// el módulo Contable tenga sus tablas reales.
-
+// El módulo Contable ya existe (/m/contable) -- este texto originalmente
+// decía "todavía no existe" porque se escribió antes de que se construyera.
+// Los reportes de solo lectura sobre asientos (Balance General, Estado de
+// Resultado) siguen sin implementarse acá dentro de Reportes, pero el
+// módulo en sí ya está operativo, así que el mensaje y el link llevan al
+// usuario al lugar correcto en vez de sugerir que no existe nada.
 export default function Contable() {
+  const navigate = useNavigate()
+
   return (
     <EmptyState
       icon={Calculator}
-      title="Próximamente"
-      description="El módulo Contable todavía no existe. Cuando esté construido, el Balance General y el Estado de Resultado van a aparecer acá como reportes de solo lectura sobre sus asientos."
-    />
+      title="Reportes contables: próximamente"
+      description="El Balance General y el Estado de Resultado como reportes de solo lectura todavía no están armados acá. Mientras tanto, podés operar el módulo Contable directamente."
+    >
+      <Button onClick={() => navigate('/m/contable')}>Ir a Contable</Button>
+    </EmptyState>
   )
 }
