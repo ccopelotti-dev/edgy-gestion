@@ -797,7 +797,11 @@ export function RecepcionDialog({
       numeroRemito,
       notas,
       lineas: validLineas.map((l) => ({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        // La tabla recepcion_lineas usa `uuid` como tipo de columna id.
+        // El formato anterior (timestamp + random) no es un UUID válido y
+        // hacía que el INSERT fallara en silencio (error 22P02) — la
+        // recepción se guardaba, pero sus líneas nunca se persistían.
+        id: crypto.randomUUID(),
         itemTipo: l.itemTipo,
         itemId: l.itemId,
         cantidad: l.cantidad,
