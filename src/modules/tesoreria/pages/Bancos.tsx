@@ -8,6 +8,7 @@ import {
 import { signedAmount, useBankTotals, useTreasury } from '../data/store'
 import type { BankAccount, MovementType } from '../types'
 import { MovementDialog } from '../components/treasury/MovementDialog'
+import { AccountDialog } from '../components/treasury/AccountDialog'
 import {
   Amount,
   EmptyState,
@@ -82,28 +83,52 @@ export function Bancos() {
       </div>
 
       {/* Cuentas */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {balances.map(({ account, balance }) => (
-          <button
-            key={account.id}
-            type="button"
-            onClick={() => setSelectedId(selectedId === account.id ? null : account.id)}
-            className={cn(
-              'flex flex-col gap-1 rounded-xl border p-4 text-left transition-colors',
-              selectedId === account.id
-                ? 'border-primary bg-primary/5 ring-primary/20 ring-2'
-                : 'hover:border-primary/40',
-            )}
-          >
-            <p className="text-sm font-medium">{account.banco}</p>
-            <p className="text-muted-foreground text-xs">{account.alias}</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums">{formatARS(balance)}</p>
-            <p className="text-muted-foreground text-xs">
-              {account.tipo === 'cuenta_corriente' ? 'Cuenta corriente' : 'Caja de ahorro'} · {account.numero}
-            </p>
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">Cuentas bancarias</h2>
+          <p className="text-muted-foreground text-sm">
+            {balances.length === 0
+              ? 'Todavía no hay ninguna cuenta cargada.'
+              : `${balances.length} cuenta${balances.length === 1 ? '' : 's'} cargada${balances.length === 1 ? '' : 's'}.`}
+          </p>
+        </div>
+        <AccountDialog onSubmit={(payload) => dispatch({ type: 'ADD_ACCOUNT', payload })} />
       </div>
+
+      {balances.length === 0 ? (
+        <Card>
+          <CardContent className="py-4">
+            <EmptyState
+              icon={Landmark}
+              title="Sin cuentas bancarias"
+              description="Creá la primera cuenta para poder registrar movimientos bancarios y habilitar el espejo automático desde Caja, Ventas y Compras."
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {balances.map(({ account, balance }) => (
+            <button
+              key={account.id}
+              type="button"
+              onClick={() => setSelectedId(selectedId === account.id ? null : account.id)}
+              className={cn(
+                'flex flex-col gap-1 rounded-xl border p-4 text-left transition-colors',
+                selectedId === account.id
+                  ? 'border-primary bg-primary/5 ring-primary/20 ring-2'
+                  : 'hover:border-primary/40',
+              )}
+            >
+              <p className="text-sm font-medium">{account.banco}</p>
+              <p className="text-muted-foreground text-xs">{account.alias}</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums">{formatARS(balance)}</p>
+              <p className="text-muted-foreground text-xs">
+                {account.tipo === 'cuenta_corriente' ? 'Cuenta corriente' : 'Caja de ahorro'} · {account.numero}
+              </p>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Movimientos */}
       <Card>
