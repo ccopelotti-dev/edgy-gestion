@@ -30,9 +30,14 @@ import {
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
 
-let _lineSeq = 0
+// Este id se usa tanto de key de React como, al guardar, de id real de la
+// fila en la tabla `formula_lineas` de Supabase (columna tipo uuid). El
+// formato anterior (`line-<timestamp>-<seq>-<random>`) no era un UUID
+// válido: el INSERT fallaba en silencio (error 22P02) y la fórmula se
+// guardaba sin ninguna de sus líneas. crypto.randomUUID() es válido para
+// ambos usos.
 function lineUid(): string {
-  return `line-${Date.now()}-${++_lineSeq}-${Math.random().toString(36).slice(2, 7)}`
+  return crypto.randomUUID()
 }
 
 // ─── Local state types ────────────────────────────────────────────────────────
