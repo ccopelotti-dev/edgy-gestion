@@ -48,6 +48,7 @@ import { generarId } from '../types';
 import { SEED_STATE } from './seed';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
+import { registrarMovimientoTesoreria } from '@/lib/tesoreriaSync';
 
 // ─── Action Types (idénticos a la versión anterior) ───────────
 
@@ -521,12 +522,21 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
       if (c.items.length) {
         supabase.from('comprobante_compra_items').insert(c.items.map((i) => itemComprobanteToRow(i, c.id))).then(logErr('items de comprobante de compra'));
       }
-      if (c.ordenCompraId) {
-        const proveedor = nextState.proveedores.find((p) => p.id === c.proveedorId);
-        if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras comprobante'));
-      } else {
-        const proveedor = nextState.proveedores.find((p) => p.id === c.proveedorId);
-        if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras comprobante'));
+      const proveedor = nextState.proveedores.find((p) => p.id === c.proveedorId);
+      if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras comprobante'));
+      // Si el comprobante se pagó al instante con un medio que no es cuenta
+      // corriente, reflejar el movimiento de dinero real en Tesorería.
+      if (c.medioPago !== 'cuenta_corriente' && c.montoPagado > 0) {
+        registrarMovimientoTesoreria({
+          clienteId,
+          tipo: 'egreso',
+          medioPago: c.medioPago,
+          monto: c.montoPagado,
+          concepto: `Factura compra N.º ${c.numero} — ${proveedor?.nombre ?? 'Proveedor'}`,
+          categoria: 'Pago a proveedores',
+          fecha: c.fecha,
+          origenModulo: 'compras',
+        });
       }
       return;
     }
@@ -573,6 +583,20 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
       }
       const proveedor = nextState.proveedores.find((p) => p.id === pago.proveedorId);
       if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras pago'));
+      // Un pago siempre representa dinero real saliendo (salvo cuenta
+      // corriente, que es solo un asiento contable). Reflejarlo en Tesorería.
+      if (pago.medioPago !== 'cuenta_corriente') {
+        registrarMovimientoTesoreria({
+          clienteId,
+          tipo: 'egreso',
+          medioPago: pago.medioPago,
+          monto: pago.monto,
+          concepto: `Pago N.º ${pago.numero} — ${proveedor?.nombre ?? 'Proveedor'}`,
+          categoria: 'Pago a proveedores',
+          fecha: pago.fecha,
+          origenModulo: 'compras',
+        });
+      }
       return;
     }
 
