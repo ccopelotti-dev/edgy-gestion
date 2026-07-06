@@ -643,10 +643,22 @@ function syncToSupabase(
 
     case 'ADD_FORMULA': {
       const f = nextState.formulas[nextState.formulas.length - 1]
-      supabase.from('formulas').insert(formulaToRow(f, clienteId)).then(logErr('alta de fórmula'))
-      if (f.lineas.length) {
-        supabase.from('formula_lineas').insert(f.lineas.map((l) => formulaLineaToRow(l, f.id))).then(logErr('líneas de fórmula'))
-      }
+      // IMPORTANTE: el INSERT de las líneas se dispara recién DESPUÉS de que
+      // el INSERT de la fórmula haya confirmado en Supabase (encadenado con
+      // .then, no en paralelo). Antes ambos INSERT se disparaban al mismo
+      // tiempo, y la política RLS de `formula_lineas` (que exige que exista
+      // una fila en `formulas` con ese id) podía evaluarse antes de que la
+      // fila padre estuviera confirmada, devolviendo 42501 (RLS) y perdiendo
+      // las líneas en silencio.
+      supabase
+        .from('formulas')
+        .insert(formulaToRow(f, clienteId))
+        .then((res) => {
+          logErr('alta de fórmula')(res)
+          if (!res.error && f.lineas.length) {
+            supabase.from('formula_lineas').insert(f.lineas.map((l) => formulaLineaToRow(l, f.id))).then(logErr('líneas de fórmula'))
+          }
+        })
       return
     }
     case 'UPDATE_FORMULA': {
@@ -672,10 +684,18 @@ function syncToSupabase(
 
     case 'ADD_RECEPCION': {
       const r = nextState.recepciones[nextState.recepciones.length - 1]
-      supabase.from('recepciones').insert(recepcionToRow(r, clienteId)).then(logErr('alta de recepción'))
-      if (r.lineas.length) {
-        supabase.from('recepcion_lineas').insert(r.lineas.map((l) => recepcionLineaToRow(l, r.id))).then(logErr('líneas de recepción'))
-      }
+      // Mismo fix que ADD_FORMULA: las líneas se insertan recién cuando el
+      // INSERT de la recepción confirmó, para que la política RLS de
+      // `recepcion_lineas` encuentre la fila padre ya visible.
+      supabase
+        .from('recepciones')
+        .insert(recepcionToRow(r, clienteId))
+        .then((res) => {
+          logErr('alta de recepción')(res)
+          if (!res.error && r.lineas.length) {
+            supabase.from('recepcion_lineas').insert(r.lineas.map((l) => recepcionLineaToRow(l, r.id))).then(logErr('líneas de recepción'))
+          }
+        })
       return
     }
 
@@ -721,10 +741,19 @@ function syncToSupabase(
 
     case 'ADD_TRANSFERENCIA': {
       const t = nextState.transferencias[nextState.transferencias.length - 1]
-      supabase.from('transferencias').insert(transferenciaToRow(t, clienteId)).then(logErr('alta de transferencia'))
-      if (t.lineas.length) {
-        supabase.from('transferencia_lineas').insert(t.lineas.map((l) => transferenciaLineaToRow(l, t.id))).then(logErr('líneas de transferencia'))
-      }
+      // Mismo fix: encadenado con .then para evitar la carrera contra la
+      // política RLS de `transferencia_lineas` (aunque hoy "Nueva
+      // transferencia" está deshabilitado en la UI, se corrige por
+      // consistencia con ADD_FORMULA/ADD_RECEPCION).
+      supabase
+        .from('transferencias')
+        .insert(transferenciaToRow(t, clienteId))
+        .then((res) => {
+          logErr('alta de transferencia')(res)
+          if (!res.error && t.lineas.length) {
+            supabase.from('transferencia_lineas').insert(t.lineas.map((l) => transferenciaLineaToRow(l, t.id))).then(logErr('líneas de transferencia'))
+          }
+        })
       return
     }
 
