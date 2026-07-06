@@ -457,10 +457,22 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
     case 'ADD_COTIZACION': {
       const c = nextState.cotizaciones.find((x) => x.id === action.payload.id);
       if (!c) return;
-      supabase.from('cotizaciones_compra').insert(cotizacionToRow(c, clienteId)).then(logErr('alta de cotización'));
-      if (c.items.length) {
-        supabase.from('cotizacion_compra_items').insert(c.items.map((i) => itemToRow(i, 'cotizacion_id', c.id))).then(logErr('items de cotización'));
-      }
+      // IMPORTANTE: el INSERT de los items se dispara recién DESPUÉS de que
+      // el INSERT de la cotización haya confirmado en Supabase (encadenado
+      // con .then, no en paralelo). Antes ambos INSERT se disparaban al
+      // mismo tiempo, y la política RLS de `cotizacion_compra_items` (que
+      // exige que exista una fila en `cotizaciones_compra` con ese id)
+      // podía evaluarse antes de que la fila padre estuviera confirmada,
+      // devolviendo 42501 (RLS) y perdiendo los items en silencio.
+      supabase
+        .from('cotizaciones_compra')
+        .insert(cotizacionToRow(c, clienteId))
+        .then((res) => {
+          logErr('alta de cotización')(res);
+          if (!res.error && c.items.length) {
+            supabase.from('cotizacion_compra_items').insert(c.items.map((i) => itemToRow(i, 'cotizacion_id', c.id))).then(logErr('items de cotización'));
+          }
+        });
       return;
     }
 
@@ -484,10 +496,17 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
         supabase.from('cotizaciones_compra').update({ estado: cot.estado, orden_compra_id: cot.ordenCompraId ?? null }).eq('id', cot.id).then(logErr('cotización aprobada'));
       }
       if (oc) {
-        supabase.from('ordenes_compra').insert(ordenCompraToRow(oc, clienteId)).then(logErr('alta de orden de compra (desde cotización)'));
-        if (oc.items.length) {
-          supabase.from('orden_compra_items').insert(oc.items.map((i) => itemToRow(i, 'orden_compra_id', oc.id))).then(logErr('items de orden de compra'));
-        }
+        // Mismo fix: encadenar el INSERT de items después del INSERT de la
+        // orden de compra para evitar la carrera RLS.
+        supabase
+          .from('ordenes_compra')
+          .insert(ordenCompraToRow(oc, clienteId))
+          .then((res) => {
+            logErr('alta de orden de compra (desde cotización)')(res);
+            if (!res.error && oc.items.length) {
+              supabase.from('orden_compra_items').insert(oc.items.map((i) => itemToRow(i, 'orden_compra_id', oc.id))).then(logErr('items de orden de compra'));
+            }
+          });
       }
       return;
     }
@@ -495,10 +514,15 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
     case 'ADD_ORDEN_COMPRA': {
       const o = nextState.ordenesCompra.find((x) => x.id === action.payload.id);
       if (!o) return;
-      supabase.from('ordenes_compra').insert(ordenCompraToRow(o, clienteId)).then(logErr('alta de orden de compra'));
-      if (o.items.length) {
-        supabase.from('orden_compra_items').insert(o.items.map((i) => itemToRow(i, 'orden_compra_id', o.id))).then(logErr('items de orden de compra'));
-      }
+      supabase
+        .from('ordenes_compra')
+        .insert(ordenCompraToRow(o, clienteId))
+        .then((res) => {
+          logErr('alta de orden de compra')(res);
+          if (!res.error && o.items.length) {
+            supabase.from('orden_compra_items').insert(o.items.map((i) => itemToRow(i, 'orden_compra_id', o.id))).then(logErr('items de orden de compra'));
+          }
+        });
       return;
     }
 
@@ -518,10 +542,20 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
     case 'ADD_COMPROBANTE_COMPRA': {
       const c = nextState.comprobantes.find((x) => x.id === action.payload.id);
       if (!c) return;
-      supabase.from('comprobantes_compra').insert(comprobanteToRow(c, clienteId)).then(logErr('alta de comprobante de compra'));
-      if (c.items.length) {
-        supabase.from('comprobante_compra_items').insert(c.items.map((i) => itemComprobanteToRow(i, c.id))).then(logErr('items de comprobante de compra'));
-      }
+      // Mismo fix: los items del comprobante de compra se insertan recién
+      // cuando el INSERT del comprobante confirmó, para que la política
+      // RLS de `comprobante_compra_items` encuentre la fila padre ya
+      // visible. El resto (saldo del proveedor, espejo en Tesorería) no
+      // depende de esta fila para su propia política RLS.
+      supabase
+        .from('comprobantes_compra')
+        .insert(comprobanteToRow(c, clienteId))
+        .then((res) => {
+          logErr('alta de comprobante de compra')(res);
+          if (!res.error && c.items.length) {
+            supabase.from('comprobante_compra_items').insert(c.items.map((i) => itemComprobanteToRow(i, c.id))).then(logErr('items de comprobante de compra'));
+          }
+        });
       const proveedor = nextState.proveedores.find((p) => p.id === c.proveedorId);
       if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras comprobante'));
       // Si el comprobante se pagó al instante con un medio que no es cuenta
@@ -564,13 +598,20 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
     case 'ADD_PAGO': {
       const pago = nextState.pagos.find((x) => x.id === action.payload.id);
       if (!pago) return;
-      supabase.from('pagos_compra').insert(pagoToRow(pago, clienteId)).then(logErr('alta de pago'));
-      if (pago.imputaciones.length) {
-        supabase
-          .from('pago_compra_imputaciones')
-          .insert(pago.imputaciones.map((imp) => ({ id: generarId(), pago_id: pago.id, comprobante_id: imp.comprobanteId, monto_imputado: imp.montoImputado })))
-          .then(logErr('imputaciones de pago'));
-      }
+      // Mismo fix: las imputaciones referencian al pago por id, así que se
+      // encadenan después de que el INSERT del pago haya confirmado.
+      supabase
+        .from('pagos_compra')
+        .insert(pagoToRow(pago, clienteId))
+        .then((res) => {
+          logErr('alta de pago')(res);
+          if (!res.error && pago.imputaciones.length) {
+            supabase
+              .from('pago_compra_imputaciones')
+              .insert(pago.imputaciones.map((imp) => ({ id: generarId(), pago_id: pago.id, comprobante_id: imp.comprobanteId, monto_imputado: imp.montoImputado })))
+              .then(logErr('imputaciones de pago'));
+          }
+        });
       for (const imp of pago.imputaciones) {
         const c = nextState.comprobantes.find((x) => x.id === imp.comprobanteId);
         if (c) {
