@@ -47,6 +47,7 @@ import { generarId, CONSUMIDOR_FINAL_ID, clienteConsumidorFinal } from '../types
 import { SEED_STATE } from './seed';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
+import { registrarMovimientoTesoreria } from '@/lib/tesoreriaSync';
 
 // ─── Action Types (idénticos a la versión anterior) ───────────
 
@@ -629,6 +630,21 @@ function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId:
         const cli = nextState.clientes.find((x) => x.id === c.clienteId);
         if (cli) supabase.from('clientes_venta').update({ saldo_cuenta_corriente: cli.saldoCuentaCorriente }).eq('id', cli.id).then(logErr('saldo cliente tras comprobante'));
       }
+      // Si el comprobante se cobró al instante con un medio que no es cuenta
+      // corriente, reflejar el movimiento de dinero real en Tesorería.
+      if (c.medioPago !== 'cuenta_corriente' && c.montoCobrado > 0) {
+        const cliente = nextState.clientes.find((x) => x.id === c.clienteId);
+        registrarMovimientoTesoreria({
+          clienteId,
+          tipo: 'ingreso',
+          medioPago: c.medioPago,
+          monto: c.montoCobrado,
+          concepto: `Factura N.º ${c.numero} — ${cliente?.nombre ?? 'Cliente'}`,
+          categoria: 'Cobranza clientes',
+          fecha: c.fecha,
+          origenModulo: 'ventas',
+        });
+      }
       return;
     }
 
@@ -677,6 +693,21 @@ function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId:
       if (esClienteReal(cobro.clienteId)) {
         const cli = nextState.clientes.find((x) => x.id === cobro.clienteId);
         if (cli) supabase.from('clientes_venta').update({ saldo_cuenta_corriente: cli.saldoCuentaCorriente }).eq('id', cli.id).then(logErr('saldo cliente tras cobro'));
+      }
+      // Un cobro siempre representa dinero real entrando (salvo cuenta
+      // corriente, que es solo un asiento contable). Reflejarlo en Tesorería.
+      if (cobro.medioPago !== 'cuenta_corriente') {
+        const cliente = nextState.clientes.find((x) => x.id === cobro.clienteId);
+        registrarMovimientoTesoreria({
+          clienteId,
+          tipo: 'ingreso',
+          medioPago: cobro.medioPago,
+          monto: cobro.monto,
+          concepto: `Cobro N.º ${cobro.numero} — ${cliente?.nombre ?? 'Cliente'}`,
+          categoria: 'Cobranza clientes',
+          fecha: cobro.fecha,
+          origenModulo: 'ventas',
+        });
       }
       return;
     }
