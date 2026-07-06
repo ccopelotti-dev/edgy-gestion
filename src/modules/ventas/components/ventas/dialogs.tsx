@@ -1011,6 +1011,11 @@ function newPresupuestoItemRow(): PresupuestoItemRow {
   };
 }
 
+/** Una fila de ítem se considera incompleta si falta la descripción o el precio. */
+function filaPresupuestoIncompleta(item: PresupuestoItemRow): boolean {
+  return !item.descripcion.trim() || item.precioUnitario <= 0;
+}
+
 export function PresupuestoDialog({
   open,
   onOpenChange,
@@ -1027,6 +1032,10 @@ export function PresupuestoDialog({
   const [items, setItems] = useState<PresupuestoItemRow[]>([newPresupuestoItemRow()]);
   const [descuentoGeneral, setDescuentoGeneral] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Se activa recién después del primer intento fallido de guardar: a partir
+  // de ahí, las filas incompletas se resaltan en rojo en vivo.
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
+  const itemsSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -1056,6 +1065,7 @@ export function PresupuestoDialog({
         setDescuentoGeneral(0);
       }
       setErrors({});
+      setIntentoGuardar(false);
     }
   }, [open, presupuesto, validezDefault]);
 
@@ -1082,14 +1092,23 @@ export function PresupuestoDialog({
     const next: Record<string, string> = {};
     if (!clienteId) next.clienteId = 'Seleccione un cliente';
     if (items.length === 0) next.items = 'Agregue al menos un ítem';
-    const hasEmpty = items.some((it) => !it.descripcion.trim() || it.precioUnitario <= 0);
-    if (hasEmpty) next.items = 'Complete la descripción y precio de cada ítem';
+    const filasIncompletas = items
+      .map((it, i) => (filaPresupuestoIncompleta(it) ? i + 1 : null))
+      .filter((n): n is number => n !== null);
+    if (filasIncompletas.length > 0) {
+      const plural = filasIncompletas.length > 1;
+      next.items = `Falta descripción y/o precio en la${plural ? 's filas' : ' fila'} ${filasIncompletas.join(', ')} (resaltada${plural ? 's' : ''} en rojo abajo).`;
+    }
     setErrors(next);
+    if (Object.keys(next).length > 0) setIntentoGuardar(true);
     return Object.keys(next).length === 0;
   };
 
   const handleSave = () => {
-    if (!validate()) return;
+    if (!validate()) {
+      itemsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     onSave({
       clienteId,
       fecha,
@@ -1188,14 +1207,18 @@ export function PresupuestoDialog({
             </div>
 
             {/* Items table */}
-            <div>
+            <div ref={itemsSectionRef}>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-gray-900">Ítems</h3>
                 <button type="button" className={`${btnSecondary} flex items-center gap-1 text-xs py-1.5 px-3`} onClick={addItem}>
                   <Plus className="w-3.5 h-3.5" /> Agregar
                 </button>
               </div>
-              {errors.items && <p className="text-xs text-red-600 mb-2">{errors.items}</p>}
+              {errors.items && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 mb-2">
+                  <p className="text-xs text-red-700">{errors.items}</p>
+                </div>
+              )}
 
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
@@ -1210,60 +1233,68 @@ export function PresupuestoDialog({
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item, idx) => (
-                      <tr key={item.key} className="border-t border-gray-100">
-                        <td className="px-2 py-1.5">
-                          <input
-                            className="w-full border-0 bg-transparent text-sm focus:outline-none"
-                            placeholder="Descripción"
-                            value={item.descripcion}
-                            onChange={(e) => updateItem(idx, 'descripcion', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <input
-                            className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
-                            type="number"
-                            min={1}
-                            value={item.cantidad}
-                            onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
-                          />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <input
-                            className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            value={item.precioUnitario}
-                            onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))}
-                          />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <input
-                            className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
-                            type="number"
-                            min={0}
-                            max={100}
-                            value={item.descuento}
-                            onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))}
-                          />
-                        </td>
-                        <td className="px-3 py-1.5 text-right text-gray-700 font-medium">
-                          {formatARS(getSubtotal(item))}
-                        </td>
-                        <td className="px-1 py-1.5">
-                          <button
-                            type="button"
-                            className={btnIcon}
-                            onClick={() => removeItem(idx)}
-                            disabled={items.length <= 1}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {items.map((item, idx) => {
+                      const filaInvalida = intentoGuardar && filaPresupuestoIncompleta(item);
+                      const descripcionInvalida = filaInvalida && !item.descripcion.trim();
+                      const precioInvalido = filaInvalida && item.precioUnitario <= 0;
+                      return (
+                        <tr
+                          key={item.key}
+                          className={`border-t border-gray-100 ${filaInvalida ? 'bg-red-50' : ''}`}
+                        >
+                          <td className="px-2 py-1.5">
+                            <input
+                              className={`w-full border-0 bg-transparent text-sm focus:outline-none ${descripcionInvalida ? 'ring-1 ring-red-400 rounded' : ''}`}
+                              placeholder={descripcionInvalida ? 'Falta la descripción' : 'Descripción'}
+                              value={item.descripcion}
+                              onChange={(e) => updateItem(idx, 'descripcion', e.target.value)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              type="number"
+                              min={1}
+                              value={item.cantidad}
+                              onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none ${precioInvalido ? 'ring-1 ring-red-400 rounded' : ''}`}
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={item.precioUnitario}
+                              onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={item.descuento}
+                              onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-gray-700 font-medium">
+                            {formatARS(getSubtotal(item))}
+                          </td>
+                          <td className="px-1 py-1.5">
+                            <button
+                              type="button"
+                              className={btnIcon}
+                              onClick={() => removeItem(idx)}
+                              disabled={items.length <= 1}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
