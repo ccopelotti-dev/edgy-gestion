@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link2, Plus } from 'lucide-react'
+import { AlertTriangle, Link2, Plus } from 'lucide-react'
 import {
   CATEGORIES,
   PAYMENT_METHODS,
@@ -94,6 +94,7 @@ function MovementForm({
 
   const categorias = CATEGORIES.filter((c) => c.type === tipo || c.type === 'ambos')
   const needsAccount = mode === 'banco' || isBankSettled(medioPago)
+  const sinCuentasDisponibles = needsAccount && accounts.length === 0
   const montoNum = Number(monto)
   const valid = concepto.trim() !== '' && categoria !== '' && montoNum > 0 && (!needsAccount || cuentaId !== '')
 
@@ -147,13 +148,24 @@ function MovementForm({
         {needsAccount && (
           <div className="grid gap-2">
             <Label>{mode === 'banco' ? 'Cuenta bancaria' : 'Cuenta de acreditación'}</Label>
-            <Select value={cuentaId} onValueChange={setCuentaId}>
-              <SelectTrigger><SelectValue placeholder="Seleccionar cuenta" /></SelectTrigger>
-              <SelectContent>
-                {accounts.map((a) => (<SelectItem key={a.id} value={a.id}>{a.banco} — {a.alias}</SelectItem>))}
-              </SelectContent>
-            </Select>
-            {mode === 'caja' && (
+            {sinCuentasDisponibles ? (
+              <div className="border-warning/40 bg-warning/10 text-warning-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Todavía no hay ninguna cuenta bancaria cargada. Creá una en{' '}
+                  <span className="font-medium">Tesorería &gt; Bancos</span> antes de registrar este movimiento —
+                  si no, no se va a poder generar el espejo bancario.
+                </span>
+              </div>
+            ) : (
+              <Select value={cuentaId} onValueChange={setCuentaId}>
+                <SelectTrigger><SelectValue placeholder="Seleccionar cuenta" /></SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => (<SelectItem key={a.id} value={a.id}>{a.banco} — {a.alias}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            )}
+            {mode === 'caja' && !sinCuentasDisponibles && (
               <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
                 <Link2 className="size-3.5" />
                 Se generará automáticamente el movimiento espejo en esta cuenta.
