@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Plus, Trash2, ImagePlus, X, Loader2, Star, Wand2 } from 'lucide-react'
 import { formatARS } from '../../lib/format'
+import { todayISO } from '../../lib/format'
 import {
   subirImagenProducto,
   eliminarImagenProducto,
@@ -707,6 +708,7 @@ export function RecepcionDialog({
   productos,
   insumos,
 }: RecepcionDialogProps) {
+  const [fecha, setFecha] = useState(todayISO())
   const [proveedor, setProveedor] = useState('')
   const [numeroRemito, setNumeroRemito] = useState('')
   const [notas, setNotas] = useState('')
@@ -716,6 +718,7 @@ export function RecepcionDialog({
 
   useEffect(() => {
     if (open) {
+      setFecha(todayISO())
       setProveedor('')
       setNumeroRemito('')
       setNotas('')
@@ -789,7 +792,7 @@ export function RecepcionDialog({
     if (validLineas.length === 0) return
 
     onSave({
-      fecha: new Date().toISOString().slice(0, 10),
+      fecha,
       proveedor,
       numeroRemito,
       notas,
@@ -815,8 +818,17 @@ export function RecepcionDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          {/* Proveedor y Remito */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Fecha, Proveedor y Remito */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Fecha</label>
+              <input
+                className={inputClass}
+                type="date"
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+              />
+            </div>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Proveedor</label>
               <input
