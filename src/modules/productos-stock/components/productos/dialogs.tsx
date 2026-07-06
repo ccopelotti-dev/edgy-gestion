@@ -15,7 +15,7 @@ import { formatARS } from '../../lib/format'
 import {
   subirImagenProducto,
   eliminarImagenProducto,
-  TIPOS_IMAGEN_ACEPTADOS,
+  ACCEPT_IMAGENES,
 } from '../../lib/imagenes'
 import { generarCodigoInterno } from '../../lib/etiqueta'
 import type {
@@ -271,7 +271,7 @@ export function ProductoDialog({
             <input
               ref={fileInputRef}
               type="file"
-              accept={TIPOS_IMAGEN_ACEPTADOS.join(',')}
+              accept={ACCEPT_IMAGENES}
               multiple
               className="hidden"
               onChange={(e) => handleFilesSelected(e.target.files)}
