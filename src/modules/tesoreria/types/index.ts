@@ -55,7 +55,7 @@ export interface CajaMovement {
   linkId?: string
 }
 
-export type BankMovementOrigin = 'manual' | 'caja' | 'cheque'
+export type BankMovementOrigin = 'manual' | 'caja' | 'cheque' | 'ventas' | 'compras'
 export type AccountKind = 'cuenta_corriente' | 'caja_ahorro'
 
 export interface BankAccount {
