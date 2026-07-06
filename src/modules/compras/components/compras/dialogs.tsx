@@ -3,7 +3,7 @@
 // Edgy Gestion · React 19 + Radix UI + Tailwind CSS 4
 // ============================================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, Plus, Trash2 } from 'lucide-react';
 
@@ -457,6 +457,11 @@ function newComprobanteItemRow(): ComprobanteItemRow {
   return { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, alicuotaIva: 21 };
 }
 
+/** Una fila de item se considera incompleta si falta la descripcion o el precio. */
+function filaItemIncompleta(item: ComprobanteItemRow): boolean {
+  return !item.descripcion.trim() || item.precioUnitario <= 0;
+}
+
 export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSave }: ComprobanteCompraDialogProps) {
   const [tipo, setTipo] = useState<TipoComprobanteCompra>('factura');
   const [proveedorId, setProveedorId] = useState('');
@@ -465,6 +470,10 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
   const [medioPago, setMedioPago] = useState<MedioPagoCompra>('transferencia');
   const [items, setItems] = useState<ComprobanteItemRow[]>([newComprobanteItemRow()]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Se activa recien despues del primer intento fallido de guardar: a partir
+  // de ahi, las filas incompletas se resaltan en rojo en vivo.
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
+  const itemsSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -475,6 +484,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
       setMedioPago('transferencia');
       setItems([newComprobanteItemRow()]);
       setErrors({});
+      setIntentoGuardar(false);
     }
   }, [open]);
 
@@ -495,13 +505,26 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     if (!proveedorId) next.proveedorId = 'Seleccione un proveedor';
-    if (items.some((it) => !it.descripcion.trim() || it.precioUnitario <= 0)) next.items = 'Complete descripcion y precio de cada item';
+    const filasIncompletas = items
+      .map((it, i) => (filaItemIncompleta(it) ? i + 1 : null))
+      .filter((n): n is number => n !== null);
+    if (filasIncompletas.length > 0) {
+      const plural = filasIncompletas.length > 1;
+      next.items = `Falta descripcion y/o precio en la${plural ? 's filas' : ' fila'} ${filasIncompletas.join(', ')} (resaltada${plural ? 's' : ''} en rojo abajo).`;
+    }
     setErrors(next);
+    if (Object.keys(next).length > 0) setIntentoGuardar(true);
     return Object.keys(next).length === 0;
   };
 
   const handleSave = () => {
-    if (!validate()) return;
+    if (!validate()) {
+      // El mensaje puede quedar fuera de la vista si el usuario scrolleo
+      // hacia abajo para completar filas nuevas -- llevamos la seccion de
+      // items a la vista para que el error sea imposible de pasar por alto.
+      itemsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     onSave({
       tipo, proveedorId, fecha, fechaVencimiento, medioPago,
       items: items.map((item) => {
@@ -567,14 +590,18 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
             </div>
 
             {/* Items */}
-            <div>
+            <div ref={itemsSectionRef}>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-gray-900">Items</h3>
                 <button type="button" className={`${btnSecondary} flex items-center gap-1 text-xs py-1.5 px-3`} onClick={addItem}>
                   <Plus className="w-3.5 h-3.5" /> Agregar
                 </button>
               </div>
-              {errors.items && <p className="text-xs text-red-600 mb-2">{errors.items}</p>}
+              {errors.items && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 mb-2">
+                  <p className="text-xs text-red-700">{errors.items}</p>
+                </div>
+              )}
 
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
@@ -590,34 +617,71 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item, idx) => (
-                      <tr key={item.key} className="border-t border-gray-100">
-                        <td className="px-2 py-1.5">
-                          <input className="w-full border-0 bg-transparent text-sm focus:outline-none" placeholder="Descripcion" value={item.descripcion} onChange={(e) => updateItem(idx, 'descripcion', e.target.value)} />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={1} value={item.cantidad} onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))} />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} step={0.01} value={item.precioUnitario} onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))} />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} max={100} value={item.descuento} onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))} />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <select className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" value={item.alicuotaIva} onChange={(e) => updateItem(idx, 'alicuotaIva', Number(e.target.value))}>
-                            <option value={0}>0%</option>
-                            <option value={10.5}>10,5%</option>
-                            <option value={21}>21%</option>
-                            <option value={27}>27%</option>
-                          </select>
-                        </td>
-                        <td className="px-3 py-1.5 text-right text-gray-700 font-medium">{formatARS(getSubtotal(item))}</td>
-                        <td className="px-1 py-1.5">
-                          <button type="button" className={btnIcon} onClick={() => removeItem(idx)} disabled={items.length <= 1}><Trash2 className="w-3.5 h-3.5" /></button>
-                        </td>
-                      </tr>
-                    ))}
+                    {items.map((item, idx) => {
+                      const filaInvalida = intentoGuardar && filaItemIncompleta(item);
+                      const descripcionInvalida = filaInvalida && !item.descripcion.trim();
+                      const precioInvalido = filaInvalida && item.precioUnitario <= 0;
+                      return (
+                        <tr
+                          key={item.key}
+                          className={`border-t border-gray-100 ${filaInvalida ? 'bg-red-50' : ''}`}
+                        >
+                          <td className="px-2 py-1.5">
+                            <input
+                              className={`w-full border-0 bg-transparent text-sm focus:outline-none ${descripcionInvalida ? 'ring-1 ring-red-400 rounded' : ''}`}
+                              placeholder={descripcionInvalida ? 'Falta la descripcion' : 'Descripcion'}
+                              value={item.descripcion}
+                              onChange={(e) => updateItem(idx, 'descripcion', e.target.value)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              type="number"
+                              min={1}
+                              value={item.cantidad}
+                              onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none ${precioInvalido ? 'ring-1 ring-red-400 rounded' : ''}`}
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={item.precioUnitario}
+                              onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={item.descuento}
+                              onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <select
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              value={item.alicuotaIva}
+                              onChange={(e) => updateItem(idx, 'alicuotaIva', Number(e.target.value))}
+                            >
+                              <option value={0}>0%</option>
+                              <option value={10.5}>10,5%</option>
+                              <option value={21}>21%</option>
+                              <option value={27}>27%</option>
+                            </select>
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-gray-700 font-medium">{formatARS(getSubtotal(item))}</td>
+                          <td className="px-1 py-1.5">
+                            <button type="button" className={btnIcon} onClick={() => removeItem(idx)} disabled={items.length <= 1}><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
