@@ -49,6 +49,7 @@ import { SEED_STATE } from './seed';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { registrarMovimientoTesoreria } from '@/lib/tesoreriaSync';
+import { todayISO } from '../lib/format';
 
 // ─── Action Types (idénticos a la versión anterior) ───────────
 
@@ -150,7 +151,11 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
         numero: numeroOC,
         proveedorId: cotizacion.proveedorId,
         cotizacionId,
-        fecha: new Date().toISOString().split('T')[0],
+        // ANTES: `new Date().toISOString().split('T')[0]` -- da la fecha en
+        // UTC. Como Argentina es UTC-3, pasadas las 21 hs (hora local) una
+        // OC generada al convertir una cotización quedaba fechada para el
+        // día siguiente. Se usa todayISO() (componentes locales del Date).
+        fecha: todayISO(),
         estado: 'pendiente',
         items: ocItems,
         subtotal: cotizacion.subtotal,
