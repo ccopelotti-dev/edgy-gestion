@@ -54,8 +54,18 @@ export function formatDateLong(iso: string): string {
   return dateLongFmt.format(new Date(iso + 'T00:00:00'))
 }
 
+// ANTES: `new Date().toISOString().slice(0, 10)` -- toISOString() da la
+// fecha en UTC, y Argentina es UTC-3. Pasadas las 21 hs (hora local) el
+// reloj UTC ya cambió de día, así que todayISO() devolvía el día
+// siguiente: cheques y movimientos nuevos se creaban con fecha de mañana,
+// y daysUntil()/Vencimientos clasificaban mal qué está vencido. Se arma
+// la fecha a partir de los componentes locales del Date, que sí respetan
+// la zona horaria del navegador.
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  const d = new Date()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${dd}`
 }
 
 export function daysUntil(iso: string): number {
