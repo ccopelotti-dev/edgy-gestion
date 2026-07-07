@@ -8,6 +8,7 @@ import {
 } from 'react'
 import type { UtilidadesState, SeguimientoHoras, EntradaHoras } from '../types'
 import { seedState } from './seed'
+import { todayISO } from '../lib/format'
 
 // Solo Tracking de horas usa este store local -- Explorador de archivos e
 // Importación masiva son Supabase-backed desde el día uno (ver
@@ -33,7 +34,11 @@ function reducer(state: UtilidadesState, action: Action): UtilidadesState {
       const nuevo: SeguimientoHoras = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        // ANTES: `new Date().toISOString().slice(0, 10)` -- da la fecha en
+        // UTC. Como Argentina es UTC-3, pasadas las 21 hs (hora local) un
+        // seguimiento de horas nuevo quedaba fechado para el día siguiente.
+        // Se usa todayISO() (componentes locales del Date).
+        createdAt: todayISO(),
       }
       return { ...state, seguimientos: [...state.seguimientos, nuevo] }
     }
