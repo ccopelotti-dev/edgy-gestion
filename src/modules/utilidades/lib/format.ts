@@ -6,12 +6,25 @@ const dateFmt = new Intl.DateTimeFormat('es-AR', {
   year: 'numeric',
 })
 
+// ANTES: `new Date(iso)` -- para un string de solo fecha ("2026-07-06",
+// sin hora), el motor de JS lo interpreta como medianoche UTC. En
+// Argentina (UTC-3) eso cae a las 21 hs del día ANTERIOR en hora local,
+// así que el formateador mostraba siempre un día menos del que
+// correspondía (no solo de noche: siempre). Se agrega "T00:00:00" (sin
+// "Z") para que se interprete como medianoche LOCAL en vez de UTC.
 export function formatDate(iso: string): string {
-  return dateFmt.format(new Date(iso))
+  return dateFmt.format(new Date(iso + 'T00:00:00'))
 }
 
+// ANTES: `new Date().toISOString().slice(0, 10)` -- da la fecha en UTC.
+// Como Argentina es UTC-3, pasadas las 21 hs (hora local) el reloj UTC ya
+// cambió de día. Se arma la fecha a partir de los componentes locales del
+// Date en vez de UTC.
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  const d = new Date()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${dd}`
 }
 
 const numberFmt = new Intl.NumberFormat('es-AR', {
