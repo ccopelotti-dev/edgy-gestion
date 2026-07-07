@@ -28,6 +28,7 @@ import type {
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
+import { todayISO } from '../lib/format'
 
 // ─── Helpers de id ──────────────────────────────────────────
 
@@ -62,7 +63,7 @@ function reducer(state: ServiciosState, action: Action): ServiciosState {
       const nuevo: Servicio = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        createdAt: todayISO(),
       }
       return { ...state, servicios: [...state.servicios, nuevo] }
     }
