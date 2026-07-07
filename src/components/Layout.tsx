@@ -1,13 +1,28 @@
-import { Outlet, Navigate, Link } from 'react-router-dom'
-import { Store } from 'lucide-react'
+import { Outlet, Navigate, Link, useNavigate } from 'react-router-dom'
+import { Store, LogOut } from 'lucide-react'
 import { Sidebar } from '@/components/Sidebar'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
 import { colorDeContraste } from '@/lib/colorContraste'
+import { supabase } from '@/lib/supabase'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+
+// Iniciales para el avatar de "Cuenta" en el header -- primeras letras de
+// hasta dos palabras del nombre del cliente (ej. "La Charcutería Express" -> "LC").
+function iniciales(nombre: string): string {
+  const palabras = nombre.trim().split(/\s+/).filter(Boolean)
+  return palabras.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
+}
 
 export function DashboardLayout() {
   const { cliente, modulosActivos, cargando, error } = useClienteActual()
   const { esStaff, cargando: cargandoStaff } = usePersonalEdgy()
+  const navigate = useNavigate()
 
   if (cargando || cargandoStaff) {
     return <div className="flex h-screen items-center justify-center text-gray-400">Cargando...</div>
@@ -57,6 +72,12 @@ export function DashboardLayout() {
   const colorMarca = cliente.color_marca ?? '#0C1A2E'
   const contraste = colorDeContraste(colorMarca)
   const bordeLogo = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.5)' : 'rgba(32,31,27,0.35)'
+  const fondoAvatar = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.18)' : 'rgba(32,31,27,0.12)'
+
+  async function cerrarSesion() {
+    await supabase.auth.signOut()
+    navigate('/ingresar', { replace: true })
+  }
 
   return (
     <div className="flex h-screen">
@@ -81,9 +102,30 @@ export function DashboardLayout() {
               <Store size={18} className="text-gray-400" />
             )}
           </div>
-          <span className="truncate text-base font-medium" style={{ color: contraste }}>
+          <span className="min-w-0 flex-1 truncate text-base font-medium" style={{ color: contraste }}>
             {cliente.nombre}
           </span>
+
+          {/* Cuenta -- por ahora solo Cerrar sesión. Alertas (campana) y el
+              resto de las opciones de Cuenta quedan para cuando se diseñen
+              esas pantallas. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium"
+                style={{ backgroundColor: fondoAvatar, color: contraste }}
+                title="Cuenta"
+              >
+                {iniciales(cliente.nombre)}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={cerrarSesion}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Cerrar sesión
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </header>
 
         <main className="flex-1 overflow-y-auto bg-white p-8">
