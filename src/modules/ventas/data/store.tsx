@@ -48,6 +48,7 @@ import { SEED_STATE } from './seed';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { registrarMovimientoTesoreria } from '@/lib/tesoreriaSync';
+import { todayISO } from '../lib/format';
 
 // ─── Action Types (idénticos a la versión anterior) ───────────
 
@@ -162,7 +163,11 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
         tipo: tipoOrden,
         clienteId: presupuesto.clienteId,
         presupuestoId,
-        fecha: new Date().toISOString().split('T')[0],
+        // ANTES: `new Date().toISOString().split('T')[0]` -- da la fecha en
+        // UTC. Como Argentina es UTC-3, pasadas las 21 hs (hora local) una
+        // orden generada al convertir un presupuesto quedaba fechada para
+        // el día siguiente. Se usa todayISO() (componentes locales del Date).
+        fecha: todayISO(),
         estado: 'pendiente',
         items: ordenItems,
         subtotal: presupuesto.subtotal,
@@ -1162,7 +1167,10 @@ export function useDashboardStats(): DashboardStats {
     const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
     const hace7Dias = new Date(ahora);
     hace7Dias.setDate(hace7Dias.getDate() - 7);
-    const hoyStr = ahora.toISOString().split('T')[0];
+    // ANTES: `ahora.toISOString().split('T')[0]` -- fecha en UTC. Pasadas
+    // las 21 hs (hora Argentina) "ventas hoy" comparaba contra el día
+    // siguiente y no encontraba nada aunque hubiera facturas de esa tarde.
+    const hoyStr = todayISO();
 
     const facturas = comprobantes.filter((c) => c.tipo === 'factura' && c.estado !== 'anulado');
     const facturasMes = facturas.filter((c) => new Date(c.fecha) >= inicioMes);
