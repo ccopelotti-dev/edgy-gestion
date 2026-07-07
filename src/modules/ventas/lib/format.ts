@@ -47,9 +47,20 @@ export function formatDateTime(isoDate: string): string {
 
 /**
  * Devuelve la fecha de hoy en formato ISO (YYYY-MM-DD)
+ *
+ * ANTES usaba `new Date().toISOString().slice(0, 10)`, que da la fecha en
+ * UTC. Como Argentina es UTC-3, pasadas las 21 hs (hora local) el reloj UTC
+ * ya cambió de día: comprobantes, presupuestos, órdenes y el punto de venta
+ * nuevos se creaban por defecto con la fecha de mañana, y "Ventas hoy" del
+ * dashboard no encontraba nada aunque hubiera ventas cargadas esa misma
+ * tarde/noche. Se arma la fecha a partir de los componentes locales del
+ * Date (que sí respetan la zona horaria del navegador) en vez de UTC.
  */
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 /**
