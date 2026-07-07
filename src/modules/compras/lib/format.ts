@@ -21,8 +21,16 @@ export function formatDateTime(isoDate: string): string {
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// ANTES: `new Date().toISOString().slice(0, 10)` -- toISOString() da la
+// fecha en UTC, y Argentina es UTC-3. Pasadas las 21 hs (hora local) el
+// reloj UTC ya cambió de día, así que las cotizaciones/OC/comprobantes
+// nuevos se creaban por defecto con la fecha de mañana. Se arma la fecha
+// a partir de los componentes locales del Date en vez de UTC.
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 export function nowISO(): string {
