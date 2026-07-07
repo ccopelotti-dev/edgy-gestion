@@ -12,6 +12,14 @@
 // masiva + Reportes). Esta reescritura los suma al resto de las
 // entidades (insumos, fórmulas, movimientos, recepciones,
 // transferencias, control) que hasta ahora sólo vivían acá.
+//
+// FIX de huso horario (ver auditoría de toISOString): las 8 fechas que
+// antes se armaban con `new Date().toISOString().slice(0, 10)` -- en
+// UTC -- ahora usan todayISO() de lib/format, que arma la fecha con los
+// componentes locales del Date. Antes, pasadas las 21 hs (hora
+// Argentina), un producto/insumo/fórmula/recepción/transferencia/regla de
+// control nuevo, o un ajuste/recepción rápida de stock, quedaba fechado
+// para el día siguiente.
 // ============================================================
 
 import {
@@ -40,6 +48,7 @@ import type {
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
+import { todayISO } from '../lib/format'
 
 // ─── Helpers de id ──────────────────────────────────────────
 
@@ -111,7 +120,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nuevo: Producto = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        createdAt: todayISO(),
       }
       return { ...state, productos: [...state.productos, nuevo] }
     }
@@ -133,7 +142,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nuevo: Insumo = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        createdAt: todayISO(),
       }
       return { ...state, insumos: [...state.insumos, nuevo] }
     }
@@ -188,7 +197,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nueva: Formula = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        createdAt: todayISO(),
       }
       return { ...state, formulas: [...state.formulas, nueva] }
     }
@@ -216,7 +225,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nueva: Recepcion = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        createdAt: todayISO(),
       }
       return { ...state, recepciones: [...state.recepciones, nueva] }
     }
@@ -293,7 +302,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nueva: Transferencia = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        createdAt: todayISO(),
       }
       return { ...state, transferencias: [...state.transferencias, nueva] }
     }
@@ -303,7 +312,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nueva: ReglaControl = {
         ...action.payload,
         id: uid(),
-        createdAt: new Date().toISOString().slice(0, 10),
+        createdAt: todayISO(),
       }
       return { ...state, reglasControl: [...state.reglasControl, nueva] }
     }
@@ -325,7 +334,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         cantidad,
         motivo,
         nota,
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: todayISO(),
         origen: 'ajuste_manual',
       }
 
@@ -362,7 +371,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         cantidad,
         costoUnitario,
         nota,
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: todayISO(),
         origen: 'recepcion',
       }
 
