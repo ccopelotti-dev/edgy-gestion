@@ -37,6 +37,20 @@ interface ResumenDashboard {
 
 const DIAS_FLUJO = 30
 
+// OJO: no usar `Date.toISOString()` para calcular "hoy" -- eso da la fecha
+// en UTC, y Argentina es UTC-3. Pasadas las 21 hs (hora local) el reloj
+// UTC ya cambió de día, así que "ventas hoy" quedaba comparando contra el
+// día siguiente y no encontraba nada aunque hubiera ventas cargadas esa
+// misma tarde/noche. Esta función arma la fecha a partir de los
+// componentes locales del Date (getFullYear/getMonth/getDate), que sí
+// respetan la zona horaria del navegador.
+function fechaLocalISO(d: Date): string {
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 const VACIO: Omit<ResumenDashboard, 'cargando' | 'error'> = {
   saldoCaja: 0,
   totalBancos: 0,
@@ -62,10 +76,10 @@ export function useResumenDashboard(clienteId: string | undefined): ResumenDashb
     setError(null)
 
     const hoy = new Date()
-    const hoyStr = hoy.toISOString().split('T')[0]
+    const hoyStr = fechaLocalISO(hoy)
     const desdeFlujo = new Date(hoy)
     desdeFlujo.setDate(desdeFlujo.getDate() - DIAS_FLUJO)
-    const desdeFlujoStr = desdeFlujo.toISOString().split('T')[0]
+    const desdeFlujoStr = fechaLocalISO(desdeFlujo)
 
     Promise.all([
       supabase.from('movimientos_caja').select('tipo, medio_pago, monto, fecha').eq('cliente_id', clienteId),
