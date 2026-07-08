@@ -49,7 +49,7 @@ export async function cerrarComandaComoVenta(
   }
 
   const items = comanda.items.map((i) => {
-    const alicuota = (i.productoId && ivaPorProducto.get(i.productoId)) ?? IVA_DEFAULT
+    const alicuota = i.productoId ? (ivaPorProducto.get(i.productoId) ?? IVA_DEFAULT) : IVA_DEFAULT
     const montoIva = i.subtotal * (alicuota / 100)
     return {
       id: crypto.randomUUID(),
