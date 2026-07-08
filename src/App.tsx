@@ -10,6 +10,7 @@ import { ClienteDetalle } from '@/pages/panel/ClienteDetalle'
 import { ModulosListado } from '@/pages/panel/ModulosListado'
 import { CompletarCuenta } from '@/pages/CompletarCuenta'
 import { Ingresar } from '@/pages/Ingresar'
+import MenuPublico from '@/pages/MenuPublico'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
 
 function RaizRedirect() {
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/" element={<RaizRedirect />} />
         <Route path="/ingresar" element={<Ingresar />} />
         <Route path="/completar-cuenta" element={<CompletarCuenta />} />
+        <Route path="/menu/:slug" element={<MenuPublico />} />
         <Route element={<RutaStaff />}>
           <Route path="/panel" element={<PanelLayout />}>
             <Route index element={<Navigate to="/panel/nuevo-cliente" replace />} />
