@@ -15,8 +15,10 @@ import {
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { useTurnoActivo } from '@/hooks/useTurnoActivo'
+import { MEDIO_PAGO_LABEL, type MedioPago } from '@/modules/ventas/types'
 import { useComandasCocina, useComandaDeMesa } from '../data/store'
 import { formatARS, formatHora, ESTADO_COCINA_LABEL } from '../lib/format'
+import { cerrarComandaComoVenta } from '../lib/cerrarComandaVenta'
 
 interface MesaLite {
   id: string
@@ -48,6 +50,8 @@ export default function Mesa() {
   const [productoId, setProductoId] = useState('')
   const [cantidadNueva, setCantidadNueva] = useState(1)
   const [nota, setNota] = useState('')
+  const [medioPago, setMedioPago] = useState<MedioPago>('efectivo')
+  const [cerrando, setCerrando] = useState(false)
 
   useEffect(() => {
     if (!mesaId) return
@@ -122,13 +126,21 @@ export default function Mesa() {
     dispatch({ type: 'PASAR_A_COBRO', payload: { comandaId: comanda.id } })
   }
 
-  function cerrarComanda() {
-    if (!comanda) return
-    // NOTA: comprobanteId queda sin resolver por ahora. Crear el
-    // Comprobante real en Ventas (origenModulo:'comandas-cocina',
-    // origenId: comanda.id) y recien despues despachar CERRAR_COMANDA
-    // con ese id es la integracion pendiente (Tarea F).
-    dispatch({ type: 'CERRAR_COMANDA', payload: { comandaId: comanda.id } })
+  async function cerrarComanda() {
+    if (!comanda || !cliente?.id) return
+    setCerrando(true)
+    // Antes de cerrar la comanda acá, se genera el Comprobante real en
+    // Ventas y se refleja el cobro en Tesorería (Tarea F) — recién con
+    // ese comprobanteId resuelto se despacha CERRAR_COMANDA, mismo
+    // criterio que Ventas/Compras resolviendo `numero` antes de llegar
+    // al reducer.
+    const comprobanteId = await cerrarComandaComoVenta(comanda, cliente.id, medioPago)
+    if (!comprobanteId) {
+      window.alert('No se pudo generar el comprobante de venta. Revisá la consola e intentá de nuevo.')
+      setCerrando(false)
+      return
+    }
+    dispatch({ type: 'CERRAR_COMANDA', payload: { comandaId: comanda.id, comprobanteId } })
     navigate('/m/mesas-salon')
   }
 
@@ -325,21 +337,42 @@ export default function Mesa() {
             </table>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {comanda.estado === 'abierta' ? (
-              <>
-                <Button onClick={pasarACobro} disabled={comanda.items.length === 0}>
-                  <Receipt className="mr-1.5 h-4 w-4" />
-                  Pasar a cobro
+          {comanda.estado === 'abierta' ? (
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={pasarACobro} disabled={comanda.items.length === 0}>
+                <Receipt className="mr-1.5 h-4 w-4" />
+                Pasar a cobro
+              </Button>
+              <Button variant="outline" className="text-red-600" onClick={cancelarComanda}>
+                Cancelar comanda
+              </Button>
+            </div>
+          ) : (
+            <Card className="max-w-sm">
+              <CardContent className="flex flex-col gap-3 py-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="medio-pago">Medio de pago</Label>
+                  <Select value={medioPago} onValueChange={(v) => setMedioPago(v as MedioPago)}>
+                    <SelectTrigger id="medio-pago">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(MEDIO_PAGO_LABEL) as MedioPago[])
+                        .filter((mp) => mp !== 'cuenta_corriente')
+                        .map((mp) => (
+                          <SelectItem key={mp} value={mp}>
+                            {MEDIO_PAGO_LABEL[mp]}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={cerrarComanda} disabled={cerrando}>
+                  {cerrando ? 'Generando comprobante…' : `Cobrar ${formatARS(comanda.total)} y cerrar`}
                 </Button>
-                <Button variant="outline" className="text-red-600" onClick={cancelarComanda}>
-                  Cancelar comanda
-                </Button>
-              </>
-            ) : (
-              <Button onClick={cerrarComanda}>Cerrar comanda</Button>
-            )}
-          </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
     </div>
