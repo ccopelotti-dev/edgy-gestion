@@ -85,7 +85,9 @@ export default function ControlStock() {
 
   const today = todayISO()
 
-  // Build control items list
+  // Build control items list. Cuando un producto es 'con_variantes', cada
+  // variante genera su propio ControlItem (id = variante.id) -- así el
+  // conteo físico se hace por "Remera Roja M", no por "Remera" en general.
   const controlItems = useMemo<ControlItem[]>(() => {
     const items: ControlItem[] = []
 
@@ -97,6 +99,36 @@ export default function ControlStock() {
       const rule = state.reglasControl.find(
         (r) => !r.rubroId || r.rubroId === p.rubroId,
       )
+
+      if (p.tipo === 'con_variantes') {
+        for (const v of p.variantes) {
+          const lastRegistro = state.registrosControl
+            .filter((rc) => rc.itemTipo === 'producto' && rc.itemId === v.id)
+            .sort((a, b) => b.fecha.localeCompare(a.fecha))[0]
+
+          let estado: ControlStatus = 'sin_control'
+          if (rule) {
+            if (!lastRegistro) {
+              estado = 'vencido'
+            } else {
+              const dias = daysBetween(lastRegistro.fecha, today)
+              estado = dias >= rule.frecuenciaDias ? 'vencido' : 'al_dia'
+            }
+          }
+
+          items.push({
+            id: v.id,
+            nombre: `${p.nombre} — ${[v.color, v.talle].filter(Boolean).join(' / ') || '(sin nombre)'}`,
+            tipo: 'producto',
+            stock: v.stock,
+            unidadAbrev: unidadAbrev(p.unidadVenta),
+            rubroId: p.rubroId,
+            ultimoControl: lastRegistro?.fecha ?? null,
+            estado,
+          })
+        }
+        continue
+      }
 
       // Find last control registro
       const lastRegistro = state.registrosControl

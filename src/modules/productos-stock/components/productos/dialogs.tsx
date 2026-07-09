@@ -22,6 +22,8 @@ import { generarCodigoInterno } from '../../lib/etiqueta'
 import { supabase } from '@/lib/supabase'
 import type {
   Producto,
+  ProductoVariante,
+  TipoProducto,
   Insumo,
   Rubro,
   SubRubro,
@@ -38,6 +40,13 @@ import { ALICUOTAS_IVA, UNIDADES, MOTIVOS_AJUSTE, MAX_IMAGENES_PRODUCTO } from '
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
+
+// ─── ids client-side para variantes nuevas (mismo patrón que Servicios) ───────
+
+let _vSeq = 0
+function vUid(): string {
+  return `var-${Date.now()}-${++_vSeq}-${Math.random().toString(36).slice(2, 7)}`
+}
 
 // ─── ProductoDialog ───────────────────────────────────────────────────────────
 
@@ -76,6 +85,8 @@ const emptyProducto: ProductoFormData = {
   estado: 'activo',
   imagenes: [],
   codigoBarras: undefined,
+  tipo: 'unico',
+  variantes: [],
 }
 
 export function ProductoDialog({
@@ -157,7 +168,13 @@ export function ProductoDialog({
       setNuevaMarcaNombre('')
       if (editData) {
         const { id, stock, createdAt, tieneFormula, ...rest } = editData
-        setForm({ ...rest, imagenes: rest.imagenes ?? [] })
+        setForm({
+          ...rest,
+          imagenes: rest.imagenes ?? [],
+          // Copia profunda de las variantes -- el editor las muta localmente
+          // hasta que se guarda, sin tocar el state global.
+          variantes: rest.variantes.map((v) => ({ ...v })),
+        })
       } else {
         setForm(emptyProducto)
       }
@@ -166,6 +183,35 @@ export function ProductoDialog({
 
   function update<K extends keyof ProductoFormData>(key: K, value: ProductoFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  // ── Variantes (Fase 2: color/talle) ──────────────────────────────────────
+  // El stock de cada variante NO se edita acá -- se maneja igual que el
+  // stock de un producto único, vía Recepción o Ajuste de stock. Acá solo
+  // se define QUÉ variantes existen (color/talle/código de barras propio).
+  // Las variantes nuevas arrancan en 0; las existentes conservan su stock
+  // real (se muestra de solo lectura como referencia).
+
+  function handleAddVariante() {
+    setForm((f) => ({
+      ...f,
+      variantes: [...f.variantes, { id: vUid(), color: '', talle: '', stock: 0 }],
+    }))
+  }
+
+  function handleUpdateVariante(id: string, updates: Partial<ProductoVariante>) {
+    setForm((f) => ({
+      ...f,
+      variantes: f.variantes.map((v) => (v.id === id ? { ...v, ...updates } : v)),
+    }))
+  }
+
+  function handleDeleteVariante(id: string) {
+    setForm((f) => ({ ...f, variantes: f.variantes.filter((v) => v.id !== id) }))
+  }
+
+  function handleTipoChange(tipo: TipoProducto) {
+    setForm((f) => ({ ...f, tipo, variantes: tipo === 'unico' ? [] : f.variantes }))
   }
 
   async function handleFilesSelected(files: FileList | null) {
@@ -221,8 +267,14 @@ export function ProductoDialog({
     onOpenChange(false)
   }
 
+  const variantesValidas =
+    form.tipo === 'unico' ||
+    (form.variantes.length > 0 &&
+      form.variantes.every((v) => (v.color?.trim() || '') || (v.talle?.trim() || '')))
+
   function handleSave() {
     if (!form.nombre.trim()) return
+    if (!variantesValidas) return
 
     const codigoBarrasLimpio = form.codigoBarras?.trim() || undefined
     if (codigoBarrasLimpio) {
@@ -244,6 +296,15 @@ export function ProductoDialog({
       subRubroId: form.subRubroId || undefined,
       marcaId: form.marcaId || undefined,
       proveedorId: form.proveedorId || undefined,
+      variantes:
+        form.tipo === 'con_variantes'
+          ? form.variantes.map((v) => ({
+              ...v,
+              color: v.color?.trim() || undefined,
+              talle: v.talle?.trim() || undefined,
+              codigoBarras: v.codigoBarras?.trim() || undefined,
+            }))
+          : [],
     })
     onOpenChange(false)
   }
@@ -605,6 +666,117 @@ export function ProductoDialog({
             />
           </div>
 
+          {/* Tipo: único o con variantes */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Tipo de producto</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  checked={form.tipo === 'unico'}
+                  onChange={() => handleTipoChange('unico')}
+                />
+                Único
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  checked={form.tipo === 'con_variantes'}
+                  onChange={() => handleTipoChange('con_variantes')}
+                />
+                Con variantes (color / talle)
+              </label>
+            </div>
+          </div>
+
+          {/* Variantes */}
+          {form.tipo === 'con_variantes' && (
+            <div className="space-y-3 rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold">Variantes</h4>
+                <Button type="button" variant="outline" size="sm" onClick={handleAddVariante}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Agregar variante
+                </Button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                El stock de cada variante se carga desde Recepción o Ajuste de stock, no acá --
+                este formulario solo define qué combinaciones existen.
+              </p>
+
+              {form.variantes.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-md">
+                  Sin variantes. Agregá al menos una (ej: "Rojo" / "M").
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="px-2 py-2 font-medium">Color</th>
+                        <th className="px-2 py-2 font-medium">Talle</th>
+                        <th className="px-2 py-2 font-medium">Cód. barras</th>
+                        <th className="px-2 py-2 font-medium w-20 text-right">Stock</th>
+                        <th className="px-2 py-2 w-10" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {form.variantes.map((v) => (
+                        <tr key={v.id} className="border-b last:border-0">
+                          <td className="px-2 py-2">
+                            <input
+                              className={`${inputClass} text-xs`}
+                              value={v.color ?? ''}
+                              onChange={(e) =>
+                                handleUpdateVariante(v.id, { color: e.target.value })
+                              }
+                              placeholder="Ej: Rojo"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input
+                              className={`${inputClass} text-xs`}
+                              value={v.talle ?? ''}
+                              onChange={(e) =>
+                                handleUpdateVariante(v.id, { talle: e.target.value })
+                              }
+                              placeholder="Ej: M"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input
+                              className={`${inputClass} text-xs`}
+                              value={v.codigoBarras ?? ''}
+                              onChange={(e) =>
+                                handleUpdateVariante(v.id, { codigoBarras: e.target.value })
+                              }
+                              placeholder="Opcional"
+                            />
+                          </td>
+                          <td className="px-2 py-2 text-right text-xs text-muted-foreground tabular-nums">
+                            {v.stock}
+                          </td>
+                          <td className="px-2 py-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-red-500"
+                              onClick={() => handleDeleteVariante(v.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Checkboxes */}
           <div className="flex items-center gap-6">
             <label className="flex items-center gap-2 text-sm">
@@ -632,7 +804,10 @@ export function ProductoDialog({
           <Button variant="outline" onClick={handleCancelar}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!form.nombre.trim() || subiendo}>
+          <Button
+            onClick={handleSave}
+            disabled={!form.nombre.trim() || subiendo || !variantesValidas}
+          >
             {editData ? 'Guardar cambios' : 'Crear producto'}
           </Button>
         </DialogFooter>
@@ -842,6 +1017,8 @@ interface LineaForm {
   key: string
   itemTipo: 'producto' | 'insumo'
   itemId: string
+  /** Solo si itemTipo === 'producto' y ese producto es 'con_variantes'. */
+  varianteId: string
   cantidad: number
   costoUnitario: number
   /** Vencimiento del lote que ingresa (opcional -- perecederos). */
@@ -879,37 +1056,70 @@ export function RecepcionDialog({
   // "tipea" el codigo y aprieta Enter solo, como si fuera un teclado -- no
   // hace falta ninguna integracion especial, solo escuchar el Enter de este
   // input. Si el producto ya tiene una linea cargada, suma 1 a la cantidad
-  // en vez de duplicar la linea.
+  // en vez de duplicar la linea. Busca primero por código del producto
+  // (tipo 'unico'), y si no matchea, por código de una variante puntual
+  // (tipo 'con_variantes') -- así el lector sirve para ambos casos.
   function handleEscanear(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return
     const codigo = codigoEscaneado.trim()
     if (!codigo) return
 
     const producto = productos.find((p) => p.codigoBarras === codigo)
-    if (!producto) {
-      setErrorEscaneo(`No se encontró ningún producto con el código "${codigo}".`)
+    if (producto) {
+      setErrorEscaneo('')
+      setLineas((prev) => {
+        const idx = prev.findIndex((l) => l.itemTipo === 'producto' && l.itemId === producto.id && !l.varianteId)
+        if (idx >= 0) {
+          return prev.map((l, i) => (i === idx ? { ...l, cantidad: l.cantidad + 1 } : l))
+        }
+        return [
+          ...prev,
+          {
+            key: `${Date.now()}-${Math.random()}`,
+            itemTipo: 'producto',
+            itemId: producto.id,
+            varianteId: '',
+            cantidad: 1,
+            costoUnitario: producto.costo,
+            fechaVencimiento: '',
+          },
+        ]
+      })
+      setCodigoEscaneado('')
       return
     }
 
-    setErrorEscaneo('')
-    setLineas((prev) => {
-      const idx = prev.findIndex((l) => l.itemTipo === 'producto' && l.itemId === producto.id)
-      if (idx >= 0) {
-        return prev.map((l, i) => (i === idx ? { ...l, cantidad: l.cantidad + 1 } : l))
+    // Buscar por código de barras de una variante puntual.
+    for (const p of productos) {
+      const variante = p.variantes.find((v) => v.codigoBarras === codigo)
+      if (variante) {
+        setErrorEscaneo('')
+        setLineas((prev) => {
+          const idx = prev.findIndex(
+            (l) => l.itemTipo === 'producto' && l.itemId === p.id && l.varianteId === variante.id,
+          )
+          if (idx >= 0) {
+            return prev.map((l, i) => (i === idx ? { ...l, cantidad: l.cantidad + 1 } : l))
+          }
+          return [
+            ...prev,
+            {
+              key: `${Date.now()}-${Math.random()}`,
+              itemTipo: 'producto',
+              itemId: p.id,
+              varianteId: variante.id,
+              cantidad: 1,
+              costoUnitario: p.costo,
+              fechaVencimiento: '',
+            },
+          ]
+        })
+        setCodigoEscaneado('')
+        return
       }
-      return [
-        ...prev,
-        {
-          key: `${Date.now()}-${Math.random()}`,
-          itemTipo: 'producto',
-          itemId: producto.id,
-          cantidad: 1,
-          costoUnitario: producto.costo,
-          fechaVencimiento: '',
-        },
-      ]
-    })
-    setCodigoEscaneado('')
+    }
+
+    setErrorEscaneo(`No se encontró ningún producto con el código "${codigo}".`)
   }
 
   function addLinea() {
@@ -919,6 +1129,7 @@ export function RecepcionDialog({
         key: `${Date.now()}-${Math.random()}`,
         itemTipo: 'producto',
         itemId: '',
+        varianteId: '',
         cantidad: 0,
         costoUnitario: 0,
         fechaVencimiento: '',
@@ -936,8 +1147,19 @@ export function RecepcionDialog({
     setLineas((prev) => prev.filter((_, i) => i !== index))
   }
 
+  // Una línea de producto 'con_variantes' recién es válida cuando además
+  // eligieron la variante puntual (no alcanza con elegir el producto).
+  function lineaValida(l: LineaForm): boolean {
+    if (!l.itemId || l.cantidad <= 0) return false
+    if (l.itemTipo === 'producto') {
+      const producto = productos.find((p) => p.id === l.itemId)
+      if (producto?.tipo === 'con_variantes' && !l.varianteId) return false
+    }
+    return true
+  }
+
   function handleSave() {
-    const validLineas = lineas.filter((l) => l.itemId && l.cantidad > 0)
+    const validLineas = lineas.filter(lineaValida)
     if (validLineas.length === 0) return
 
     onSave({
@@ -953,6 +1175,7 @@ export function RecepcionDialog({
         id: crypto.randomUUID(),
         itemTipo: l.itemTipo,
         itemId: l.itemId,
+        varianteId: l.varianteId || undefined,
         cantidad: l.cantidad,
         costoUnitario: l.costoUnitario,
         fechaVencimiento: l.fechaVencimiento || undefined,
@@ -1051,100 +1274,140 @@ export function RecepcionDialog({
             {lineas.map((linea, idx) => {
               const itemsDisponibles =
                 linea.itemTipo === 'producto' ? productos : insumos
+              const productoSeleccionado =
+                linea.itemTipo === 'producto'
+                  ? productos.find((p) => p.id === linea.itemId)
+                  : undefined
+              const tieneVariantes =
+                productoSeleccionado?.tipo === 'con_variantes'
+
               return (
                 <div
                   key={linea.key}
-                  className="grid grid-cols-[110px_1fr_85px_85px_130px_36px] gap-2 items-end"
+                  className="grid gap-2 rounded-md border p-2"
                 >
-                  {/* Tipo */}
-                  <div className="grid gap-1">
-                    <label className="text-xs text-muted-foreground">Tipo</label>
-                    <select
-                      className={inputClass}
-                      value={linea.itemTipo}
-                      onChange={(e) =>
-                        updateLinea(idx, {
-                          itemTipo: e.target.value as 'producto' | 'insumo',
-                          itemId: '',
-                        })
-                      }
+                  <div className="grid grid-cols-[110px_1fr_85px_85px_130px_36px] gap-2 items-end">
+                    {/* Tipo */}
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Tipo</label>
+                      <select
+                        className={inputClass}
+                        value={linea.itemTipo}
+                        onChange={(e) =>
+                          updateLinea(idx, {
+                            itemTipo: e.target.value as 'producto' | 'insumo',
+                            itemId: '',
+                            varianteId: '',
+                          })
+                        }
+                      >
+                        <option value="producto">Producto</option>
+                        <option value="insumo">Insumo</option>
+                      </select>
+                    </div>
+
+                    {/* Item */}
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Item</label>
+                      <select
+                        className={inputClass}
+                        value={linea.itemId}
+                        onChange={(e) =>
+                          updateLinea(idx, { itemId: e.target.value, varianteId: '' })
+                        }
+                      >
+                        <option value="">Seleccionar...</option>
+                        {itemsDisponibles.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Cantidad */}
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Cantidad</label>
+                      <input
+                        className={inputClass}
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={linea.cantidad || ''}
+                        onChange={(e) =>
+                          updateLinea(idx, { cantidad: parseFloat(e.target.value) || 0 })
+                        }
+                      />
+                    </div>
+
+                    {/* Costo unitario */}
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Costo unit.</label>
+                      <input
+                        className={inputClass}
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={linea.costoUnitario || ''}
+                        onChange={(e) =>
+                          updateLinea(idx, {
+                            costoUnitario: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                      />
+                    </div>
+
+                    {/* Vencimiento / lote */}
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Vencimiento</label>
+                      <input
+                        className={inputClass}
+                        type="date"
+                        value={linea.fechaVencimiento}
+                        onChange={(e) =>
+                          updateLinea(idx, { fechaVencimiento: e.target.value })
+                        }
+                      />
+                    </div>
+
+                    {/* Delete */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-muted-foreground hover:text-red-500"
+                      onClick={() => removeLinea(idx)}
                     >
-                      <option value="producto">Producto</option>
-                      <option value="insumo">Insumo</option>
-                    </select>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
 
-                  {/* Item */}
-                  <div className="grid gap-1">
-                    <label className="text-xs text-muted-foreground">Item</label>
-                    <select
-                      className={inputClass}
-                      value={linea.itemId}
-                      onChange={(e) => updateLinea(idx, { itemId: e.target.value })}
-                    >
-                      <option value="">Seleccionar...</option>
-                      {itemsDisponibles.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Cantidad */}
-                  <div className="grid gap-1">
-                    <label className="text-xs text-muted-foreground">Cantidad</label>
-                    <input
-                      className={inputClass}
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={linea.cantidad || ''}
-                      onChange={(e) =>
-                        updateLinea(idx, { cantidad: parseFloat(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-
-                  {/* Costo unitario */}
-                  <div className="grid gap-1">
-                    <label className="text-xs text-muted-foreground">Costo unit.</label>
-                    <input
-                      className={inputClass}
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={linea.costoUnitario || ''}
-                      onChange={(e) =>
-                        updateLinea(idx, {
-                          costoUnitario: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                    />
-                  </div>
-
-                  {/* Vencimiento / lote */}
-                  <div className="grid gap-1">
-                    <label className="text-xs text-muted-foreground">Vencimiento</label>
-                    <input
-                      className={inputClass}
-                      type="date"
-                      value={linea.fechaVencimiento}
-                      onChange={(e) =>
-                        updateLinea(idx, { fechaVencimiento: e.target.value })
-                      }
-                    />
-                  </div>
-
-                  {/* Delete */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-muted-foreground hover:text-red-500"
-                    onClick={() => removeLinea(idx)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {/* Selector de variante (solo si el producto es 'con_variantes') */}
+                  {tieneVariantes && (
+                    <div className="grid gap-1 max-w-xs">
+                      <label className="text-xs text-muted-foreground">
+                        Variante (color / talle) *
+                      </label>
+                      <select
+                        className={inputClass}
+                        value={linea.varianteId}
+                        onChange={(e) => updateLinea(idx, { varianteId: e.target.value })}
+                      >
+                        <option value="">Seleccionar...</option>
+                        {productoSeleccionado!.variantes.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {[v.color, v.talle].filter(Boolean).join(' / ') || '(sin nombre)'}
+                            {' — stock actual: '}
+                            {v.stock}
+                          </option>
+                        ))}
+                      </select>
+                      {!linea.varianteId && (
+                        <p className="text-xs text-red-500">
+                          Elegí la variante antes de guardar la recepción.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -1157,7 +1420,7 @@ export function RecepcionDialog({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={lineas.filter((l) => l.itemId && l.cantidad > 0).length === 0}
+            disabled={lineas.filter(lineaValida).length === 0}
           >
             Crear recepcion
           </Button>
@@ -1168,6 +1431,8 @@ export function RecepcionDialog({
 }
 
 // ─── AjusteStockDialog ────────────────────────────────────────────────────────
+// Usado solo para Insumos (Insumos.tsx) -- los productos con variantes se
+// ajustan desde la página Stock, que maneja su propio selector de variante.
 
 interface AjusteStockDialogProps {
   open: boolean

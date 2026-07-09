@@ -96,9 +96,31 @@ export interface Marca {
   nombre: string
 }
 
+// ─── Variantes de producto ────────────────────────────────────────────────────
+// Fase 2 del refactor de Productos. Un producto "con variantes" (ej. una
+// remera con combinaciones color/talle) reemplaza el stock único por N
+// variantes, CADA UNA CON SU PROPIO STOCK -- confirmado con el usuario, es
+// el comportamiento estándar de retail con talles/colores. El precio de
+// venta sigue siendo el del producto padre (mismo precio para todas las
+// variantes) -- a diferencia de Servicios, acá no se abre precio por
+// variante.
+
+export interface ProductoVariante {
+  id: string
+  /** Color de la variante (opcional -- puede haber productos solo con talle, o solo con color). */
+  color?: string
+  /** Talle de la variante (opcional). */
+  talle?: string
+  /** Código de barras propio de esta combinación (opcional, distinto al del producto padre). */
+  codigoBarras?: string
+  stock: number
+}
+
 // ─── Producto ───────────────────────────────────────────────────────────────────
 
 export type EstadoProducto = 'activo' | 'inactivo'
+
+export type TipoProducto = 'unico' | 'con_variantes'
 
 export interface Producto {
   id: string
@@ -118,6 +140,11 @@ export interface Producto {
   costo: number
   iva: AlicuotaIVA
   unidadVenta: UnidadMedida
+  /** Si tipo === 'con_variantes', este campo es la SUMA del stock de todas
+   * las variantes (se mantiene sincronizado por el reducer) -- así el resto
+   * del sistema (alertas de stock bajo, valor de inventario) sigue
+   * funcionando sin tener que saber de variantes. El desglose real vive en
+   * `variantes`. */
   stock: number
   stockMinimo: number
   controlaStock: boolean
@@ -138,6 +165,10 @@ export interface Producto {
    * unicidad en el reducer (ADD_PRODUCTO/UPDATE_PRODUCTO).
    */
   codigoBarras?: string
+  /** 'unico' (default, como hasta ahora) o 'con_variantes' (color/talle). */
+  tipo: TipoProducto
+  /** Solo relevante si tipo === 'con_variantes'. Vacío si tipo === 'unico'. */
+  variantes: ProductoVariante[]
   createdAt: string
 }
 
@@ -217,6 +248,10 @@ export interface MovimientoStock {
   tipo: 'ingreso' | 'egreso' | 'ajuste'
   itemTipo: 'producto' | 'insumo'
   itemId: string
+  /** Si itemTipo === 'producto' y el producto es 'con_variantes', identifica
+   * la variante puntual afectada (ej. "Remera Roja M"). Vacío para
+   * productos 'unico' e insumos. */
+  varianteId?: string
   cantidad: number
   motivo?: MotivoAjuste
   nota?: string
@@ -238,6 +273,10 @@ export interface LineaRecepcion {
   id: string
   itemTipo: 'producto' | 'insumo'
   itemId: string
+  /** Igual que en MovimientoStock: variante puntual si el producto es
+   * 'con_variantes'. Se copia al movimiento que esta línea genera al
+   * confirmar la recepción. */
+  varianteId?: string
   cantidad: number
   costoUnitario: number
   /** Vencimiento del lote que ingresa (opcional -- perecederos). */

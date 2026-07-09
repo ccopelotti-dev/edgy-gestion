@@ -201,7 +201,14 @@ export default function Productos() {
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                       {p.codigoBarras ?? '-'}
                     </td>
-                    <td className="px-4 py-3 font-medium">{p.nombre}</td>
+                    <td className="px-4 py-3 font-medium">
+                      {p.nombre}
+                      {p.tipo === 'con_variantes' && (
+                        <span className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
+                          {p.variantes.length} variante{p.variantes.length === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {rubro
                         ? subRubro

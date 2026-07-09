@@ -31,6 +31,10 @@ const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
 
 // ─── Item unificado para la tabla ────────────────────────────────────────────
+// Cuando un producto es 'con_variantes', cada variante genera UN StockItem
+// propio (id = variante.id, nombre = "Producto — Color / Talle") en vez de
+// un único renglón para todo el producto -- así Recibir/Ajustar operan
+// sobre la variante puntual, igual que Recepción y Control de Stock.
 
 interface StockItem {
   id: string
@@ -40,6 +44,9 @@ interface StockItem {
   minimo: number
   costo: number
   unidadAbrev: string
+  /** Producto padre + variante puntual, solo cuando aplica. */
+  productoId?: string
+  varianteId?: string
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -66,15 +73,32 @@ export default function Stock() {
   const items = useMemo<StockItem[]>(() => {
     const fromProductos: StockItem[] = state.productos
       .filter((p) => p.controlaStock)
-      .map((p) => ({
-        id: p.id,
-        nombre: p.nombre,
-        tipo: 'producto' as const,
-        stock: p.stock,
-        minimo: p.stockMinimo,
-        costo: p.costo,
-        unidadAbrev: unidadAbrev(p.unidadVenta),
-      }))
+      .flatMap((p) => {
+        if (p.tipo === 'con_variantes') {
+          return p.variantes.map((v) => ({
+            id: v.id,
+            nombre: `${p.nombre} — ${[v.color, v.talle].filter(Boolean).join(' / ') || '(sin nombre)'}`,
+            tipo: 'producto' as const,
+            stock: v.stock,
+            minimo: p.stockMinimo,
+            costo: p.costo,
+            unidadAbrev: unidadAbrev(p.unidadVenta),
+            productoId: p.id,
+            varianteId: v.id,
+          }))
+        }
+        return [
+          {
+            id: p.id,
+            nombre: p.nombre,
+            tipo: 'producto' as const,
+            stock: p.stock,
+            minimo: p.stockMinimo,
+            costo: p.costo,
+            unidadAbrev: unidadAbrev(p.unidadVenta),
+          },
+        ]
+      })
 
     const fromInsumos: StockItem[] = state.insumos.map((i) => ({
       id: i.id,
@@ -111,7 +135,8 @@ export default function Stock() {
       type: 'RECIBIR_STOCK',
       payload: {
         itemTipo: recibirItem.tipo,
-        itemId: recibirItem.id,
+        itemId: recibirItem.varianteId ? recibirItem.productoId! : recibirItem.id,
+        varianteId: recibirItem.varianteId,
         cantidad: recibirCantidad,
         costoUnitario: recibirCosto > 0 ? recibirCosto : undefined,
       },
@@ -125,7 +150,8 @@ export default function Stock() {
       type: 'AJUSTAR_STOCK',
       payload: {
         itemTipo: ajustarItem.tipo,
-        itemId: ajustarItem.id,
+        itemId: ajustarItem.varianteId ? ajustarItem.productoId! : ajustarItem.id,
+        varianteId: ajustarItem.varianteId,
         cantidad: ajustarCantidad,
         motivo: ajustarMotivo,
         nota: ajustarNota || undefined,

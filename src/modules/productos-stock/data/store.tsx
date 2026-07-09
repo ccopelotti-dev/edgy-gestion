@@ -20,6 +20,15 @@
 // Argentina), un producto/insumo/fórmula/recepción/transferencia/regla de
 // control nuevo, o un ajuste/recepción rápida de stock, quedaba fechado
 // para el día siguiente.
+//
+// FASE 2 (variantes de color/talle): un producto 'con_variantes' tiene
+// stock INDIVIDUAL por combinación (ej. "Remera Roja M": 5, "Remera Azul
+// L": 3). El array `variantes` se sincroniza con delete+reinsert en cada
+// ADD/UPDATE_PRODUCTO (mismo patrón que `servicio_variantes` en el store
+// de Servicios) -- el formulario de producto SIEMPRE manda el stock
+// actual de cada variante existente (no lo resetea), así que esto es
+// seguro salvo la rara carrera de editar el producto justo mientras se
+// confirma una recepción de esa misma variante en simultáneo.
 // ============================================================
 
 import {
@@ -33,6 +42,7 @@ import {
 import type {
   ProductosStockState,
   Producto,
+  ProductoVariante,
   Insumo,
   Rubro,
   SubRubro,
@@ -94,6 +104,8 @@ type Action =
       payload: {
         itemTipo: 'producto' | 'insumo'
         itemId: string
+        /** Solo si itemTipo === 'producto' y el producto es 'con_variantes'. */
+        varianteId?: string
         cantidad: number
         motivo?: MovimientoStock['motivo']
         nota?: string
@@ -104,6 +116,8 @@ type Action =
       payload: {
         itemTipo: 'producto' | 'insumo'
         itemId: string
+        /** Solo si itemTipo === 'producto' y el producto es 'con_variantes'. */
+        varianteId?: string
         cantidad: number
         costoUnitario?: number
         nota?: string
@@ -266,6 +280,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           tipo: 'ingreso',
           itemTipo: linea.itemTipo,
           itemId: linea.itemId,
+          varianteId: linea.varianteId,
           cantidad: linea.cantidad,
           costoUnitario: linea.costoUnitario,
           fecha: recepcion.fecha,
@@ -278,15 +293,20 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         })
 
         if (linea.itemTipo === 'producto') {
-          productos = productos.map((p) =>
-            p.id === linea.itemId
-              ? {
-                  ...p,
-                  stock: p.stock + linea.cantidad,
-                  costo: linea.costoUnitario > 0 ? linea.costoUnitario : p.costo,
-                }
-              : p,
-          )
+          productos = productos.map((p) => {
+            if (p.id !== linea.itemId) return p
+            const nuevoCosto = linea.costoUnitario > 0 ? linea.costoUnitario : p.costo
+            if (linea.varianteId) {
+              const variantes = p.variantes.map((v) =>
+                v.id === linea.varianteId
+                  ? { ...v, stock: v.stock + linea.cantidad }
+                  : v,
+              )
+              const stock = variantes.reduce((sum, v) => sum + v.stock, 0)
+              return { ...p, variantes, stock, costo: nuevoCosto }
+            }
+            return { ...p, stock: p.stock + linea.cantidad, costo: nuevoCosto }
+          })
         } else {
           insumos = insumos.map((i) =>
             i.id === linea.itemId
@@ -348,13 +368,14 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
 
     // ── Ajustar stock (manual) ────────────────────────────────────────────────
     case 'AJUSTAR_STOCK': {
-      const { itemTipo, itemId, cantidad, motivo, nota } = action.payload
+      const { itemTipo, itemId, varianteId, cantidad, motivo, nota } = action.payload
 
       const movimiento: MovimientoStock = {
         id: uid(),
         tipo: 'ajuste',
         itemTipo,
         itemId,
+        varianteId,
         cantidad,
         motivo,
         nota,
@@ -366,9 +387,17 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       let insumos = state.insumos
 
       if (itemTipo === 'producto') {
-        productos = productos.map((p) =>
-          p.id === itemId ? { ...p, stock: p.stock + cantidad } : p,
-        )
+        productos = productos.map((p) => {
+          if (p.id !== itemId) return p
+          if (varianteId) {
+            const variantes = p.variantes.map((v) =>
+              v.id === varianteId ? { ...v, stock: v.stock + cantidad } : v,
+            )
+            const stock = variantes.reduce((sum, v) => sum + v.stock, 0)
+            return { ...p, variantes, stock }
+          }
+          return { ...p, stock: p.stock + cantidad }
+        })
       } else {
         insumos = insumos.map((i) =>
           i.id === itemId ? { ...i, stock: i.stock + cantidad } : i,
@@ -385,13 +414,14 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
 
     // ── Recibir stock (item individual) ───────────────────────────────────────
     case 'RECIBIR_STOCK': {
-      const { itemTipo, itemId, cantidad, costoUnitario, nota } = action.payload
+      const { itemTipo, itemId, varianteId, cantidad, costoUnitario, nota } = action.payload
 
       const movimiento: MovimientoStock = {
         id: uid(),
         tipo: 'ingreso',
         itemTipo,
         itemId,
+        varianteId,
         cantidad,
         costoUnitario,
         nota,
@@ -403,17 +433,19 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       let insumos = state.insumos
 
       if (itemTipo === 'producto') {
-        productos = productos.map((p) =>
-          p.id === itemId
-            ? {
-                ...p,
-                stock: p.stock + cantidad,
-                ...(costoUnitario != null && costoUnitario > 0
-                  ? { costo: costoUnitario }
-                  : {}),
-              }
-            : p,
-        )
+        productos = productos.map((p) => {
+          if (p.id !== itemId) return p
+          const costoUpdate =
+            costoUnitario != null && costoUnitario > 0 ? { costo: costoUnitario } : {}
+          if (varianteId) {
+            const variantes = p.variantes.map((v) =>
+              v.id === varianteId ? { ...v, stock: v.stock + cantidad } : v,
+            )
+            const stock = variantes.reduce((sum, v) => sum + v.stock, 0)
+            return { ...p, variantes, stock, ...costoUpdate }
+          }
+          return { ...p, stock: p.stock + cantidad, ...costoUpdate }
+        })
       } else {
         insumos = insumos.map((i) =>
           i.id === itemId
@@ -474,11 +506,39 @@ function productoToRow(p: Producto, clienteId: string) {
     codigo_barras: p.codigoBarras || null,
     marca_id: p.marcaId || null,
     proveedor_id: p.proveedorId || null,
+    tipo: p.tipo,
   }
 }
 
 function marcaToRow(m: Marca, clienteId: string) {
   return { id: m.id, cliente_id: clienteId, nombre: m.nombre }
+}
+
+function productoVarianteToRow(v: ProductoVariante, productoId: string, orden: number) {
+  return {
+    id: v.id,
+    producto_id: productoId,
+    color: v.color || null,
+    talle: v.talle || null,
+    codigo_barras: v.codigoBarras || null,
+    stock: v.stock,
+    orden,
+  }
+}
+
+// Mismo patrón que syncVariantes en el store de Servicios: borra todas las
+// variantes del producto y reinserta las actuales. Es seguro porque el
+// formulario de Producto siempre manda el stock REAL de cada variante
+// existente (nunca lo resetea a 0) -- ver comentario al inicio del archivo.
+function syncProductoVariantes(productoId: string, variantes: ProductoVariante[]) {
+  supabase.from('producto_variantes').delete().eq('producto_id', productoId).then(() => {
+    if (variantes.length) {
+      supabase
+        .from('producto_variantes')
+        .insert(variantes.map((v, idx) => productoVarianteToRow(v, productoId, idx)))
+        .then(logErr('variantes de producto'))
+    }
+  })
 }
 
 function insumoToRow(i: Insumo, clienteId: string) {
@@ -538,6 +598,7 @@ function movimientoToRow(m: MovimientoStock, clienteId: string) {
     tipo: m.tipo,
     item_tipo: m.itemTipo,
     item_id: m.itemId,
+    variante_id: m.varianteId || null,
     cantidad: m.cantidad,
     motivo: m.motivo || null,
     nota: m.nota || null,
@@ -567,6 +628,7 @@ function recepcionLineaToRow(l: LineaRecepcion, recepcionId: string) {
     recepcion_id: recepcionId,
     item_tipo: l.itemTipo,
     item_id: l.itemId,
+    variante_id: l.varianteId || null,
     cantidad: l.cantidad,
     costo_unitario: l.costoUnitario,
     fecha_vencimiento: l.fechaVencimiento || null,
@@ -634,12 +696,22 @@ function syncToSupabase(
     case 'ADD_PRODUCTO': {
       const p = nextState.productos[nextState.productos.length - 1]
       supabase.from('productos').insert(productoToRow(p, clienteId)).then(logErr('alta de producto'))
+      if (p.tipo === 'con_variantes' && p.variantes.length) {
+        supabase
+          .from('producto_variantes')
+          .insert(p.variantes.map((v, idx) => productoVarianteToRow(v, p.id, idx)))
+          .then(logErr('variantes de producto'))
+      }
       return
     }
-    case 'UPDATE_PRODUCTO':
-      supabase.from('productos').update(productoToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de producto'))
+    case 'UPDATE_PRODUCTO': {
+      const p = action.payload
+      supabase.from('productos').update(productoToRow(p, clienteId)).eq('id', p.id).then(logErr('edición de producto'))
+      syncProductoVariantes(p.id, p.tipo === 'con_variantes' ? p.variantes : [])
       return
+    }
     case 'DELETE_PRODUCTO':
+      // producto_variantes tiene ON DELETE CASCADE en la migración.
       supabase.from('productos').delete().eq('id', action.payload).then(logErr('borrado de producto'))
       return
 
@@ -770,8 +842,16 @@ function syncToSupabase(
       // Productos/insumos cuyo stock o costo cambió.
       for (const p of nextState.productos) {
         const prev = prevState.productos.find((x) => x.id === p.id)
-        if (prev && (prev.stock !== p.stock || prev.costo !== p.costo)) {
+        if (!prev) continue
+        if (prev.stock !== p.stock || prev.costo !== p.costo) {
           supabase.from('productos').update({ stock: p.stock, costo: p.costo }).eq('id', p.id).then(logErr('stock de producto'))
+        }
+        // Variantes cuyo stock cambió (Fase 2).
+        for (const v of p.variantes) {
+          const prevV = prev.variantes.find((x) => x.id === v.id)
+          if (prevV && prevV.stock !== v.stock) {
+            supabase.from('producto_variantes').update({ stock: v.stock }).eq('id', v.id).then(logErr('stock de variante'))
+          }
         }
       }
       for (const i of nextState.insumos) {
@@ -828,9 +908,16 @@ function syncToSupabase(
       supabase.from('movimientos_stock').insert(movimientoToRow(m, clienteId)).then(logErr('movimiento de stock'))
 
       const { itemTipo, itemId } = action.payload
+      const varianteId = 'varianteId' in action.payload ? action.payload.varianteId : undefined
       if (itemTipo === 'producto') {
         const p = nextState.productos.find((x) => x.id === itemId)
-        if (p) supabase.from('productos').update({ stock: p.stock, costo: p.costo }).eq('id', p.id).then(logErr('stock de producto'))
+        if (p) {
+          supabase.from('productos').update({ stock: p.stock, costo: p.costo }).eq('id', p.id).then(logErr('stock de producto'))
+          if (varianteId) {
+            const v = p.variantes.find((x) => x.id === varianteId)
+            if (v) supabase.from('producto_variantes').update({ stock: v.stock }).eq('id', v.id).then(logErr('stock de variante'))
+          }
+        }
       } else {
         const i = nextState.insumos.find((x) => x.id === itemId)
         if (i) supabase.from('insumos').update({ stock: i.stock, costo: i.costo }).eq('id', i.id).then(logErr('stock de insumo'))
@@ -848,6 +935,7 @@ function syncToSupabase(
 async function fetchProductosStockState(): Promise<ProductosStockState> {
   const [
     productosRes,
+    productoVariantesRes,
     insumosRes,
     rubrosRes,
     subRubrosRes,
@@ -863,6 +951,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     registrosControlRes,
   ] = await Promise.all([
     supabase.from('productos').select('*').order('created_at'),
+    supabase.from('producto_variantes').select('*').order('orden'),
     supabase.from('insumos').select('*').order('created_at'),
     supabase.from('rubros').select('*').order('created_at'),
     supabase.from('sub_rubros').select('*').order('created_at'),
@@ -877,6 +966,19 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('reglas_control').select('*').order('created_at'),
     supabase.from('registros_control').select('*').order('fecha'),
   ])
+
+  const variantesByProducto = new Map<string, ProductoVariante[]>()
+  for (const r of productoVariantesRes.data ?? []) {
+    const arr = variantesByProducto.get(r.producto_id) ?? []
+    arr.push({
+      id: r.id,
+      color: r.color ?? undefined,
+      talle: r.talle ?? undefined,
+      codigoBarras: r.codigo_barras ?? undefined,
+      stock: Number(r.stock),
+    })
+    variantesByProducto.set(r.producto_id, arr)
+  }
 
   const productos: Producto[] = (productosRes.data ?? []).map((r: any) => ({
     id: r.id,
@@ -899,6 +1001,8 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     codigoBarras: r.codigo_barras ?? undefined,
     marcaId: r.marca_id ?? undefined,
     proveedorId: r.proveedor_id ?? undefined,
+    tipo: (r.tipo as Producto['tipo']) ?? 'unico',
+    variantes: variantesByProducto.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -965,6 +1069,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     tipo: r.tipo,
     itemTipo: r.item_tipo,
     itemId: r.item_id,
+    varianteId: r.variante_id ?? undefined,
     cantidad: Number(r.cantidad),
     motivo: r.motivo ?? undefined,
     nota: r.nota ?? undefined,
@@ -982,6 +1087,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
       id: r.id,
       itemTipo: r.item_tipo,
       itemId: r.item_id,
+      varianteId: r.variante_id ?? undefined,
       cantidad: Number(r.cantidad),
       costoUnitario: Number(r.costo_unitario),
       fechaVencimiento: r.fecha_vencimiento ?? undefined,
