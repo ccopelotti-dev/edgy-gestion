@@ -15,4 +15,11 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   'utilidades': lazy(() => import('./utilidades')),
   'servicios': lazy(() => import('./servicios')),
   'contable': lazy(() => import('./contable')),
+  // Vertical gastronómico (ver 0018_gastronomico_nucleo.sql y siguientes).
+  'mesas-salon': lazy(() => import('./mesas-salon')),
+  'comandas-cocina': lazy(() => import('./comandas-cocina')),
+  'caja-turno': lazy(() => import('./caja-turno')),
+  'menu-qr': lazy(() => import('./menu-qr')),
+  'delivery-whatsapp': lazy(() => import('./delivery-whatsapp')),
+  'viandas': lazy(() => import('./viandas')),
 }
