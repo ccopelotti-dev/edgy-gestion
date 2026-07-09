@@ -87,6 +87,7 @@ const ESQUEMAS: Record<EntidadImportable, ColumnaEsquema[]> = {
     { nombre: 'Descripcion', requerida: false, ejemplo: 'Gaseosa cola 500ml' },
     { nombre: 'Rubro', requerida: true, ejemplo: 'Bebidas' },
     { nombre: 'SubRubro', requerida: false, ejemplo: 'Gaseosas' },
+    { nombre: 'Marca', requerida: false, ejemplo: 'Coca-Cola' },
     { nombre: 'PrecioVenta', requerida: true, ejemplo: '1500' },
     { nombre: 'Costo', requerida: false, ejemplo: '900' },
     { nombre: 'IVA', requerida: false, ejemplo: '21' },
@@ -153,6 +154,9 @@ export function validarProductos(
   csv: CsvParseado,
   rubros: RubroExistente[],
   subRubros: { id: string; rubroId: string; nombre: string }[],
+  // Marcas del cliente (Fase 1 del refactor de Productos). Opcional en la
+  // firma (default []) para no romper otros llamadores existentes.
+  marcas: RubroExistente[] = [],
 ): FilaConPayload[] {
   return csv.filas.map((fila, idx) => {
     const obj = filaAObjeto(csv.headers, fila)
@@ -184,6 +188,25 @@ export function validarProductos(
       subRubroId = sr.id
     }
 
+    // Marca es opcional -- si la columna viene vacía, el producto queda sin
+    // marca (no todos los rubros la necesitan, ver types/index.ts). Si viene
+    // completada, tiene que existir (mismo criterio que Rubro/Sub-rubro):
+    // se crea una vez desde el formulario de Producto o -- a futuro -- una
+    // página de Marcas, y a partir de ahí se puede reutilizar en la carga
+    // masiva.
+    let marcaId: string | undefined
+    if (obj['marca']) {
+      const m = buscarRubro(obj['marca'], marcas)
+      if (!m) {
+        return err(
+          numeroFila,
+          obj,
+          `Marca "${obj['marca']}" no encontrada -- creála primero desde Nuevo producto`,
+        )
+      }
+      marcaId = m.id
+    }
+
     const iva = obj['iva']?.replace(',', '.') || '21'
     if (!IVA_VALIDOS.map((v) => v.replace(',', '.')).includes(iva)) {
       return err(numeroFila, obj, `IVA "${obj['iva']}" inválido (0, 10.5, 21 o 27)`)
@@ -199,6 +222,7 @@ export function validarProductos(
         descripcion: obj['descripcion'] || '',
         rubro_id: rubro.id,
         sub_rubro_id: subRubroId ?? null,
+        marca_id: marcaId ?? null,
         precio_venta: Number(precioVenta.replace(',', '.')),
         costo: obj['costo'] ? Number(obj['costo'].replace(',', '.')) : 0,
         iva: Number(iva),

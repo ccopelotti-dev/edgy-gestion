@@ -37,6 +37,7 @@ export default function ImportacionMasiva() {
     historial,
     rubrosProducto,
     subRubrosProducto,
+    marcasProducto,
     rubrosServicio,
     subRubrosServicio,
     cargando,
@@ -72,7 +73,7 @@ export default function ImportacionMasiva() {
     let validadas: FilaConPayload[]
     switch (entidad) {
       case 'productos':
-        validadas = validarProductos(csv, rubrosProducto, subRubrosProducto)
+        validadas = validarProductos(csv, rubrosProducto, subRubrosProducto, marcasProducto)
         break
       case 'rubros_producto':
         validadas = validarRubrosProducto(csv)
@@ -118,7 +119,9 @@ export default function ImportacionMasiva() {
         </p>
         <p>
           <strong>Importante:</strong> los rubros (y sub-rubros) referenciados tienen que existir
-          antes de importar -- creálos primero en la pestaña Rubros del módulo correspondiente.
+          antes de importar -- creálos primero en la pestaña Rubros del módulo correspondiente. Lo
+          mismo para Marca (columna opcional en Productos): si la completás, tiene que existir --
+          creála primero desde "Nuevo producto".
         </p>
         <p className="text-muted-foreground">
           Esta primera entrega cubre las entidades que ya tienen tabla real en Supabase (Productos,

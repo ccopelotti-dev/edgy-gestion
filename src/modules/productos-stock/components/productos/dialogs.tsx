@@ -19,11 +19,13 @@ import {
   ACCEPT_IMAGENES,
 } from '../../lib/imagenes'
 import { generarCodigoInterno } from '../../lib/etiqueta'
+import { supabase } from '@/lib/supabase'
 import type {
   Producto,
   Insumo,
   Rubro,
   SubRubro,
+  Marca,
   Recepcion,
   LineaRecepcion,
   AlicuotaIVA,
@@ -49,6 +51,10 @@ interface ProductoDialogProps {
   subRubros: SubRubro[]
   /** Productos existentes, para validar que el código de barras no se repita. */
   productos: Producto[]
+  /** Catálogo de marcas del cliente (ver Fase 1 del refactor de Productos). */
+  marcas: Marca[]
+  /** Crea una marca nueva en el catálogo compartido (dispatch ADD_MARCA). */
+  onCrearMarca: (nombre: string) => void
   editData?: Producto
 }
 
@@ -57,6 +63,8 @@ const emptyProducto: ProductoFormData = {
   codigo: '',
   rubroId: '',
   subRubroId: undefined,
+  marcaId: undefined,
+  proveedorId: undefined,
   descripcion: '',
   precioVenta: 0,
   costo: 0,
@@ -77,6 +85,8 @@ export function ProductoDialog({
   rubros,
   subRubros,
   productos,
+  marcas,
+  onCrearMarca,
   editData,
 }: ProductoDialogProps) {
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
@@ -92,12 +102,59 @@ export function ProductoDialog({
   // del producto guardado — si se cancela, se borran del bucket.
   const subidasEnEstaSesionRef = useRef<Set<string>>(new Set())
 
+  // Proveedores (catálogo de Compras), para el select de "proveedor
+  // preferido". Se trae directo de Supabase -- ver comentario en 0023 --
+  // para no acoplar este módulo al Context de Compras solo por esto.
+  const [proveedores, setProveedores] = useState<{ id: string; nombre: string }[]>([])
+
+  useEffect(() => {
+    if (!open) return
+    let activo = true
+    supabase
+      .from('proveedores')
+      .select('id, nombre')
+      .order('nombre')
+      .then(({ data }) => {
+        if (activo) setProveedores(data ?? [])
+      })
+    return () => {
+      activo = false
+    }
+  }, [open])
+
+  // Alta rápida de marca desde el propio formulario: se dispara ADD_MARCA en
+  // el padre, y en cuanto la marca nueva aparece en el catálogo (prop
+  // `marcas`, que viene del state global) se auto-selecciona acá.
+  const [mostrarNuevaMarca, setMostrarNuevaMarca] = useState(false)
+  const [nuevaMarcaNombre, setNuevaMarcaNombre] = useState('')
+  const [pendingMarcaNombre, setPendingMarcaNombre] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pendingMarcaNombre) return
+    const encontrada = marcas.find((m) => m.nombre === pendingMarcaNombre)
+    if (encontrada) {
+      setForm((prev) => ({ ...prev, marcaId: encontrada.id }))
+      setPendingMarcaNombre(null)
+    }
+  }, [marcas, pendingMarcaNombre])
+
+  function handleCrearMarca() {
+    const nombre = nuevaMarcaNombre.trim()
+    if (!nombre) return
+    onCrearMarca(nombre)
+    setPendingMarcaNombre(nombre)
+    setNuevaMarcaNombre('')
+    setMostrarNuevaMarca(false)
+  }
+
   useEffect(() => {
     if (open) {
       carpetaIdRef.current =
         editData?.id ?? `nuevo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       subidasEnEstaSesionRef.current = new Set()
       setErrorImagen('')
+      setMostrarNuevaMarca(false)
+      setNuevaMarcaNombre('')
       if (editData) {
         const { id, stock, createdAt, tieneFormula, ...rest } = editData
         setForm({ ...rest, imagenes: rest.imagenes ?? [] })
@@ -185,6 +242,8 @@ export function ProductoDialog({
       codigo: form.codigo.trim() || `PROD-${Date.now().toString(36).toUpperCase()}`,
       codigoBarras: codigoBarrasLimpio,
       subRubroId: form.subRubroId || undefined,
+      marcaId: form.marcaId || undefined,
+      proveedorId: form.proveedorId || undefined,
     })
     onOpenChange(false)
   }
@@ -372,6 +431,92 @@ export function ProductoDialog({
                 {subRubrosFiltrados.map((sr) => (
                   <option key={sr.id} value={sr.id}>
                     {sr.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Marca y Proveedor preferido */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Marca</label>
+              {mostrarNuevaMarca ? (
+                <div className="flex gap-2">
+                  <input
+                    className={inputClass}
+                    value={nuevaMarcaNombre}
+                    onChange={(e) => setNuevaMarcaNombre(e.target.value)}
+                    placeholder="Nombre de la marca"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleCrearMarca()
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={handleCrearMarca}
+                    disabled={!nuevaMarcaNombre.trim()}
+                  >
+                    Crear
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => {
+                      setMostrarNuevaMarca(false)
+                      setNuevaMarcaNombre('')
+                    }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <select
+                    className={inputClass}
+                    value={form.marcaId ?? ''}
+                    onChange={(e) => update('marcaId', e.target.value || undefined)}
+                  >
+                    <option value="">Sin marca</option>
+                    {marcas.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.nombre}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setMostrarNuevaMarca(true)}
+                    title="Nueva marca"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Proveedor preferido</label>
+              <select
+                className={inputClass}
+                value={form.proveedorId ?? ''}
+                onChange={(e) => update('proveedorId', e.target.value || undefined)}
+              >
+                <option value="">Sin proveedor preferido</option>
+                {proveedores.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre}
                   </option>
                 ))}
               </select>
@@ -699,6 +844,8 @@ interface LineaForm {
   itemId: string
   cantidad: number
   costoUnitario: number
+  /** Vencimiento del lote que ingresa (opcional -- perecederos). */
+  fechaVencimiento: string
 }
 
 export function RecepcionDialog({
@@ -758,6 +905,7 @@ export function RecepcionDialog({
           itemId: producto.id,
           cantidad: 1,
           costoUnitario: producto.costo,
+          fechaVencimiento: '',
         },
       ]
     })
@@ -773,6 +921,7 @@ export function RecepcionDialog({
         itemId: '',
         cantidad: 0,
         costoUnitario: 0,
+        fechaVencimiento: '',
       },
     ])
   }
@@ -806,6 +955,7 @@ export function RecepcionDialog({
         itemId: l.itemId,
         cantidad: l.cantidad,
         costoUnitario: l.costoUnitario,
+        fechaVencimiento: l.fechaVencimiento || undefined,
       })),
     })
     onOpenChange(false)
@@ -813,7 +963,7 @@ export function RecepcionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Nueva recepcion de mercaderia</DialogTitle>
           <DialogDescription>
@@ -904,7 +1054,7 @@ export function RecepcionDialog({
               return (
                 <div
                   key={linea.key}
-                  className="grid grid-cols-[120px_1fr_100px_100px_36px] gap-2 items-end"
+                  className="grid grid-cols-[110px_1fr_85px_85px_130px_36px] gap-2 items-end"
                 >
                   {/* Tipo */}
                   <div className="grid gap-1">
@@ -969,6 +1119,19 @@ export function RecepcionDialog({
                         updateLinea(idx, {
                           costoUnitario: parseFloat(e.target.value) || 0,
                         })
+                      }
+                    />
+                  </div>
+
+                  {/* Vencimiento / lote */}
+                  <div className="grid gap-1">
+                    <label className="text-xs text-muted-foreground">Vencimiento</label>
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={linea.fechaVencimiento}
+                      onChange={(e) =>
+                        updateLinea(idx, { fechaVencimiento: e.target.value })
                       }
                     />
                   </div>

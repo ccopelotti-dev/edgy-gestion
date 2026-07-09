@@ -29,6 +29,7 @@ interface UseImportacionesResult {
   historial: ImportacionMasiva[]
   rubrosProducto: RubroExistente[]
   subRubrosProducto: { id: string; rubroId: string; nombre: string }[]
+  marcasProducto: RubroExistente[]
   rubrosServicio: RubroExistente[]
   subRubrosServicio: { id: string; rubroId: string; nombre: string }[]
   cargando: boolean
@@ -50,6 +51,7 @@ export function useImportaciones(): UseImportacionesResult {
   const [subRubrosProducto, setSubRubrosProducto] = useState<
     { id: string; rubroId: string; nombre: string }[]
   >([])
+  const [marcasProducto, setMarcasProducto] = useState<RubroExistente[]>([])
   const [rubrosServicio, setRubrosServicio] = useState<RubroExistente[]>([])
   const [subRubrosServicio, setSubRubrosServicio] = useState<
     { id: string; rubroId: string; nombre: string }[]
@@ -65,7 +67,7 @@ export function useImportaciones(): UseImportacionesResult {
     setCargando(true)
     setError(null)
 
-    const [hist, rp, srp, rs, srs] = await Promise.all([
+    const [hist, rp, srp, mp, rs, srs] = await Promise.all([
       supabase
         .from('importaciones_masivas')
         .select('*')
@@ -82,6 +84,7 @@ export function useImportaciones(): UseImportacionesResult {
           (r) => r.id,
         ) ?? [],
       ),
+      supabase.from('marcas').select('id, nombre').eq('cliente_id', clienteId),
       supabase.from('rubros_servicio').select('id, nombre').eq('cliente_id', clienteId),
       supabase.from('sub_rubros_servicio').select('id, rubro_id, nombre').in(
         'rubro_id',
@@ -94,6 +97,7 @@ export function useImportaciones(): UseImportacionesResult {
     setHistorial((hist.data ?? []).map(filaAImportacion))
     setRubrosProducto(rp.data ?? [])
     setSubRubrosProducto((srp.data ?? []).map((s: any) => ({ id: s.id, rubroId: s.rubro_id, nombre: s.nombre })))
+    setMarcasProducto(mp.data ?? [])
     setRubrosServicio(rs.data ?? [])
     setSubRubrosServicio((srs.data ?? []).map((s: any) => ({ id: s.id, rubroId: s.rubro_id, nombre: s.nombre })))
     setCargando(false)
@@ -153,6 +157,7 @@ export function useImportaciones(): UseImportacionesResult {
     historial,
     rubrosProducto,
     subRubrosProducto,
+    marcasProducto,
     rubrosServicio,
     subRubrosServicio,
     cargando: cargando || cargandoClienteId,

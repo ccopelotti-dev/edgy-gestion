@@ -36,6 +36,7 @@ import type {
   Insumo,
   Rubro,
   SubRubro,
+  Marca,
   Formula,
   LineaFormula,
   MovimientoStock,
@@ -75,6 +76,9 @@ type Action =
   | { type: 'ADD_SUBRUBRO'; payload: Omit<SubRubro, 'id'> }
   | { type: 'UPDATE_SUBRUBRO'; payload: SubRubro }
   | { type: 'DELETE_SUBRUBRO'; payload: string }
+  | { type: 'ADD_MARCA'; payload: Omit<Marca, 'id'> }
+  | { type: 'UPDATE_MARCA'; payload: Marca }
+  | { type: 'DELETE_MARCA'; payload: string }
   | { type: 'ADD_FORMULA'; payload: Omit<Formula, 'id' | 'createdAt'> }
   | { type: 'UPDATE_FORMULA'; payload: Formula }
   | { type: 'DELETE_FORMULA'; payload: string }
@@ -192,6 +196,22 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         subRubros: state.subRubros.filter((sr) => sr.id !== action.payload),
       }
 
+    // ── Marcas ────────────────────────────────────────────────────────────────
+    case 'ADD_MARCA': {
+      const nueva: Marca = { ...action.payload, id: uid() }
+      return { ...state, marcas: [...state.marcas, nueva] }
+    }
+    case 'UPDATE_MARCA':
+      return {
+        ...state,
+        marcas: state.marcas.map((m) => (m.id === action.payload.id ? action.payload : m)),
+      }
+    case 'DELETE_MARCA':
+      return {
+        ...state,
+        marcas: state.marcas.filter((m) => m.id !== action.payload),
+      }
+
     // ── Fórmulas ──────────────────────────────────────────────────────────────
     case 'ADD_FORMULA': {
       const nueva: Formula = {
@@ -251,6 +271,10 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           fecha: recepcion.fecha,
           origen: 'recepcion',
           origenId: recepcion.id,
+          // Mismo patrón que costoUnitario: se copia el vencimiento/lote de
+          // la línea al movimiento que genera, para que Control de Stock
+          // pueda alertar "por vencer" sin volver a la recepción original.
+          fechaVencimiento: linea.fechaVencimiento,
         })
 
         if (linea.itemTipo === 'producto') {
@@ -448,7 +472,13 @@ function productoToRow(p: Producto, clienteId: string) {
     rubro_id: p.rubroId || null,
     sub_rubro_id: p.subRubroId || null,
     codigo_barras: p.codigoBarras || null,
+    marca_id: p.marcaId || null,
+    proveedor_id: p.proveedorId || null,
   }
+}
+
+function marcaToRow(m: Marca, clienteId: string) {
+  return { id: m.id, cliente_id: clienteId, nombre: m.nombre }
 }
 
 function insumoToRow(i: Insumo, clienteId: string) {
@@ -515,6 +545,7 @@ function movimientoToRow(m: MovimientoStock, clienteId: string) {
     fecha: m.fecha,
     origen: m.origen || null,
     origen_id: m.origenId || null,
+    fecha_vencimiento: m.fechaVencimiento || null,
   }
 }
 
@@ -538,6 +569,7 @@ function recepcionLineaToRow(l: LineaRecepcion, recepcionId: string) {
     item_id: l.itemId,
     cantidad: l.cantidad,
     costo_unitario: l.costoUnitario,
+    fecha_vencimiento: l.fechaVencimiento || null,
   }
 }
 
@@ -648,6 +680,18 @@ function syncToSupabase(
       return
     case 'DELETE_SUBRUBRO':
       supabase.from('sub_rubros').delete().eq('id', action.payload).then(logErr('borrado de sub-rubro'))
+      return
+
+    case 'ADD_MARCA': {
+      const m = nextState.marcas[nextState.marcas.length - 1]
+      supabase.from('marcas').insert(marcaToRow(m, clienteId)).then(logErr('alta de marca'))
+      return
+    }
+    case 'UPDATE_MARCA':
+      supabase.from('marcas').update(marcaToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de marca'))
+      return
+    case 'DELETE_MARCA':
+      supabase.from('marcas').delete().eq('id', action.payload).then(logErr('borrado de marca'))
       return
 
     case 'ADD_FORMULA': {
@@ -807,6 +851,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     insumosRes,
     rubrosRes,
     subRubrosRes,
+    marcasRes,
     formulasRes,
     formulaLineasRes,
     movimientosRes,
@@ -821,6 +866,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('insumos').select('*').order('created_at'),
     supabase.from('rubros').select('*').order('created_at'),
     supabase.from('sub_rubros').select('*').order('created_at'),
+    supabase.from('marcas').select('*').order('nombre'),
     supabase.from('formulas').select('*').order('created_at'),
     supabase.from('formula_lineas').select('*'),
     supabase.from('movimientos_stock').select('*').order('fecha'),
@@ -851,6 +897,8 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     tieneFormula: r.tiene_formula,
     imagenes: r.imagenes ?? [],
     codigoBarras: r.codigo_barras ?? undefined,
+    marcaId: r.marca_id ?? undefined,
+    proveedorId: r.proveedor_id ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -877,6 +925,11 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
   const subRubros: SubRubro[] = (subRubrosRes.data ?? []).map((r: any) => ({
     id: r.id,
     rubroId: r.rubro_id,
+    nombre: r.nombre,
+  }))
+
+  const marcas: Marca[] = (marcasRes.data ?? []).map((r: any) => ({
+    id: r.id,
     nombre: r.nombre,
   }))
 
@@ -919,6 +972,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     fecha: r.fecha,
     origen: r.origen ?? undefined,
     origenId: r.origen_id ?? undefined,
+    fechaVencimiento: r.fecha_vencimiento ?? undefined,
   }))
 
   const recepcionLineasByRecepcion = new Map<string, LineaRecepcion[]>()
@@ -930,6 +984,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
       itemId: r.item_id,
       cantidad: Number(r.cantidad),
       costoUnitario: Number(r.costo_unitario),
+      fechaVencimiento: r.fecha_vencimiento ?? undefined,
     })
     recepcionLineasByRecepcion.set(r.recepcion_id, arr)
   }
@@ -991,6 +1046,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     insumos,
     rubros,
     subRubros,
+    marcas,
     formulas,
     movimientos,
     recepciones,
@@ -1073,6 +1129,11 @@ export function useInsumosPorRubro(rubroId?: string) {
         : state.insumos,
     [state.insumos, rubroId],
   )
+}
+
+export function useMarcas() {
+  const { state } = useProductosStock()
+  return state.marcas
 }
 
 export function useSubRubrosDeRubro(rubroId?: string) {

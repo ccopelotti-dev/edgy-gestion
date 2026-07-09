@@ -271,6 +271,8 @@ export default function Productos() {
         rubros={state.rubros}
         subRubros={state.subRubros}
         productos={state.productos}
+        marcas={state.marcas}
+        onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
         editData={editingProducto}
       />
 

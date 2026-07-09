@@ -87,6 +87,15 @@ export interface SubRubro {
   nombre: string
 }
 
+// ─── Marca ──────────────────────────────────────────────────────────────────────
+// Catálogo simple por cliente, mismo patrón que Rubro -- evita que "Coca Cola"
+// y "coca cola" queden como si fueran marcas distintas por errores de tipeo.
+
+export interface Marca {
+  id: string
+  nombre: string
+}
+
 // ─── Producto ───────────────────────────────────────────────────────────────────
 
 export type EstadoProducto = 'activo' | 'inactivo'
@@ -98,6 +107,13 @@ export interface Producto {
   descripcion: string
   rubroId: string
   subRubroId?: string
+  /** Marca del producto (catálogo `marcas`), opcional -- no todos los rubros
+   * la necesitan (una empanada casera no tiene marca, una gaseosa sí). */
+  marcaId?: string
+  /** Proveedor preferido/default para este producto (catálogo de Compras).
+   * No reemplaza el campo `proveedor` de texto libre por remito en
+   * Recepción -- ese es puntual, este es el default sugerido del catálogo. */
+  proveedorId?: string
   precioVenta: number
   costo: number
   iva: AlicuotaIVA
@@ -208,6 +224,10 @@ export interface MovimientoStock {
   fecha: string
   origen?: 'recepcion' | 'transferencia' | 'ajuste_manual' | 'formula'
   origenId?: string
+  /** Vencimiento del lote que ingresó con este movimiento (perecederos).
+   * Se copia desde LineaRecepcion.fechaVencimiento al confirmar la
+   * recepción -- ver Control de Stock para la alerta de "por vencer". */
+  fechaVencimiento?: string
 }
 
 // ─── Recepción ──────────────────────────────────────────────────────────────────
@@ -220,6 +240,8 @@ export interface LineaRecepcion {
   itemId: string
   cantidad: number
   costoUnitario: number
+  /** Vencimiento del lote que ingresa (opcional -- perecederos). */
+  fechaVencimiento?: string
 }
 
 export interface Recepcion {
@@ -280,6 +302,7 @@ export interface ProductosStockState {
   insumos: Insumo[]
   rubros: Rubro[]
   subRubros: SubRubro[]
+  marcas: Marca[]
   formulas: Formula[]
   movimientos: MovimientoStock[]
   recepciones: Recepcion[]

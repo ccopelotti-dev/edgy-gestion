@@ -52,6 +52,22 @@ interface ControlItem {
   estado: ControlStatus
 }
 
+// Lotes por vencer / vencidos (Fase 1 del refactor de Productos): se arma a
+// partir de los movimientos de ingreso que tienen fechaVencimiento cargado
+// (viene de Recepción, ver LineaRecepcion.fechaVencimiento). No hace falta
+// volver a la recepción original -- Control de Stock lee directo de
+// movimientos_stock, igual que el resto de esta página.
+const VENCIMIENTO_ALERTA_DIAS = 7
+
+interface AlertaVencimiento {
+  key: string
+  nombre: string
+  tipo: 'producto' | 'insumo'
+  cantidad: number
+  fechaVencimiento: string
+  diasRestantes: number
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function ControlStock() {
@@ -144,6 +160,29 @@ export default function ControlStock() {
     return items
   }, [state.productos, state.insumos, state.reglasControl, state.registrosControl, today])
 
+  // Lotes por vencer / vencidos, a partir de movimientos de ingreso con
+  // fechaVencimiento (ver comentario arriba de AlertaVencimiento).
+  const alertasVencimiento = useMemo<AlertaVencimiento[]>(() => {
+    const productosMap = new Map(state.productos.map((p) => [p.id, p.nombre]))
+    const insumosMap = new Map(state.insumos.map((i) => [i.id, i.nombre]))
+
+    return state.movimientos
+      .filter((m) => m.tipo === 'ingreso' && m.fechaVencimiento)
+      .map((m) => ({
+        key: m.id,
+        nombre:
+          (m.itemTipo === 'producto'
+            ? productosMap.get(m.itemId)
+            : insumosMap.get(m.itemId)) ?? 'Item eliminado',
+        tipo: m.itemTipo,
+        cantidad: m.cantidad,
+        fechaVencimiento: m.fechaVencimiento as string,
+        diasRestantes: daysBetween(today, m.fechaVencimiento as string),
+      }))
+      .filter((a) => a.diasRestantes <= VENCIMIENTO_ALERTA_DIAS)
+      .sort((a, b) => a.diasRestantes - b.diasRestantes)
+  }, [state.movimientos, state.productos, state.insumos, today])
+
   // Rubros map for display
   const rubrosMap = useMemo(
     () => new Map(state.rubros.map((r) => [r.id, r.nombre])),
@@ -216,6 +255,70 @@ export default function ControlStock() {
 
   return (
     <div className="space-y-8">
+      {/* ═══ Section 0: Por vencer / vencidos ════════════════════════════════ */}
+      {alertasVencimiento.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold">Por vencer</h2>
+          <div className="rounded-lg border bg-card shadow-sm overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="px-4 py-3 font-medium">Item</th>
+                  <th className="px-4 py-3 font-medium">Tipo</th>
+                  <th className="px-4 py-3 font-medium text-right">Cantidad</th>
+                  <th className="px-4 py-3 font-medium">Vencimiento</th>
+                  <th className="px-4 py-3 font-medium">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alertasVencimiento.map((a) => {
+                  const vencido = a.diasRestantes < 0
+                  const hoy = a.diasRestantes === 0
+                  return (
+                    <tr key={a.key} className="border-b last:border-0">
+                      <td className="px-4 py-3 font-medium">{a.nombre}</td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={cn(
+                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                            a.tipo === 'producto'
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                              : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+                          )}
+                        >
+                          {a.tipo === 'producto' ? 'Producto' : 'Insumo'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">{a.cantidad}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(a.fechaVencimiento)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                            vencido
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+                          )}
+                        >
+                          <AlertCircle className="h-3 w-3" />
+                          {vencido
+                            ? `Vencido hace ${Math.abs(a.diasRestantes)} dia(s)`
+                            : hoy
+                              ? 'Vence hoy'
+                              : `Vence en ${a.diasRestantes} dia(s)`}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* ═══ Section 1: Reglas de control ════════════════════════════════════ */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
