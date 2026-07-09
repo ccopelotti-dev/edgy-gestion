@@ -155,6 +155,51 @@ export interface PlantillaGarantia {
   cobertura: string
 }
 
+// ─── Combos ─────────────────────────────────────────────────────────────────────
+// Fase 5 del refactor de Productos. Un combo agrupa productos existentes en
+// un ítem vendible a precio fijo (ej: "Combo Menú" = Hamburguesa + Papas +
+// 1 bebida a elección). Confirmado con el usuario:
+//   - Composición mixta: componentes FIJOS (producto + cantidad exacta) más
+//     slots de ELECCIÓN (rubro + cantidad a elegir de ese rubro, ej. "elegí
+//     1 bebida"). La elección real del cliente sucede recién al vender el
+//     combo -- acá solo se define el slot (de qué rubro, cuántos).
+//   - Precio: fijo, cargado a mano por el usuario (no se calcula a partir
+//     del precio/costo de los componentes).
+//   - Stock: el combo NO tiene stock propio. Vender un combo (Fase 6) va a
+//     descontar stock de cada componente fijo; los slots de elección van a
+//     descontar del producto puntual que el cliente elija en ese momento.
+//     Acá solo se arma la "receta" del combo, sin tocar stock.
+//
+// Esta fase deja todo LISTO del lado de Productos -- igual que Listas de
+// precio (Fase 3) y Garantía (Fase 4), la venta real de un combo (con
+// descuento de stock de sus componentes) se conecta en Fase 6.
+
+export interface ComboComponenteFijo {
+  id: string
+  productoId: string
+  cantidad: number
+}
+
+export interface ComboComponenteEleccion {
+  id: string
+  /** Rubro del que el cliente va a elegir productos al momento de la venta. */
+  rubroId: string
+  /** Cantidad de ítems a elegir de este rubro (ej: 1 = "elegí 1 bebida"). */
+  cantidad: number
+}
+
+export interface Combo {
+  id: string
+  nombre: string
+  descripcion: string
+  /** Precio de venta fijo del combo (no se calcula a partir de los componentes). */
+  precioVenta: number
+  disponible: boolean
+  componentesFijos: ComboComponenteFijo[]
+  componentesEleccion: ComboComponenteEleccion[]
+  createdAt: string
+}
+
 // ─── Variantes de producto ────────────────────────────────────────────────────
 // Fase 2 del refactor de Productos. Un producto "con variantes" (ej. una
 // remera con combinaciones color/talle) reemplaza el stock único por N
@@ -408,6 +453,7 @@ export interface ProductosStockState {
   listasPrecio: ListaPrecio[]
   productosPrecios: ProductoPrecio[]
   plantillasGarantia: PlantillaGarantia[]
+  combos: Combo[]
   formulas: Formula[]
   movimientos: MovimientoStock[]
   recepciones: Recepcion[]

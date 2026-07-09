@@ -47,6 +47,15 @@
 // LISTO del lado de Productos -- la activación real de una garantía (para
 // qué cliente, desde cuándo corre) sucede recién cuando Ventas emite una
 // factura, que es la Fase 6 (a pedido del usuario).
+//
+// FASE 5 (combos): un combo agrupa productos existentes en un ítem vendible
+// a precio fijo, con composición mixta -- componentes FIJOS (producto +
+// cantidad) más slots de ELECCIÓN (rubro + cantidad a elegir de ese rubro,
+// ej. "elegí 1 bebida"). El combo NO tiene stock propio: vender un combo
+// (Fase 6) va a descontar stock de cada componente fijo, y del producto
+// puntual que el cliente elija en cada slot de elección. Acá solo se arma
+// la "receta" del combo (igual patrón que Formula: delete+reinsert de los
+// hijos en cada UPDATE_COMBO).
 // ============================================================
 
 import {
@@ -68,6 +77,9 @@ import type {
   ListaPrecio,
   ProductoPrecio,
   PlantillaGarantia,
+  Combo,
+  ComboComponenteFijo,
+  ComboComponenteEleccion,
   Formula,
   LineaFormula,
   MovimientoStock,
@@ -120,6 +132,9 @@ type Action =
   | { type: 'ADD_PLANTILLA_GARANTIA'; payload: Omit<PlantillaGarantia, 'id'> }
   | { type: 'UPDATE_PLANTILLA_GARANTIA'; payload: PlantillaGarantia }
   | { type: 'DELETE_PLANTILLA_GARANTIA'; payload: string }
+  | { type: 'ADD_COMBO'; payload: Omit<Combo, 'id' | 'createdAt'> }
+  | { type: 'UPDATE_COMBO'; payload: Combo }
+  | { type: 'DELETE_COMBO'; payload: string }
   | { type: 'ADD_FORMULA'; payload: Omit<Formula, 'id' | 'createdAt'> }
   | { type: 'UPDATE_FORMULA'; payload: Formula }
   | { type: 'DELETE_FORMULA'; payload: string }
@@ -331,6 +346,26 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
             ? { ...p, plantillaGarantiaId: undefined }
             : p,
         ),
+      }
+
+    // ── Combos (Fase 5) ───────────────────────────────────────────────────────
+    case 'ADD_COMBO': {
+      const nuevo: Combo = {
+        ...action.payload,
+        id: uid(),
+        createdAt: todayISO(),
+      }
+      return { ...state, combos: [...state.combos, nuevo] }
+    }
+    case 'UPDATE_COMBO':
+      return {
+        ...state,
+        combos: state.combos.map((c) => (c.id === action.payload.id ? action.payload : c)),
+      }
+    case 'DELETE_COMBO':
+      return {
+        ...state,
+        combos: state.combos.filter((c) => c.id !== action.payload),
       }
 
     // ── Fórmulas ──────────────────────────────────────────────────────────────
@@ -650,6 +685,62 @@ function plantillaGarantiaToRow(pg: PlantillaGarantia, clienteId: string) {
   }
 }
 
+function comboToRow(c: Combo, clienteId: string) {
+  return {
+    id: c.id,
+    cliente_id: clienteId,
+    nombre: c.nombre,
+    descripcion: c.descripcion || null,
+    precio_venta: c.precioVenta,
+    disponible: c.disponible,
+  }
+}
+
+function comboComponenteFijoToRow(cf: ComboComponenteFijo, comboId: string) {
+  return {
+    id: cf.id,
+    combo_id: comboId,
+    producto_id: cf.productoId,
+    cantidad: cf.cantidad,
+  }
+}
+
+function comboComponenteEleccionToRow(ce: ComboComponenteEleccion, comboId: string) {
+  return {
+    id: ce.id,
+    combo_id: comboId,
+    rubro_id: ce.rubroId,
+    cantidad: ce.cantidad,
+  }
+}
+
+// Mismo patrón que syncProductoVariantes/formula_lineas: borra los hijos del
+// combo y reinserta los actuales. El formulario de Combo siempre manda la
+// lista completa de componentes (fijos y de elección), así que este
+// delete+reinsert es seguro.
+function syncComboComponentes(
+  comboId: string,
+  componentesFijos: ComboComponenteFijo[],
+  componentesEleccion: ComboComponenteEleccion[],
+) {
+  supabase.from('combo_componentes_fijos').delete().eq('combo_id', comboId).then(() => {
+    if (componentesFijos.length) {
+      supabase
+        .from('combo_componentes_fijos')
+        .insert(componentesFijos.map((cf) => comboComponenteFijoToRow(cf, comboId)))
+        .then(logErr('componentes fijos de combo'))
+    }
+  })
+  supabase.from('combo_componentes_eleccion').delete().eq('combo_id', comboId).then(() => {
+    if (componentesEleccion.length) {
+      supabase
+        .from('combo_componentes_eleccion')
+        .insert(componentesEleccion.map((ce) => comboComponenteEleccionToRow(ce, comboId)))
+        .then(logErr('componentes a elección de combo'))
+    }
+  })
+}
+
 function productoVarianteToRow(v: ProductoVariante, productoId: string, orden: number) {
   return {
     id: v.id,
@@ -960,6 +1051,47 @@ function syncToSupabase(
       supabase.from('plantillas_garantia').delete().eq('id', action.payload).then(logErr('borrado de plantilla de garantía'))
       return
 
+    case 'ADD_COMBO': {
+      const c = nextState.combos[nextState.combos.length - 1]
+      // Mismo fix que ADD_FORMULA/ADD_RECEPCION: los componentes se insertan
+      // recién cuando el INSERT del combo confirmó, para que la política
+      // RLS de combo_componentes_* encuentre la fila padre ya visible.
+      supabase
+        .from('combos')
+        .insert(comboToRow(c, clienteId))
+        .then((res) => {
+          logErr('alta de combo')(res)
+          if (!res.error) {
+            if (c.componentesFijos.length) {
+              supabase
+                .from('combo_componentes_fijos')
+                .insert(c.componentesFijos.map((cf) => comboComponenteFijoToRow(cf, c.id)))
+                .then(logErr('componentes fijos de combo'))
+            }
+            if (c.componentesEleccion.length) {
+              supabase
+                .from('combo_componentes_eleccion')
+                .insert(
+                  c.componentesEleccion.map((ce) => comboComponenteEleccionToRow(ce, c.id)),
+                )
+                .then(logErr('componentes a elección de combo'))
+            }
+          }
+        })
+      return
+    }
+    case 'UPDATE_COMBO': {
+      const c = action.payload
+      supabase.from('combos').update(comboToRow(c, clienteId)).eq('id', c.id).then(logErr('edición de combo'))
+      syncComboComponentes(c.id, c.componentesFijos, c.componentesEleccion)
+      return
+    }
+    case 'DELETE_COMBO':
+      // combo_componentes_fijos y combo_componentes_eleccion tienen ON
+      // DELETE CASCADE en la migración.
+      supabase.from('combos').delete().eq('id', action.payload).then(logErr('borrado de combo'))
+      return
+
     case 'ADD_FORMULA': {
       const f = nextState.formulas[nextState.formulas.length - 1]
       // IMPORTANTE: el INSERT de las líneas se dispara recién DESPUÉS de que
@@ -1137,6 +1269,9 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     listasPrecioRes,
     productosPreciosRes,
     plantillasGarantiaRes,
+    combosRes,
+    comboComponentesFijosRes,
+    comboComponentesEleccionRes,
     formulasRes,
     formulaLineasRes,
     movimientosRes,
@@ -1156,6 +1291,9 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('listas_precio').select('*').order('nombre'),
     supabase.from('producto_precios').select('*'),
     supabase.from('plantillas_garantia').select('*').order('nombre'),
+    supabase.from('combos').select('*').order('created_at'),
+    supabase.from('combo_componentes_fijos').select('*'),
+    supabase.from('combo_componentes_eleccion').select('*'),
     supabase.from('formulas').select('*').order('created_at'),
     supabase.from('formula_lineas').select('*'),
     supabase.from('movimientos_stock').select('*').order('fecha'),
@@ -1260,6 +1398,39 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
       cobertura: r.cobertura ?? '',
     }),
   )
+
+  const componentesFijosByCombo = new Map<string, ComboComponenteFijo[]>()
+  for (const r of comboComponentesFijosRes.data ?? []) {
+    const arr = componentesFijosByCombo.get(r.combo_id) ?? []
+    arr.push({
+      id: r.id,
+      productoId: r.producto_id,
+      cantidad: Number(r.cantidad),
+    })
+    componentesFijosByCombo.set(r.combo_id, arr)
+  }
+
+  const componentesEleccionByCombo = new Map<string, ComboComponenteEleccion[]>()
+  for (const r of comboComponentesEleccionRes.data ?? []) {
+    const arr = componentesEleccionByCombo.get(r.combo_id) ?? []
+    arr.push({
+      id: r.id,
+      rubroId: r.rubro_id,
+      cantidad: Number(r.cantidad),
+    })
+    componentesEleccionByCombo.set(r.combo_id, arr)
+  }
+
+  const combos: Combo[] = (combosRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    nombre: r.nombre,
+    descripcion: r.descripcion ?? '',
+    precioVenta: Number(r.precio_venta),
+    disponible: r.disponible,
+    componentesFijos: componentesFijosByCombo.get(r.id) ?? [],
+    componentesEleccion: componentesEleccionByCombo.get(r.id) ?? [],
+    createdAt: (r.created_at ?? '').slice(0, 10),
+  }))
 
   const formulaLineasByFormula = new Map<string, LineaFormula[]>()
   for (const r of formulaLineasRes.data ?? []) {
@@ -1380,6 +1551,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     listasPrecio,
     productosPrecios,
     plantillasGarantia,
+    combos,
     formulas,
     movimientos,
     recepciones,
@@ -1509,6 +1681,11 @@ export function resolverPlantillaGarantia(
     rubros.find((r) => r.id === producto.rubroId)?.plantillaGarantiaId
   if (!idEfectivo) return undefined
   return plantillas.find((pg) => pg.id === idEfectivo)
+}
+
+export function useCombos() {
+  const { state } = useProductosStock()
+  return state.combos
 }
 
 export function useSubRubrosDeRubro(rubroId?: string) {
