@@ -29,6 +29,17 @@
 // actual de cada variante existente (no lo resetea), así que esto es
 // seguro salvo la rara carrera de editar el producto justo mientras se
 // confirma una recepción de esa misma variante en simultáneo.
+//
+// FASE 3 (listas de precio): catálogo flexible de "listas" (ej.
+// Mostrador/Salón, Delivery, Mayorista/Eventos), cada una con un % de
+// recargo por defecto sobre el costo del producto. El precio final en una
+// lista es costo * (1 + %recargo / 100), salvo que el producto tenga un
+// override puntual (ProductoPrecio) para esa combinación producto+lista.
+// precioVenta del producto NO se toca en esta fase -- sigue siendo el
+// precio que usan Ventas/Comandas/Menú QR/Delivery/Presupuestos (es la
+// lista "default" implícita). Migrar esos módulos a usar listas de precio
+// en vez de precioVenta queda para una fase futura (Fase 6), a pedido del
+// usuario -- por ahora las listas solo se administran acá, en Productos.
 // ============================================================
 
 import {
@@ -47,6 +58,8 @@ import type {
   Rubro,
   SubRubro,
   Marca,
+  ListaPrecio,
+  ProductoPrecio,
   Formula,
   LineaFormula,
   MovimientoStock,
@@ -89,6 +102,13 @@ type Action =
   | { type: 'ADD_MARCA'; payload: Omit<Marca, 'id'> }
   | { type: 'UPDATE_MARCA'; payload: Marca }
   | { type: 'DELETE_MARCA'; payload: string }
+  | { type: 'ADD_LISTA_PRECIO'; payload: Omit<ListaPrecio, 'id'> }
+  | { type: 'UPDATE_LISTA_PRECIO'; payload: ListaPrecio }
+  | { type: 'DELETE_LISTA_PRECIO'; payload: string }
+  | {
+      type: 'SET_PRECIO_PRODUCTO'
+      payload: { productoId: string; listaId: string; precio: number | null }
+    }
   | { type: 'ADD_FORMULA'; payload: Omit<Formula, 'id' | 'createdAt'> }
   | { type: 'UPDATE_FORMULA'; payload: Formula }
   | { type: 'DELETE_FORMULA'; payload: string }
@@ -225,6 +245,52 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         ...state,
         marcas: state.marcas.filter((m) => m.id !== action.payload),
       }
+
+    // ── Listas de precio (Fase 3) ────────────────────────────────────────────
+    case 'ADD_LISTA_PRECIO': {
+      const nueva: ListaPrecio = { ...action.payload, id: uid() }
+      return { ...state, listasPrecio: [...state.listasPrecio, nueva] }
+    }
+    case 'UPDATE_LISTA_PRECIO':
+      return {
+        ...state,
+        listasPrecio: state.listasPrecio.map((l) =>
+          l.id === action.payload.id ? action.payload : l,
+        ),
+      }
+    case 'DELETE_LISTA_PRECIO':
+      return {
+        ...state,
+        listasPrecio: state.listasPrecio.filter((l) => l.id !== action.payload),
+        productosPrecios: state.productosPrecios.filter(
+          (pp) => pp.listaId !== action.payload,
+        ),
+      }
+    case 'SET_PRECIO_PRODUCTO': {
+      const { productoId, listaId, precio } = action.payload
+      const existente = state.productosPrecios.find(
+        (pp) => pp.productoId === productoId && pp.listaId === listaId,
+      )
+      // precio === null: quitar el override y volver al cálculo automático
+      // (costo * (1 + %recargo / 100)).
+      if (precio === null) {
+        if (!existente) return state
+        return {
+          ...state,
+          productosPrecios: state.productosPrecios.filter((pp) => pp.id !== existente.id),
+        }
+      }
+      if (existente) {
+        return {
+          ...state,
+          productosPrecios: state.productosPrecios.map((pp) =>
+            pp.id === existente.id ? { ...pp, precio } : pp,
+          ),
+        }
+      }
+      const nuevo: ProductoPrecio = { id: uid(), productoId, listaId, precio }
+      return { ...state, productosPrecios: [...state.productosPrecios, nuevo] }
+    }
 
     // ── Fórmulas ──────────────────────────────────────────────────────────────
     case 'ADD_FORMULA': {
@@ -514,6 +580,24 @@ function marcaToRow(m: Marca, clienteId: string) {
   return { id: m.id, cliente_id: clienteId, nombre: m.nombre }
 }
 
+function listaPrecioToRow(l: ListaPrecio, clienteId: string) {
+  return {
+    id: l.id,
+    cliente_id: clienteId,
+    nombre: l.nombre,
+    porcentaje_recargo: l.porcentajeRecargo,
+  }
+}
+
+function productoPrecioToRow(pp: ProductoPrecio) {
+  return {
+    id: pp.id,
+    producto_id: pp.productoId,
+    lista_id: pp.listaId,
+    precio: pp.precio,
+  }
+}
+
 function productoVarianteToRow(v: ProductoVariante, productoId: string, orden: number) {
   return {
     id: v.id,
@@ -766,6 +850,43 @@ function syncToSupabase(
       supabase.from('marcas').delete().eq('id', action.payload).then(logErr('borrado de marca'))
       return
 
+    case 'ADD_LISTA_PRECIO': {
+      const l = nextState.listasPrecio[nextState.listasPrecio.length - 1]
+      supabase.from('listas_precio').insert(listaPrecioToRow(l, clienteId)).then(logErr('alta de lista de precio'))
+      return
+    }
+    case 'UPDATE_LISTA_PRECIO':
+      supabase.from('listas_precio').update(listaPrecioToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de lista de precio'))
+      return
+    case 'DELETE_LISTA_PRECIO':
+      // producto_precios tiene ON DELETE CASCADE en la migración.
+      supabase.from('listas_precio').delete().eq('id', action.payload).then(logErr('borrado de lista de precio'))
+      return
+
+    case 'SET_PRECIO_PRODUCTO': {
+      const { productoId, listaId, precio } = action.payload
+      const existente = prevState.productosPrecios.find(
+        (pp) => pp.productoId === productoId && pp.listaId === listaId,
+      )
+      if (precio === null) {
+        if (existente) {
+          supabase.from('producto_precios').delete().eq('id', existente.id).then(logErr('borrado de precio de producto'))
+        }
+        return
+      }
+      if (existente) {
+        supabase.from('producto_precios').update({ precio }).eq('id', existente.id).then(logErr('edición de precio de producto'))
+      } else {
+        const nuevo = nextState.productosPrecios.find(
+          (pp) => pp.productoId === productoId && pp.listaId === listaId,
+        )
+        if (nuevo) {
+          supabase.from('producto_precios').insert(productoPrecioToRow(nuevo)).then(logErr('alta de precio de producto'))
+        }
+      }
+      return
+    }
+
     case 'ADD_FORMULA': {
       const f = nextState.formulas[nextState.formulas.length - 1]
       // IMPORTANTE: el INSERT de las líneas se dispara recién DESPUÉS de que
@@ -940,6 +1061,8 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     rubrosRes,
     subRubrosRes,
     marcasRes,
+    listasPrecioRes,
+    productosPreciosRes,
     formulasRes,
     formulaLineasRes,
     movimientosRes,
@@ -956,6 +1079,8 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('rubros').select('*').order('created_at'),
     supabase.from('sub_rubros').select('*').order('created_at'),
     supabase.from('marcas').select('*').order('nombre'),
+    supabase.from('listas_precio').select('*').order('nombre'),
+    supabase.from('producto_precios').select('*'),
     supabase.from('formulas').select('*').order('created_at'),
     supabase.from('formula_lineas').select('*'),
     supabase.from('movimientos_stock').select('*').order('fecha'),
@@ -1035,6 +1160,19 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
   const marcas: Marca[] = (marcasRes.data ?? []).map((r: any) => ({
     id: r.id,
     nombre: r.nombre,
+  }))
+
+  const listasPrecio: ListaPrecio[] = (listasPrecioRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    nombre: r.nombre,
+    porcentajeRecargo: Number(r.porcentaje_recargo),
+  }))
+
+  const productosPrecios: ProductoPrecio[] = (productosPreciosRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    productoId: r.producto_id,
+    listaId: r.lista_id,
+    precio: Number(r.precio),
   }))
 
   const formulaLineasByFormula = new Map<string, LineaFormula[]>()
@@ -1153,6 +1291,8 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     rubros,
     subRubros,
     marcas,
+    listasPrecio,
+    productosPrecios,
     formulas,
     movimientos,
     recepciones,
@@ -1240,6 +1380,27 @@ export function useInsumosPorRubro(rubroId?: string) {
 export function useMarcas() {
   const { state } = useProductosStock()
   return state.marcas
+}
+
+export function useListasPrecio() {
+  const { state } = useProductosStock()
+  return state.listasPrecio
+}
+
+/** Precio final de un producto para una lista de precio: usa el override
+ * manual si existe (ProductoPrecio), si no lo calcula como
+ * costo * (1 + %recargo / 100). No reemplaza producto.precioVenta -- ver
+ * comentario de Fase 3 al inicio del archivo. */
+export function calcularPrecioLista(
+  producto: Producto,
+  lista: ListaPrecio,
+  productosPrecios: ProductoPrecio[],
+): number {
+  const override = productosPrecios.find(
+    (pp) => pp.productoId === producto.id && pp.listaId === lista.id,
+  )
+  if (override) return override.precio
+  return producto.costo * (1 + lista.porcentajeRecargo / 100)
 }
 
 export function useSubRubrosDeRubro(rubroId?: string) {

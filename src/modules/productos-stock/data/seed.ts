@@ -4,6 +4,8 @@ export const seedState: ProductosStockState = {
   rubros: [],
   subRubros: [],
   marcas: [],
+  listasPrecio: [],
+  productosPrecios: [],
   productos: [],
   insumos: [],
   formulas: [],
