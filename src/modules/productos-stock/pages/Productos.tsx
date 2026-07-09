@@ -280,6 +280,7 @@ export default function Productos() {
         productos={state.productos}
         marcas={state.marcas}
         onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
+        plantillasGarantia={state.plantillasGarantia}
         editData={editingProducto}
       />
 

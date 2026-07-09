@@ -28,6 +28,7 @@ import type {
   Rubro,
   SubRubro,
   Marca,
+  PlantillaGarantia,
   Recepcion,
   LineaRecepcion,
   AlicuotaIVA,
@@ -64,6 +65,8 @@ interface ProductoDialogProps {
   marcas: Marca[]
   /** Crea una marca nueva en el catálogo compartido (dispatch ADD_MARCA). */
   onCrearMarca: (nombre: string) => void
+  /** Catálogo de plantillas de garantía (Fase 4). */
+  plantillasGarantia: PlantillaGarantia[]
   editData?: Producto
 }
 
@@ -87,6 +90,7 @@ const emptyProducto: ProductoFormData = {
   codigoBarras: undefined,
   tipo: 'unico',
   variantes: [],
+  plantillaGarantiaId: undefined,
 }
 
 export function ProductoDialog({
@@ -98,6 +102,7 @@ export function ProductoDialog({
   productos,
   marcas,
   onCrearMarca,
+  plantillasGarantia,
   editData,
 }: ProductoDialogProps) {
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
@@ -296,6 +301,7 @@ export function ProductoDialog({
       subRubroId: form.subRubroId || undefined,
       marcaId: form.marcaId || undefined,
       proveedorId: form.proveedorId || undefined,
+      plantillaGarantiaId: form.plantillaGarantiaId || undefined,
       variantes:
         form.tipo === 'con_variantes'
           ? form.variantes.map((v) => ({
@@ -311,6 +317,13 @@ export function ProductoDialog({
 
   const rubrosFiltrados = rubros.filter((r) => r.tipo === 'producto' || r.tipo === 'ambos')
   const subRubrosFiltrados = subRubros.filter((sr) => sr.rubroId === form.rubroId)
+
+  // Garantía heredada del rubro elegido (si el rubro tiene una plantilla
+  // default asignada). Se muestra como referencia -- ver Fase 4.
+  const rubroSeleccionado = rubros.find((r) => r.id === form.rubroId)
+  const plantillaHeredada = rubroSeleccionado?.plantillaGarantiaId
+    ? plantillasGarantia.find((pg) => pg.id === rubroSeleccionado.plantillaGarantiaId)
+    : undefined
 
   return (
     <Dialog
@@ -582,6 +595,31 @@ export function ProductoDialog({
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Garantía (Fase 4: override puntual, con fallback al rubro) */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Garantía</label>
+            <select
+              className={inputClass}
+              value={form.plantillaGarantiaId ?? ''}
+              onChange={(e) => update('plantillaGarantiaId', e.target.value || undefined)}
+            >
+              <option value="">
+                {plantillaHeredada
+                  ? `Heredar del rubro (${plantillaHeredada.nombre})`
+                  : 'Sin garantía'}
+              </option>
+              {plantillasGarantia.map((pg) => (
+                <option key={pg.id} value={pg.id}>
+                  {pg.nombre} ({pg.duracionMeses} {pg.duracionMeses === 1 ? 'mes' : 'meses'})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Solo hace falta elegir una acá si este producto puntual usa una garantía distinta a
+              la del rubro.
+            </p>
           </div>
 
           {/* Descripcion */}

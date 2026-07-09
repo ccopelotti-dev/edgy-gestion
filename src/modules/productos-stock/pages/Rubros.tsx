@@ -61,7 +61,11 @@ export default function Rubros() {
     setRubroDialogOpen(true)
   }
 
-  function handleGuardarRubro(data: { nombre: string; tipo: Rubro['tipo'] }) {
+  function handleGuardarRubro(data: {
+    nombre: string
+    tipo: Rubro['tipo']
+    plantillaGarantiaId?: string
+  }) {
     if (editingRubro) {
       dispatch({ type: 'UPDATE_RUBRO', payload: { ...editingRubro, ...data } })
     } else {
@@ -246,6 +250,7 @@ export default function Rubros() {
         onOpenChange={setRubroDialogOpen}
         onSave={handleGuardarRubro}
         editData={editingRubro}
+        plantillasGarantia={state.plantillasGarantia}
       />
 
       {rubroActual && (

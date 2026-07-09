@@ -40,6 +40,13 @@
 // lista "default" implícita). Migrar esos módulos a usar listas de precio
 // en vez de precioVenta queda para una fase futura (Fase 6), a pedido del
 // usuario -- por ahora las listas solo se administran acá, en Productos.
+//
+// FASE 4 (garantía): catálogo de plantillas de garantía (nombre, duración
+// en meses, cobertura), asignable como default a nivel Rubro y opcional
+// override a nivel Producto puntual. Igual que Fase 3, esta fase deja todo
+// LISTO del lado de Productos -- la activación real de una garantía (para
+// qué cliente, desde cuándo corre) sucede recién cuando Ventas emite una
+// factura, que es la Fase 6 (a pedido del usuario).
 // ============================================================
 
 import {
@@ -60,6 +67,7 @@ import type {
   Marca,
   ListaPrecio,
   ProductoPrecio,
+  PlantillaGarantia,
   Formula,
   LineaFormula,
   MovimientoStock,
@@ -109,6 +117,9 @@ type Action =
       type: 'SET_PRECIO_PRODUCTO'
       payload: { productoId: string; listaId: string; precio: number | null }
     }
+  | { type: 'ADD_PLANTILLA_GARANTIA'; payload: Omit<PlantillaGarantia, 'id'> }
+  | { type: 'UPDATE_PLANTILLA_GARANTIA'; payload: PlantillaGarantia }
+  | { type: 'DELETE_PLANTILLA_GARANTIA'; payload: string }
   | { type: 'ADD_FORMULA'; payload: Omit<Formula, 'id' | 'createdAt'> }
   | { type: 'UPDATE_FORMULA'; payload: Formula }
   | { type: 'DELETE_FORMULA'; payload: string }
@@ -291,6 +302,36 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nuevo: ProductoPrecio = { id: uid(), productoId, listaId, precio }
       return { ...state, productosPrecios: [...state.productosPrecios, nuevo] }
     }
+
+    // ── Plantillas de garantía (Fase 4) ──────────────────────────────────────
+    case 'ADD_PLANTILLA_GARANTIA': {
+      const nueva: PlantillaGarantia = { ...action.payload, id: uid() }
+      return { ...state, plantillasGarantia: [...state.plantillasGarantia, nueva] }
+    }
+    case 'UPDATE_PLANTILLA_GARANTIA':
+      return {
+        ...state,
+        plantillasGarantia: state.plantillasGarantia.map((pg) =>
+          pg.id === action.payload.id ? action.payload : pg,
+        ),
+      }
+    case 'DELETE_PLANTILLA_GARANTIA':
+      // Los rubros/productos que tenían esta plantilla asignada quedan sin
+      // garantía (igual que la FK "on delete set null" del lado Supabase).
+      return {
+        ...state,
+        plantillasGarantia: state.plantillasGarantia.filter((pg) => pg.id !== action.payload),
+        rubros: state.rubros.map((r) =>
+          r.plantillaGarantiaId === action.payload
+            ? { ...r, plantillaGarantiaId: undefined }
+            : r,
+        ),
+        productos: state.productos.map((p) =>
+          p.plantillaGarantiaId === action.payload
+            ? { ...p, plantillaGarantiaId: undefined }
+            : p,
+        ),
+      }
 
     // ── Fórmulas ──────────────────────────────────────────────────────────────
     case 'ADD_FORMULA': {
@@ -573,6 +614,7 @@ function productoToRow(p: Producto, clienteId: string) {
     marca_id: p.marcaId || null,
     proveedor_id: p.proveedorId || null,
     tipo: p.tipo,
+    plantilla_garantia_id: p.plantillaGarantiaId || null,
   }
 }
 
@@ -595,6 +637,16 @@ function productoPrecioToRow(pp: ProductoPrecio) {
     producto_id: pp.productoId,
     lista_id: pp.listaId,
     precio: pp.precio,
+  }
+}
+
+function plantillaGarantiaToRow(pg: PlantillaGarantia, clienteId: string) {
+  return {
+    id: pg.id,
+    cliente_id: clienteId,
+    nombre: pg.nombre,
+    duracion_meses: pg.duracionMeses,
+    cobertura: pg.cobertura || null,
   }
 }
 
@@ -642,7 +694,13 @@ function insumoToRow(i: Insumo, clienteId: string) {
 }
 
 function rubroToRow(r: Rubro, clienteId: string) {
-  return { id: r.id, cliente_id: clienteId, nombre: r.nombre, tipo: r.tipo }
+  return {
+    id: r.id,
+    cliente_id: clienteId,
+    nombre: r.nombre,
+    tipo: r.tipo,
+    plantilla_garantia_id: r.plantillaGarantiaId || null,
+  }
 }
 
 function subRubroToRow(sr: SubRubro) {
@@ -887,6 +945,21 @@ function syncToSupabase(
       return
     }
 
+    case 'ADD_PLANTILLA_GARANTIA': {
+      const pg = nextState.plantillasGarantia[nextState.plantillasGarantia.length - 1]
+      supabase.from('plantillas_garantia').insert(plantillaGarantiaToRow(pg, clienteId)).then(logErr('alta de plantilla de garantía'))
+      return
+    }
+    case 'UPDATE_PLANTILLA_GARANTIA':
+      supabase.from('plantillas_garantia').update(plantillaGarantiaToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de plantilla de garantía'))
+      return
+    case 'DELETE_PLANTILLA_GARANTIA':
+      // rubros.plantilla_garantia_id y productos.plantilla_garantia_id tienen
+      // "on delete set null" en la migración -- Supabase los limpia solo,
+      // igual que el reducer hace en memoria.
+      supabase.from('plantillas_garantia').delete().eq('id', action.payload).then(logErr('borrado de plantilla de garantía'))
+      return
+
     case 'ADD_FORMULA': {
       const f = nextState.formulas[nextState.formulas.length - 1]
       // IMPORTANTE: el INSERT de las líneas se dispara recién DESPUÉS de que
@@ -1063,6 +1136,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     marcasRes,
     listasPrecioRes,
     productosPreciosRes,
+    plantillasGarantiaRes,
     formulasRes,
     formulaLineasRes,
     movimientosRes,
@@ -1081,6 +1155,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('marcas').select('*').order('nombre'),
     supabase.from('listas_precio').select('*').order('nombre'),
     supabase.from('producto_precios').select('*'),
+    supabase.from('plantillas_garantia').select('*').order('nombre'),
     supabase.from('formulas').select('*').order('created_at'),
     supabase.from('formula_lineas').select('*'),
     supabase.from('movimientos_stock').select('*').order('fecha'),
@@ -1128,6 +1203,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     proveedorId: r.proveedor_id ?? undefined,
     tipo: (r.tipo as Producto['tipo']) ?? 'unico',
     variantes: variantesByProducto.get(r.id) ?? [],
+    plantillaGarantiaId: r.plantilla_garantia_id ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -1149,6 +1225,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     id: r.id,
     nombre: r.nombre,
     tipo: r.tipo,
+    plantillaGarantiaId: r.plantilla_garantia_id ?? undefined,
   }))
 
   const subRubros: SubRubro[] = (subRubrosRes.data ?? []).map((r: any) => ({
@@ -1174,6 +1251,15 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     listaId: r.lista_id,
     precio: Number(r.precio),
   }))
+
+  const plantillasGarantia: PlantillaGarantia[] = (plantillasGarantiaRes.data ?? []).map(
+    (r: any) => ({
+      id: r.id,
+      nombre: r.nombre,
+      duracionMeses: Number(r.duracion_meses),
+      cobertura: r.cobertura ?? '',
+    }),
+  )
 
   const formulaLineasByFormula = new Map<string, LineaFormula[]>()
   for (const r of formulaLineasRes.data ?? []) {
@@ -1293,6 +1379,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     marcas,
     listasPrecio,
     productosPrecios,
+    plantillasGarantia,
     formulas,
     movimientos,
     recepciones,
@@ -1401,6 +1488,27 @@ export function calcularPrecioLista(
   )
   if (override) return override.precio
   return producto.costo * (1 + lista.porcentajeRecargo / 100)
+}
+
+export function usePlantillasGarantia() {
+  const { state } = useProductosStock()
+  return state.plantillasGarantia
+}
+
+/** Resuelve la plantilla de garantía efectiva de un producto: la propia si
+ * tiene una asignada (override puntual), si no la del rubro (default), si
+ * no ninguna (undefined -- el producto no tiene garantía). Lo va a usar
+ * Ventas en la Fase 6 para activar la garantía al emitir la factura. */
+export function resolverPlantillaGarantia(
+  producto: Producto,
+  rubros: Rubro[],
+  plantillas: PlantillaGarantia[],
+): PlantillaGarantia | undefined {
+  const idEfectivo =
+    producto.plantillaGarantiaId ??
+    rubros.find((r) => r.id === producto.rubroId)?.plantillaGarantiaId
+  if (!idEfectivo) return undefined
+  return plantillas.find((pg) => pg.id === idEfectivo)
 }
 
 export function useSubRubrosDeRubro(rubroId?: string) {

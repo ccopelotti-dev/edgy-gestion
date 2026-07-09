@@ -10,6 +10,7 @@ import Rubros from './pages/Rubros'
 import Productos from './pages/Productos'
 import Catalogo from './pages/Catalogo'
 import ListasPrecio from './pages/ListasPrecio'
+import PlantillasGarantia from './pages/PlantillasGarantia'
 import Insumos from './pages/Insumos'
 import FormularProducto from './pages/FormularProducto'
 import Stock from './pages/Stock'
@@ -27,6 +28,7 @@ export default function ProductosStockModule() {
           <Route path="productos" element={<Productos />} />
           <Route path="catalogo" element={<Catalogo />} />
           <Route path="listas-precio" element={<ListasPrecio />} />
+          <Route path="garantias" element={<PlantillasGarantia />} />
           <Route path="insumos" element={<Insumos />} />
           <Route path="formular" element={<FormularProducto />} />
           <Route path="stock" element={<Stock />} />

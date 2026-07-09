@@ -6,6 +6,7 @@ export const seedState: ProductosStockState = {
   marcas: [],
   listasPrecio: [],
   productosPrecios: [],
+  plantillasGarantia: [],
   productos: [],
   insumos: [],
   formulas: [],
