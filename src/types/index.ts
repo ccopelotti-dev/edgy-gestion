@@ -41,12 +41,22 @@ export interface ClienteModulo {
 
 // Los roles ya no son una lista fija: viven en la tabla `roles`, son
 // reutilizables y definibles por cliente. Esto es solo el tipo de la fila.
+//
+// `vista` decide qué pantalla de /dashboard ve un usuario con este rol:
+// el resumen ejecutivo (financiero) o un panel de accesos operativos
+// (mesas, comandas, delivery, etc.). Es un campo separado de `es_admin`
+// a propósito -- "¿puede administrar roles/equipo?" y "¿qué dashboard
+// ve al entrar?" son preguntas distintas, aunque hoy coincidan 1 a 1
+// (ver migración 0022_dashboard_operativo.sql).
+export type VistaRol = 'administrativo' | 'operativo'
+
 export interface Rol {
   id: string
   cliente_id: string
   nombre: string
   es_sistema: boolean
   es_admin: boolean
+  vista: VistaRol
   created_at: string
 }
 
@@ -112,4 +122,3 @@ export const ROLES_SUGERIDOS: Record<TipoNegocio, string[]> = {
   servicios: ['Encargado', 'Técnico'],
   agro: ['Encargado', 'Operario'],
 }
-

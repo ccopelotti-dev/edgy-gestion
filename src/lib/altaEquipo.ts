@@ -20,7 +20,7 @@ async function asegurarRolDueno(clienteId: string): Promise<string> {
 
   const { data: creado, error } = await supabase
     .from('roles')
-    .insert({ cliente_id: clienteId, nombre: 'Dueño', es_sistema: true, es_admin: true })
+    .insert({ cliente_id: clienteId, nombre: 'Dueño', es_sistema: true, es_admin: true, vista: 'administrativo' })
     .select()
     .single()
 
@@ -70,6 +70,12 @@ export async function guardarEquipo(clienteId: string, resultado: ResultadoEquip
     let rolId = existente?.id as string | undefined
 
     if (!rolId) {
+      // vista se deriva de esAdmin por ahora (mismo criterio que el
+      // backfill de 0022_dashboard_operativo.sql): un rol admin ve el
+      // resumen ejecutivo, el resto ve el panel operativo. El wizard
+      // no tiene todavía un selector propio para 'vista' -- si algún
+      // rol necesita divergir de esta regla, se ajusta a mano después
+      // desde el panel (roles.vista es un campo independiente).
       const { data: creado, error } = await supabase
         .from('roles')
         .insert({
@@ -77,6 +83,7 @@ export async function guardarEquipo(clienteId: string, resultado: ResultadoEquip
           nombre: rolDraft.nombre,
           es_sistema: true,
           es_admin: rolDraft.esAdmin,
+          vista: rolDraft.esAdmin ? 'administrativo' : 'operativo',
         })
         .select()
         .single()
