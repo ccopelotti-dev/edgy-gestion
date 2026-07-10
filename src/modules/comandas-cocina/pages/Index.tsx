@@ -6,16 +6,22 @@ import { useComandasCocina } from '../data/store'
 import { formatARS, formatHora } from '../lib/format'
 
 // Landing del modulo: lista las comandas activas (abierta/cobro) de
-// todas las mesas, para cuando alguien entra a Comandas sin venir desde
-// una mesa puntual del Salon. El numero de mesa se resuelve con una
-// consulta directa a la tabla `mesas` (no via MesasSalonProvider, que
-// no esta montado aca -- mismo criterio cross-modulo que
-// useTurnoActivo).
+// todas las mesas, para cuando alguien entra a Comandas de salón sin
+// venir desde una mesa puntual del Salon. El numero de mesa se
+// resuelve con una consulta directa a la tabla `mesas` (no via
+// MesasSalonProvider, que no esta montado aca -- mismo criterio
+// cross-modulo que useTurnoActivo.
 //
 // Fase 7a: "Lista para cobrar" es el mismo derivado que usa Mesa.tsx
 // (todos los ítems en listo/entregado) -- se calcula acá también para
 // que el resto del equipo vea de un vistazo qué mesas ya puede cerrar
 // el mozo, sin tener que entrar a cada una.
+//
+// Fase 8d: "Comandas de salón" en vez de "Comandas" a secas -- desde
+// que existe el motor central de Órdenes de Venta (Fase 8a/8b/8c), que
+// en Gastronomía también se muestra como "Comanda" (ver
+// src/lib/terminologia.ts), hacía falta distinguir esta pantalla
+// (pedidos de mesa) de esa otra.
 export default function ComandasIndex() {
   const navigate = useNavigate()
   const { cliente } = useClienteActual()
@@ -41,13 +47,13 @@ export default function ComandasIndex() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Comandas</h1>
-        <p className="text-muted-foreground text-sm">Comandas abiertas o en cobro en este momento.</p>
+        <h1 className="text-2xl font-bold tracking-tight">Comandas de salón</h1>
+        <p className="text-muted-foreground text-sm">Comandas de salón abiertas o en cobro en este momento.</p>
       </div>
 
       {comandasActivas.length === 0 ? (
         <p className="text-muted-foreground py-8 text-center text-sm">
-          No hay comandas activas. Abrí una desde el plano de Mesas y Salón.
+          No hay comandas de salón activas. Abrí una desde el plano de Mesas y Salón.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-md border">

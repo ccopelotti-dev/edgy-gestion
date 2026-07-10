@@ -46,6 +46,16 @@ interface ClienteVentaLite {
 // cocina. Al facturar se valida y descuenta stock, se activa garantía,
 // y si el pago es de contado se genera un recibo real y se refleja en
 // Tesorería.
+//
+// Fase 8d (auditoría de conexiones, terminología por Kit): esta
+// "Comanda" es específicamente la de mesa/salón -- desde que existe el
+// motor central de Órdenes de Venta (Fase 8a/8b/8c, que en Gastronomía
+// se muestra enmascarado como "Comanda" también, ver
+// src/lib/terminologia.ts), hace falta distinguirlas en pantalla. Acá
+// se le agrega "de salón" en todos los textos visibles para el
+// operador -- los nombres de variables/funciones internas (`comanda`,
+// `abrirComanda`, `ABRIR_COMANDA`, etc.) no cambian, es puramente una
+// aclaración de UI.
 export default function Mesa() {
   const { mesaId } = useParams<{ mesaId: string }>()
   const navigate = useNavigate()
@@ -209,7 +219,7 @@ export default function Mesa() {
 
   function cancelarComanda() {
     if (!comanda) return
-    if (!window.confirm('¿Cancelar esta comanda? Se perderán los ítems cargados.')) return
+    if (!window.confirm('¿Cancelar esta comanda de salón? Se perderán los ítems cargados.')) return
     dispatch({ type: 'CANCELAR_COMANDA', payload: { comandaId: comanda.id } })
     navigate('/m/mesas-salon')
   }
@@ -250,7 +260,7 @@ export default function Mesa() {
                 ? 'En cobro'
                 : todosListos
                   ? 'Lista para cobrar'
-                  : 'Comanda abierta'}
+                  : 'Comanda de salón abierta'}
             </span>
             <p className="text-muted-foreground mt-1 text-xs">Desde {formatHora(comanda.fechaApertura)}</p>
           </div>
@@ -285,15 +295,15 @@ export default function Mesa() {
       {!turno ? (
         <Card className="border-amber-300 bg-amber-50">
           <CardContent className="py-4 text-sm text-amber-900">
-            Debe abrir un turno de caja para tomar comandas.
+            Debe abrir un turno de caja para tomar comandas de salón.
           </CardContent>
         </Card>
       ) : !comanda ? (
         <Card className="max-w-sm">
           <CardContent className="flex flex-col gap-3 py-6">
             <h2 className="font-semibold">Mesa libre</h2>
-            <p className="text-muted-foreground text-sm">Abrí una comanda para empezar a cargar el pedido.</p>
-            <Button onClick={abrirComanda}>Abrir comanda</Button>
+            <p className="text-muted-foreground text-sm">Abrí una comanda de salón para empezar a cargar el pedido.</p>
+            <Button onClick={abrirComanda}>Abrir comanda de salón</Button>
           </CardContent>
         </Card>
       ) : (
@@ -527,7 +537,7 @@ export default function Mesa() {
                   Pasar a cobro
                 </Button>
                 <Button variant="outline" className="text-red-600" onClick={cancelarComanda}>
-                  Cancelar comanda
+                  Cancelar comanda de salón
                 </Button>
               </div>
             )

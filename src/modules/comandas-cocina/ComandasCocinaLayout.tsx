@@ -2,15 +2,21 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { ChefHat, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// Layout con tabs: Comandas (lista de mesas activas) y Cocina (KDS).
-// La pantalla de detalle de una mesa (mesa/:mesaId) no es una tab -- se
-// llega ahi desde el Salon o desde el listado de Comandas.
+// Layout con tabs: Comandas de salón (lista de mesas activas) y Cocina
+// (KDS). La pantalla de detalle de una mesa (mesa/:mesaId) no es una
+// tab -- se llega ahi desde el Salon o desde el listado.
+//
+// Fase 8d: se le agrega "de salón" al label -- desde que existe el
+// motor central de Órdenes de Venta (Fase 8a/8b/8c), que en
+// Gastronomía también se muestra como "Comanda" (ver
+// src/lib/terminologia.ts), hacía falta distinguir esta de mesas de
+// la otra en pantalla.
 export function ComandasCocinaLayout() {
   const { pathname } = useLocation()
   const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
 
   const tabs = [
-    { to: base, label: 'Comandas', icon: ClipboardList, end: true },
+    { to: base, label: 'Comandas de salón', icon: ClipboardList, end: true },
     { to: `${base}/cocina`, label: 'Cocina', icon: ChefHat, end: false },
   ]
 
