@@ -11,6 +11,7 @@ import Productos from './pages/Productos'
 import Catalogo from './pages/Catalogo'
 import ListasPrecio from './pages/ListasPrecio'
 import PlantillasGarantia from './pages/PlantillasGarantia'
+import GarantiasEmitidas from './pages/GarantiasEmitidas'
 import Combos from './pages/Combos'
 import Insumos from './pages/Insumos'
 import FormularProducto from './pages/FormularProducto'
@@ -30,6 +31,7 @@ export default function ProductosStockModule() {
           <Route path="catalogo" element={<Catalogo />} />
           <Route path="listas-precio" element={<ListasPrecio />} />
           <Route path="garantias" element={<PlantillasGarantia />} />
+          <Route path="garantias-emitidas" element={<GarantiasEmitidas />} />
           <Route path="combos" element={<Combos />} />
           <Route path="insumos" element={<Insumos />} />
           <Route path="formular" element={<FormularProducto />} />

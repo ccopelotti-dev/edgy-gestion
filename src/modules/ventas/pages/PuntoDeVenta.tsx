@@ -12,6 +12,7 @@ import {
   Clock,
   Receipt,
   AlertTriangle,
+  ShieldCheck,
 } from 'lucide-react';
 
 import {
@@ -42,6 +43,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { descontarStockPorVenta } from '../lib/descontarStockVenta';
+import { activarGarantiasPorVenta, type LineaGarantia } from '../lib/activarGarantiasVenta';
 
 // ─── Tipos locales ──────────────────────────────────────────
 
@@ -54,8 +56,8 @@ interface LineaVenta {
   /** Vínculo permanente al catálogo real (productos-stock) -- opcional:
    * si se deja sin vincular, la línea sigue siendo texto libre como
    * siempre (comportamiento default sin cambios, Fase 6c del refactor
-   * de Productos). Vinculado, permite descontar stock automáticamente
-   * al facturar y, más adelante, activar garantía (Fase 6b). */
+   * de Productos). Vinculado, permite descontar stock y activar
+   * garantía automáticamente al facturar. */
   productoId?: string;
   varianteId?: string;
 }
@@ -67,6 +69,13 @@ interface VarianteCatalogo {
   stock: number;
 }
 
+interface PlantillaGarantiaLite {
+  id: string;
+  nombre: string;
+  duracionMeses: number;
+  cobertura: string;
+}
+
 interface ProductoCatalogo {
   id: string;
   nombre: string;
@@ -75,6 +84,10 @@ interface ProductoCatalogo {
   controlaStock: boolean;
   tipo: 'unico' | 'con_variantes';
   variantes: VarianteCatalogo[];
+  /** Plantilla de garantía efectiva (propia del producto, o heredada de
+   * su rubro si el producto no tiene una asignada puntual) -- Fase 6b
+   * del refactor de Productos. undefined = sin garantía. */
+  plantillaGarantia?: PlantillaGarantiaLite;
 }
 
 function etiquetaVariante(v: VarianteCatalogo): string {
@@ -103,6 +116,11 @@ export default function PuntoDeVenta() {
     { nombre: string; solicitado: number; disponible: number }[] | null
   >(null);
   const [facturando, setFacturando] = useState(false);
+  // Datos de contacto para activar garantía cuando se factura a
+  // "Consumidor Final" (no hay ficha de cliente de la que sacarlos) --
+  // Fase 6b del refactor de Productos.
+  const [contactoNombre, setContactoNombre] = useState('');
+  const [contactoTelefono, setContactoTelefono] = useState('');
 
   // Reloj en vivo
   useEffect(() => {
@@ -126,28 +144,38 @@ export default function PuntoDeVenta() {
   // este módulo no está montado dentro de ProductosStockProvider. Si NO
   // hay lista configurada, el precio sigue siendo precio_venta del
   // producto (comportamiento default, mismo criterio que Fase 6a).
+  //
+  // Fase 6b: en el mismo Promise.all se trae también, por producto, la
+  // plantilla de garantía efectiva -- propia (productos.plantilla_
+  // garantia_id) o heredada de su rubro (rubros.plantilla_garantia_id)
+  // si el producto no tiene una asignada puntual -- mismo criterio que
+  // resolverPlantillaGarantia() en productos-stock/data/store.tsx,
+  // reimplementado acá porque este módulo no lee ese Context.
   useEffect(() => {
     if (!clienteTenant?.id) return;
     let activo = true;
     const listaId = clienteTenant.lista_precio_ventas_id;
 
     async function cargarCatalogo() {
-      const [productosRes, listaRes, overridesRes, variantesRes] = await Promise.all([
-        supabase
-          .from('productos')
-          .select('id, nombre, precio_venta, costo, stock, controla_stock, tipo')
-          .eq('cliente_id', clienteTenant!.id)
-          .eq('disponible', true)
-          .eq('estado', 'activo')
-          .order('nombre'),
-        listaId
-          ? supabase.from('listas_precio').select('porcentaje_recargo').eq('id', listaId).maybeSingle()
-          : Promise.resolve({ data: null } as { data: { porcentaje_recargo: number } | null }),
-        listaId
-          ? supabase.from('producto_precios').select('producto_id, precio').eq('lista_id', listaId)
-          : Promise.resolve({ data: [] as { producto_id: string; precio: number }[] }),
-        supabase.from('producto_variantes').select('id, producto_id, color, talle, stock'),
-      ]);
+      const [productosRes, listaRes, overridesRes, variantesRes, rubrosRes, plantillasRes] =
+        await Promise.all([
+          supabase
+            .from('productos')
+            .select('id, nombre, precio_venta, costo, stock, controla_stock, tipo, rubro_id, plantilla_garantia_id')
+            .eq('cliente_id', clienteTenant!.id)
+            .eq('disponible', true)
+            .eq('estado', 'activo')
+            .order('nombre'),
+          listaId
+            ? supabase.from('listas_precio').select('porcentaje_recargo').eq('id', listaId).maybeSingle()
+            : Promise.resolve({ data: null } as { data: { porcentaje_recargo: number } | null }),
+          listaId
+            ? supabase.from('producto_precios').select('producto_id, precio').eq('lista_id', listaId)
+            : Promise.resolve({ data: [] as { producto_id: string; precio: number }[] }),
+          supabase.from('producto_variantes').select('id, producto_id, color, talle, stock'),
+          supabase.from('rubros').select('id, plantilla_garantia_id'),
+          supabase.from('plantillas_garantia').select('id, nombre, duracion_meses, cobertura'),
+        ]);
 
       if (!activo) return;
 
@@ -169,11 +197,27 @@ export default function PuntoDeVenta() {
         variantesPorProducto.set(v.producto_id, arr);
       }
 
+      const plantillaGarantiaPorRubro = new Map<string, string>();
+      for (const r of (rubrosRes.data ?? []) as any[]) {
+        if (r.plantilla_garantia_id) plantillaGarantiaPorRubro.set(r.id, r.plantilla_garantia_id);
+      }
+
+      const plantillasPorId = new Map<string, PlantillaGarantiaLite>();
+      for (const pg of (plantillasRes.data ?? []) as any[]) {
+        plantillasPorId.set(pg.id, {
+          id: pg.id,
+          nombre: pg.nombre,
+          duracionMeses: Number(pg.duracion_meses),
+          cobertura: pg.cobertura ?? '',
+        });
+      }
+
       setProductosCatalogo(
         ((productosRes.data ?? []) as any[]).map((p) => {
           const override = overridesPorProducto.get(p.id);
           const calculado = Number(p.costo) * (1 + porcentaje / 100);
           const precioVenta = listaId ? override ?? calculado : Number(p.precio_venta);
+          const idPlantillaEfectiva = p.plantilla_garantia_id ?? plantillaGarantiaPorRubro.get(p.rubro_id);
           return {
             id: p.id,
             nombre: p.nombre,
@@ -182,6 +226,7 @@ export default function PuntoDeVenta() {
             controlaStock: !!p.controla_stock,
             tipo: p.tipo === 'con_variantes' ? 'con_variantes' : 'unico',
             variantes: variantesPorProducto.get(p.id) ?? [],
+            plantillaGarantia: idPlantillaEfectiva ? plantillasPorId.get(idPlantillaEfectiva) : undefined,
           } as ProductoCatalogo;
         }),
       );
@@ -239,6 +284,23 @@ export default function PuntoDeVenta() {
       }),
     [lineas, catalogoPorId],
   );
+
+  // Líneas vinculadas a un producto con garantía asignada -- Fase 6b.
+  const lineasConGarantia = useMemo(
+    () =>
+      lineas.filter((l) => {
+        if (!l.productoId) return false;
+        return !!catalogoPorId.get(l.productoId)?.plantillaGarantia;
+      }),
+    [lineas, catalogoPorId],
+  );
+
+  // Si hay garantía en la venta y se factura a "Consumidor Final", no
+  // hay ficha de la que sacar nombre/teléfono -- hace falta pedirlos a
+  // mano antes de poder facturar.
+  const necesitaContactoGarantia = lineasConGarantia.length > 0 && clienteId === CONSUMIDOR_FINAL_ID;
+  const faltaContactoGarantia =
+    necesitaContactoGarantia && (!contactoNombre.trim() || !contactoTelefono.trim());
 
   // ── Handlers de líneas ────────────────────────────────────
 
@@ -340,7 +402,7 @@ export default function PuntoDeVenta() {
   // ── Facturar ──────────────────────────────────────────────
 
   const handleFacturar = useCallback(async () => {
-    if (lineas.length === 0 || faltanVariantes || facturando) return;
+    if (lineas.length === 0 || faltanVariantes || facturando || faltaContactoGarantia) return;
 
     setFacturando(true);
     setErroresStock(null);
@@ -429,6 +491,45 @@ export default function PuntoDeVenta() {
       });
     }
 
+    // Activación de garantía (Fase 6b) -- fire-and-forget, mismo
+    // criterio que el descuento de stock. Si el cliente es real, se
+    // usan sus datos de contacto ya cargados; si es "Consumidor Final",
+    // se usan los que se pidieron en el mini-formulario (el botón
+    // Facturar está deshabilitado hasta completarlos, ver
+    // faltaContactoGarantia).
+    if (lineasConGarantia.length > 0 && clienteTenant?.id) {
+      const clienteReal = clientes.find((c) => c.id === clienteId);
+      const nombreContacto = clienteId === CONSUMIDOR_FINAL_ID ? contactoNombre : clienteReal?.nombre ?? '';
+      const telefonoContacto = clienteId === CONSUMIDOR_FINAL_ID ? contactoTelefono : clienteReal?.telefono ?? '';
+
+      const lineasGarantia: LineaGarantia[] = lineasConGarantia.map((l) => {
+        const producto = catalogoPorId.get(l.productoId!)!;
+        const pg = producto.plantillaGarantia!;
+        return {
+          productoId: l.productoId!,
+          varianteId: l.varianteId,
+          cantidad: l.cantidad,
+          productoNombre: producto.nombre,
+          plantillaGarantiaId: pg.id,
+          nombrePlantilla: pg.nombre,
+          duracionMeses: pg.duracionMeses,
+          cobertura: pg.cobertura,
+        };
+      });
+
+      activarGarantiasPorVenta(
+        lineasGarantia,
+        clienteTenant.id,
+        numFactura,
+        hoy,
+        nombreContacto,
+        telefonoContacto,
+      ).catch(() => {
+        // eslint-disable-next-line no-console
+        console.error('No se pudo activar la garantía de la venta', numFactura);
+      });
+    }
+
     setToast(`Factura ${formatNumero(PREFIJO_COMPROBANTE.factura, numFactura)} generada`);
 
     // Limpiar formulario
@@ -436,12 +537,20 @@ export default function PuntoDeVenta() {
     setClienteId(CONSUMIDOR_FINAL_ID);
     setMedioPago('efectivo');
     setBusquedaProducto('');
+    setContactoNombre('');
+    setContactoTelefono('');
     setFacturando(false);
   }, [
     lineas,
     faltanVariantes,
     facturando,
+    faltaContactoGarantia,
+    lineasConGarantia,
+    catalogoPorId,
+    clientes,
     clienteId,
+    contactoNombre,
+    contactoTelefono,
     medioPago,
     modoEmision,
     config.ivaDefault,
@@ -524,7 +633,12 @@ export default function PuntoDeVenta() {
                       onClick={() => handleAgregarLineaCatalogo(p)}
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-indigo-50"
                     >
-                      <span className="text-gray-900">{p.nombre}</span>
+                      <span className="flex items-center gap-1.5 text-gray-900">
+                        {p.nombre}
+                        {p.plantillaGarantia && (
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                        )}
+                      </span>
                       <span className="text-gray-500">
                         {formatARS(p.precioVenta)}
                         {p.controlaStock ? ` · Stock ${p.stock}` : ''}
@@ -588,6 +702,12 @@ export default function PuntoDeVenta() {
                               <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">
                                 Catálogo
                               </span>
+                              {productoVinculado.plantillaGarantia && (
+                                <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700">
+                                  <ShieldCheck className="h-3 w-3" />
+                                  Garantía {productoVinculado.plantillaGarantia.duracionMeses}m
+                                </span>
+                              )}
                               {productoVinculado.tipo === 'con_variantes' && (
                                 <select
                                   value={linea.varianteId ?? ''}
@@ -685,6 +805,33 @@ export default function PuntoDeVenta() {
               </select>
             </div>
 
+            {/* Datos de contacto para garantía (solo Consumidor Final + hay garantía) */}
+            {necesitaContactoGarantia && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-2">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
+                  <ShieldCheck className="h-4 w-4" />
+                  Datos para la garantía
+                </p>
+                <input
+                  type="text"
+                  value={contactoNombre}
+                  onChange={(e) => setContactoNombre(e.target.value)}
+                  placeholder="Nombre del cliente"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <input
+                  type="text"
+                  value={contactoTelefono}
+                  onChange={(e) => setContactoTelefono(e.target.value)}
+                  placeholder="Teléfono"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <p className="text-[11px] text-emerald-700">
+                  Necesarios para poder ubicar al cliente si reclama la garantía.
+                </p>
+              </div>
+            )}
+
             {/* Totales */}
             <div className="space-y-2 border-t border-gray-100 pt-4">
               <div className="flex justify-between text-sm text-gray-600">
@@ -756,10 +903,22 @@ export default function PuntoDeVenta() {
               </p>
             )}
 
+            {faltaContactoGarantia && (
+              <p className="text-xs font-medium text-amber-700">
+                Completá nombre y teléfono para poder facturar (hay garantía en la venta).
+              </p>
+            )}
+
             {/* Botón FACTURAR */}
             <button
               onClick={handleFacturar}
-              disabled={lineas.length === 0 || total <= 0 || faltanVariantes || facturando}
+              disabled={
+                lineas.length === 0 ||
+                total <= 0 ||
+                faltanVariantes ||
+                facturando ||
+                faltaContactoGarantia
+              }
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-3 text-base font-bold text-white shadow-sm hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
               <ShoppingCart className="h-5 w-5" />
