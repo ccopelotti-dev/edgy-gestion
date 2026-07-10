@@ -20,6 +20,10 @@ export interface Cliente {
   color_marca: string | null
   slug: string | null
   estado: EstadoCliente
+  /** Lista de precio (productos-stock) que usa Comandas/mostrador para
+   * cotizar sus líneas -- null significa "seguir usando precioVenta",
+   * comportamiento default sin cambios (Fase 6a del refactor de Productos). */
+  lista_precio_comandas_id: string | null
   created_at: string
 }
 

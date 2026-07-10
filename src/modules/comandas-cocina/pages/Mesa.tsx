@@ -67,19 +67,76 @@ export default function Mesa() {
       })
   }, [mesaId])
 
+  // Fase 6a del refactor de Productos: si el cliente configuró una lista
+  // de precio para Comandas/mostrador (Productos → Listas de precio →
+  // "Uso por canal"), el precio de cada producto se calcula igual que
+  // calcularPrecioLista() en productos-stock/data/store.tsx (override
+  // manual en producto_precios, si no costo * (1 + %recargo)) -- pero
+  // reimplementado acá con consultas directas a Supabase, porque este
+  // módulo no está montado dentro de ProductosStockProvider. Si NO hay
+  // lista configurada (comportamiento default), el precio sigue siendo
+  // precio_venta del producto, exactamente como antes de esta fase.
   useEffect(() => {
     if (!cliente?.id) return
-    supabase
-      .from('productos')
-      .select('id, nombre, precio_venta')
-      .eq('cliente_id', cliente.id)
-      .eq('disponible', true)
-      .eq('estado', 'activo')
-      .order('nombre')
-      .then(({ data }) => {
-        setProductos((data ?? []).map((p: any) => ({ id: p.id, nombre: p.nombre, precioVenta: Number(p.precio_venta) })))
-      })
-  }, [cliente?.id])
+    let activo = true
+    const listaId = cliente.lista_precio_comandas_id
+
+    async function cargarProductos() {
+      if (!listaId) {
+        const { data } = await supabase
+          .from('productos')
+          .select('id, nombre, precio_venta')
+          .eq('cliente_id', cliente!.id)
+          .eq('disponible', true)
+          .eq('estado', 'activo')
+          .order('nombre')
+        if (activo) {
+          setProductos(
+            (data ?? []).map((p: any) => ({
+              id: p.id,
+              nombre: p.nombre,
+              precioVenta: Number(p.precio_venta),
+            })),
+          )
+        }
+        return
+      }
+
+      const [{ data: productosData }, { data: listaData }, { data: overridesData }] =
+        await Promise.all([
+          supabase
+            .from('productos')
+            .select('id, nombre, precio_venta, costo')
+            .eq('cliente_id', cliente!.id)
+            .eq('disponible', true)
+            .eq('estado', 'activo')
+            .order('nombre'),
+          supabase.from('listas_precio').select('porcentaje_recargo').eq('id', listaId).maybeSingle(),
+          supabase.from('producto_precios').select('producto_id, precio').eq('lista_id', listaId),
+        ])
+
+      if (!activo) return
+
+      const porcentaje = listaData ? Number(listaData.porcentaje_recargo) : 0
+      const overridesPorProducto = new Map<string, number>()
+      for (const o of overridesData ?? []) {
+        overridesPorProducto.set(o.producto_id, Number(o.precio))
+      }
+
+      setProductos(
+        (productosData ?? []).map((p: any) => {
+          const override = overridesPorProducto.get(p.id)
+          const calculado = Number(p.costo) * (1 + porcentaje / 100)
+          return { id: p.id, nombre: p.nombre, precioVenta: override ?? calculado }
+        }),
+      )
+    }
+
+    cargarProductos()
+    return () => {
+      activo = false
+    }
+  }, [cliente?.id, cliente?.lista_precio_comandas_id])
 
   const productoSeleccionado = productos.find((p) => p.id === productoId)
 
