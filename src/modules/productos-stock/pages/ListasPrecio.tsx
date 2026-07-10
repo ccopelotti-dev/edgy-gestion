@@ -22,38 +22,70 @@ import type { ListaPrecio, Producto, ProductoPrecio } from '../types'
 // lista de precio usa Comandas/mostrador (guardado en clientes.
 // lista_precio_comandas_id). Si no se elige ninguna, Comandas sigue
 // usando precioVenta exactamente como antes -- cero riesgo para quien no
-// toca esta config. Ventas y Delivery todavía no leen esta configuración
-// (quedan para las próximas sub-fases de Fase 6); Menú QR no genera
-// ventas, así que no aplica.
+// toca esta config.
+//
+// Fase 6c: se suma un segundo selector para Ventas/Facturación
+// (clientes.lista_precio_ventas_id), mismo criterio. Delivery todavía
+// no lee esta configuración (queda para la próxima sub-fase de Fase 6);
+// Menú QR no genera ventas, así que no aplica.
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
 
-// ─── Uso por canal de venta (Fase 6a) ──────────────────────────────────────────
+// ─── Uso por canal de venta (Fase 6a / 6c) ─────────────────────────────────────
+
+interface SelectorCanalProps {
+  label: string
+  listasPrecio: ListaPrecio[]
+  valor: string
+  guardando: boolean
+  onChange: (value: string) => void
+}
+
+function SelectorCanal({ label, listasPrecio, valor, guardando, onChange }: SelectorCanalProps) {
+  return (
+    <div className="grid gap-1.5">
+      <label className="text-xs font-medium">{label}</label>
+      <select className={inputClass} value={valor} onChange={(e) => onChange(e.target.value)} disabled={guardando}>
+        <option value="">Precio de venta (default)</option>
+        {listasPrecio.map((l) => (
+          <option key={l.id} value={l.id}>
+            {l.nombre}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
 
 function UsoPorCanal({ listasPrecio }: { listasPrecio: ListaPrecio[] }) {
   const { cliente } = useClienteActual()
   const [listaComandasId, setListaComandasId] = useState('')
+  const [listaVentasId, setListaVentasId] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     setListaComandasId(cliente?.lista_precio_comandas_id ?? '')
-  }, [cliente?.lista_precio_comandas_id])
+    setListaVentasId(cliente?.lista_precio_ventas_id ?? '')
+  }, [cliente?.lista_precio_comandas_id, cliente?.lista_precio_ventas_id])
 
-  async function handleChangeComandas(value: string) {
+  async function handleChangeCanal(campo: 'lista_precio_comandas_id' | 'lista_precio_ventas_id', value: string) {
     if (!cliente?.id) return
-    const anterior = listaComandasId
-    setListaComandasId(value)
+    const anteriorComandas = listaComandasId
+    const anteriorVentas = listaVentasId
+    if (campo === 'lista_precio_comandas_id') setListaComandasId(value)
+    else setListaVentasId(value)
     setGuardando(true)
     setError('')
     const { error: errUpdate } = await supabase
       .from('clientes')
-      .update({ lista_precio_comandas_id: value || null })
+      .update({ [campo]: value || null })
       .eq('id', cliente.id)
     setGuardando(false)
     if (errUpdate) {
-      setListaComandasId(anterior)
+      setListaComandasId(anteriorComandas)
+      setListaVentasId(anteriorVentas)
       setError('No se pudo guardar. Probá de nuevo.')
     }
   }
@@ -68,23 +100,23 @@ function UsoPorCanal({ listasPrecio }: { listasPrecio: ListaPrecio[] }) {
         Elegí qué lista de precio usa cada canal. Si dejás "Precio de venta (default)", ese
         canal sigue funcionando exactamente como hasta ahora.
       </p>
-      <div className="mt-3 grid gap-1.5 max-w-xs">
-        <label className="text-xs font-medium">Comandas / Mostrador</label>
-        <select
-          className={inputClass}
-          value={listaComandasId}
-          onChange={(e) => handleChangeComandas(e.target.value)}
-          disabled={guardando}
-        >
-          <option value="">Precio de venta (default)</option>
-          {listasPrecio.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.nombre}
-            </option>
-          ))}
-        </select>
-        {error && <p className="text-xs text-red-500">{error}</p>}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 max-w-lg">
+        <SelectorCanal
+          label="Comandas / Mostrador"
+          listasPrecio={listasPrecio}
+          valor={listaComandasId}
+          guardando={guardando}
+          onChange={(v) => handleChangeCanal('lista_precio_comandas_id', v)}
+        />
+        <SelectorCanal
+          label="Ventas / Facturación"
+          listasPrecio={listasPrecio}
+          valor={listaVentasId}
+          guardando={guardando}
+          onChange={(v) => handleChangeCanal('lista_precio_ventas_id', v)}
+        />
       </div>
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
   )
 }
@@ -291,8 +323,8 @@ export default function ListasPrecio() {
           )}
 
           <p className="text-muted-foreground text-xs">
-            El precio de venta del producto sigue siendo el default -- Comandas ya puede usar
-            una lista propia (arriba, "Uso por canal"). Ventas y Delivery todavía no.
+            El precio de venta del producto sigue siendo el default -- Comandas y Ventas ya
+            pueden usar una lista propia (arriba, "Uso por canal"). Delivery todavía no.
           </p>
         </div>
 

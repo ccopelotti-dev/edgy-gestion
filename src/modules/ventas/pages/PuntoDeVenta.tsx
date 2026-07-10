@@ -11,6 +11,7 @@ import {
   ShoppingCart,
   Clock,
   Receipt,
+  AlertTriangle,
 } from 'lucide-react';
 
 import {
@@ -38,6 +39,9 @@ import {
   type ModoEmision,
   type ComprobanteItem,
 } from '../types';
+import { supabase } from '@/lib/supabase';
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { descontarStockPorVenta } from '../lib/descontarStockVenta';
 
 // ─── Tipos locales ──────────────────────────────────────────
 
@@ -47,6 +51,34 @@ interface LineaVenta {
   cantidad: number;
   precioUnitario: number;
   descuento: number;
+  /** Vínculo permanente al catálogo real (productos-stock) -- opcional:
+   * si se deja sin vincular, la línea sigue siendo texto libre como
+   * siempre (comportamiento default sin cambios, Fase 6c del refactor
+   * de Productos). Vinculado, permite descontar stock automáticamente
+   * al facturar y, más adelante, activar garantía (Fase 6b). */
+  productoId?: string;
+  varianteId?: string;
+}
+
+interface VarianteCatalogo {
+  id: string;
+  color?: string;
+  talle?: string;
+  stock: number;
+}
+
+interface ProductoCatalogo {
+  id: string;
+  nombre: string;
+  precioVenta: number;
+  stock: number;
+  controlaStock: boolean;
+  tipo: 'unico' | 'con_variantes';
+  variantes: VarianteCatalogo[];
+}
+
+function etiquetaVariante(v: VarianteCatalogo): string {
+  return [v.color, v.talle].filter(Boolean).join(' / ') || 'Variante';
 }
 
 // ─── Componente principal ───────────────────────────────────
@@ -55,6 +87,7 @@ export default function PuntoDeVenta() {
   const clientes = useClientes();
   const { config, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
+  const { cliente: clienteTenant } = useClienteActual();
 
   // ── Estado del formulario ─────────────────────────────────
 
@@ -65,6 +98,11 @@ export default function PuntoDeVenta() {
   const [busquedaProducto, setBusquedaProducto] = useState('');
   const [ahora, setAhora] = useState(nowISO());
   const [toast, setToast] = useState<string | null>(null);
+  const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogo[]>([]);
+  const [erroresStock, setErroresStock] = useState<
+    { nombre: string; solicitado: number; disponible: number }[] | null
+  >(null);
+  const [facturando, setFacturando] = useState(false);
 
   // Reloj en vivo
   useEffect(() => {
@@ -78,6 +116,94 @@ export default function PuntoDeVenta() {
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Fase 6c del refactor de Productos: si el cliente configuró una lista
+  // de precio para Ventas/Facturación (Productos → Listas de precio →
+  // "Uso por canal"), el precio de cada producto del catálogo se calcula
+  // igual que calcularPrecioLista() en productos-stock/data/store.tsx
+  // (override manual en producto_precios, si no costo * (1 + %recargo))
+  // -- pero reimplementado acá con consultas directas a Supabase, porque
+  // este módulo no está montado dentro de ProductosStockProvider. Si NO
+  // hay lista configurada, el precio sigue siendo precio_venta del
+  // producto (comportamiento default, mismo criterio que Fase 6a).
+  useEffect(() => {
+    if (!clienteTenant?.id) return;
+    let activo = true;
+    const listaId = clienteTenant.lista_precio_ventas_id;
+
+    async function cargarCatalogo() {
+      const [productosRes, listaRes, overridesRes, variantesRes] = await Promise.all([
+        supabase
+          .from('productos')
+          .select('id, nombre, precio_venta, costo, stock, controla_stock, tipo')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('disponible', true)
+          .eq('estado', 'activo')
+          .order('nombre'),
+        listaId
+          ? supabase.from('listas_precio').select('porcentaje_recargo').eq('id', listaId).maybeSingle()
+          : Promise.resolve({ data: null } as { data: { porcentaje_recargo: number } | null }),
+        listaId
+          ? supabase.from('producto_precios').select('producto_id, precio').eq('lista_id', listaId)
+          : Promise.resolve({ data: [] as { producto_id: string; precio: number }[] }),
+        supabase.from('producto_variantes').select('id, producto_id, color, talle, stock'),
+      ]);
+
+      if (!activo) return;
+
+      const porcentaje = listaRes.data ? Number(listaRes.data.porcentaje_recargo) : 0;
+      const overridesPorProducto = new Map<string, number>();
+      for (const o of overridesRes.data ?? []) {
+        overridesPorProducto.set(o.producto_id, Number(o.precio));
+      }
+
+      const variantesPorProducto = new Map<string, VarianteCatalogo[]>();
+      for (const v of (variantesRes.data ?? []) as any[]) {
+        const arr = variantesPorProducto.get(v.producto_id) ?? [];
+        arr.push({
+          id: v.id,
+          color: v.color ?? undefined,
+          talle: v.talle ?? undefined,
+          stock: Number(v.stock),
+        });
+        variantesPorProducto.set(v.producto_id, arr);
+      }
+
+      setProductosCatalogo(
+        ((productosRes.data ?? []) as any[]).map((p) => {
+          const override = overridesPorProducto.get(p.id);
+          const calculado = Number(p.costo) * (1 + porcentaje / 100);
+          const precioVenta = listaId ? override ?? calculado : Number(p.precio_venta);
+          return {
+            id: p.id,
+            nombre: p.nombre,
+            precioVenta,
+            stock: Number(p.stock),
+            controlaStock: !!p.controla_stock,
+            tipo: p.tipo === 'con_variantes' ? 'con_variantes' : 'unico',
+            variantes: variantesPorProducto.get(p.id) ?? [],
+          } as ProductoCatalogo;
+        }),
+      );
+    }
+
+    cargarCatalogo();
+    return () => {
+      activo = false;
+    };
+  }, [clienteTenant?.id, clienteTenant?.lista_precio_ventas_id]);
+
+  const catalogoPorId = useMemo(() => {
+    const map = new Map<string, ProductoCatalogo>();
+    for (const p of productosCatalogo) map.set(p.id, p);
+    return map;
+  }, [productosCatalogo]);
+
+  const sugerencias = useMemo(() => {
+    const q = busquedaProducto.trim().toLowerCase();
+    if (!q) return [];
+    return productosCatalogo.filter((p) => p.nombre.toLowerCase().includes(q)).slice(0, 8);
+  }, [busquedaProducto, productosCatalogo]);
 
   // ── Cálculos derivados ────────────────────────────────────
 
@@ -101,6 +227,19 @@ export default function PuntoDeVenta() {
     [clientes],
   );
 
+  // Si alguna línea vinculada a un producto con variantes todavía no
+  // tiene la variante elegida, no se puede facturar -- necesitamos
+  // saber exactamente qué unidad de stock descontar.
+  const faltanVariantes = useMemo(
+    () =>
+      lineas.some((l) => {
+        if (!l.productoId) return false;
+        const p = catalogoPorId.get(l.productoId);
+        return p?.tipo === 'con_variantes' && !l.varianteId;
+      }),
+    [lineas, catalogoPorId],
+  );
+
   // ── Handlers de líneas ────────────────────────────────────
 
   const handleAgregarLinea = useCallback(() => {
@@ -118,6 +257,21 @@ export default function PuntoDeVenta() {
     setBusquedaProducto('');
   }, [busquedaProducto]);
 
+  const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogo) => {
+    setLineas((prev) => [
+      ...prev,
+      {
+        id: generarId(),
+        descripcion: producto.nombre,
+        cantidad: 1,
+        precioUnitario: producto.precioVenta,
+        descuento: 0,
+        productoId: producto.id,
+      },
+    ]);
+    setBusquedaProducto('');
+  }, []);
+
   const handleEliminarLinea = useCallback((id: string) => {
     setLineas((prev) => prev.filter((l) => l.id !== id));
   }, []);
@@ -128,6 +282,7 @@ export default function PuntoDeVenta() {
         prev.map((l) => {
           if (l.id !== id) return l;
           if (campo === 'descripcion') return { ...l, descripcion: valor };
+          if (campo === 'varianteId') return { ...l, varianteId: valor || undefined };
           const num = parseFloat(valor) || 0;
           return { ...l, [campo]: Math.max(0, num) };
         }),
@@ -136,10 +291,69 @@ export default function PuntoDeVenta() {
     [],
   );
 
+  // ── Validación de stock (bloqueante) ──────────────────────
+
+  async function validarStockDisponible(lineasAFacturar: LineaVenta[]) {
+    const pedido = new Map<
+      string,
+      { productoId: string; varianteId?: string; cantidad: number; nombre: string }
+    >();
+    for (const l of lineasAFacturar) {
+      if (!l.productoId) continue;
+      const key = `${l.productoId}::${l.varianteId ?? ''}`;
+      const prev = pedido.get(key);
+      if (prev) prev.cantidad += l.cantidad;
+      else pedido.set(key, { productoId: l.productoId, varianteId: l.varianteId, cantidad: l.cantidad, nombre: l.descripcion });
+    }
+
+    const errores: { nombre: string; solicitado: number; disponible: number }[] = [];
+    for (const { productoId, varianteId, cantidad, nombre } of pedido.values()) {
+      const { data: producto } = await supabase
+        .from('productos')
+        .select('stock, controla_stock')
+        .eq('id', productoId)
+        .maybeSingle();
+      if (!producto || !producto.controla_stock) continue;
+
+      let disponible = Number(producto.stock);
+      let etiqueta = nombre;
+      if (varianteId) {
+        const { data: variante } = await supabase
+          .from('producto_variantes')
+          .select('stock, color, talle')
+          .eq('id', varianteId)
+          .maybeSingle();
+        if (variante) {
+          disponible = Number(variante.stock);
+          const partes = [variante.color, variante.talle].filter(Boolean).join(' / ');
+          if (partes) etiqueta = `${nombre} (${partes})`;
+        }
+      }
+
+      if (disponible < cantidad) {
+        errores.push({ nombre: etiqueta, solicitado: cantidad, disponible });
+      }
+    }
+    return errores;
+  }
+
   // ── Facturar ──────────────────────────────────────────────
 
-  const handleFacturar = useCallback(() => {
-    if (lineas.length === 0) return;
+  const handleFacturar = useCallback(async () => {
+    if (lineas.length === 0 || faltanVariantes || facturando) return;
+
+    setFacturando(true);
+    setErroresStock(null);
+
+    const lineasCatalogo = lineas.filter((l) => l.productoId);
+    if (lineasCatalogo.length > 0) {
+      const errores = await validarStockDisponible(lineasCatalogo);
+      if (errores.length > 0) {
+        setErroresStock(errores);
+        setFacturando(false);
+        return;
+      }
+    }
 
     const now = nowISO();
     const hoy = todayISO();
@@ -150,6 +364,7 @@ export default function PuntoDeVenta() {
       const iva = sub * (config.ivaDefault / 100);
       return {
         id: generarId(),
+        productoId: l.productoId,
         descripcion: l.descripcion,
         cantidad: l.cantidad,
         precioUnitario: l.precioUnitario,
@@ -162,6 +377,7 @@ export default function PuntoDeVenta() {
 
     const comprobanteId = generarId();
     const esPagoCompleto = medioPago === 'efectivo';
+    const numFactura = nextNumeroComprobante.factura;
 
     dispatch({
       type: 'ADD_COMPROBANTE',
@@ -201,8 +417,18 @@ export default function PuntoDeVenta() {
       });
     }
 
-    // Número de factura (el store lo asigna, pero podemos predecirlo para el toast)
-    const numFactura = nextNumeroComprobante.factura;
+    // Descuento de stock (Fase 6c) -- fire-and-forget, ya se validó que
+    // había stock suficiente unos instantes antes.
+    if (lineasCatalogo.length > 0 && clienteTenant?.id) {
+      descontarStockPorVenta(lineasCatalogo, clienteTenant.id, numFactura, hoy).catch(() => {
+        // El comprobante ya se generó igual -- si falla el descuento de
+        // stock (ej. permisos), no se revierte la venta, pero conviene
+        // que quede constancia en consola para diagnosticar.
+        // eslint-disable-next-line no-console
+        console.error('No se pudo descontar el stock de la venta', numFactura);
+      });
+    }
+
     setToast(`Factura ${formatNumero(PREFIJO_COMPROBANTE.factura, numFactura)} generada`);
 
     // Limpiar formulario
@@ -210,8 +436,11 @@ export default function PuntoDeVenta() {
     setClienteId(CONSUMIDOR_FINAL_ID);
     setMedioPago('efectivo');
     setBusquedaProducto('');
+    setFacturando(false);
   }, [
     lineas,
+    faltanVariantes,
+    facturando,
     clienteId,
     medioPago,
     modoEmision,
@@ -221,6 +450,7 @@ export default function PuntoDeVenta() {
     total,
     nextNumeroComprobante,
     dispatch,
+    clienteTenant?.id,
   ]);
 
   // ── Render ────────────────────────────────────────────────
@@ -244,6 +474,28 @@ export default function PuntoDeVenta() {
         </div>
       )}
 
+      {/* Bloqueo por stock insuficiente */}
+      {erroresStock && erroresStock.length > 0 && (
+        <div className="rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-bold text-red-800">
+            <AlertTriangle className="h-5 w-5" />
+            No se pudo facturar: stock insuficiente
+          </div>
+          <ul className="mt-2 space-y-1 text-sm text-red-800">
+            {erroresStock.map((e, i) => (
+              <li key={i}>
+                <span className="font-semibold">{e.nombre}</span>: pedido {e.solicitado}, disponible{' '}
+                {e.disponible}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs font-medium text-red-700">
+            Esto refleja un desvío en el control de stock, no un error del sistema. Corregí el
+            stock manualmente en Productos antes de volver a intentar facturar.
+          </p>
+        </div>
+      )}
+
       <div className="flex gap-6">
         {/* ── Panel izquierdo: Items (70%) ──────────────────── */}
         <div className="w-[70%] space-y-4">
@@ -260,9 +512,27 @@ export default function PuntoDeVenta() {
                     handleAgregarLinea();
                   }
                 }}
-                placeholder="Descripción del producto o servicio..."
+                placeholder="Buscar en el catálogo o escribir descripción libre..."
                 className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
+              {sugerencias.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {sugerencias.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleAgregarLineaCatalogo(p)}
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-indigo-50"
+                    >
+                      <span className="text-gray-900">{p.nombre}</span>
+                      <span className="text-gray-500">
+                        {formatARS(p.precioVenta)}
+                        {p.controlaStock ? ` · Stock ${p.stock}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               onClick={handleAgregarLinea}
@@ -296,6 +566,9 @@ export default function PuntoDeVenta() {
                       linea.precioUnitario,
                       linea.descuento,
                     );
+                    const productoVinculado = linea.productoId
+                      ? catalogoPorId.get(linea.productoId)
+                      : undefined;
                     return (
                       <tr
                         key={linea.id}
@@ -310,6 +583,29 @@ export default function PuntoDeVenta() {
                             }
                             className="w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
+                          {productoVinculado && (
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                                Catálogo
+                              </span>
+                              {productoVinculado.tipo === 'con_variantes' && (
+                                <select
+                                  value={linea.varianteId ?? ''}
+                                  onChange={(e) =>
+                                    handleCambioLinea(linea.id, 'varianteId', e.target.value)
+                                  }
+                                  className="rounded border border-gray-200 px-1 py-0.5 text-[11px] text-gray-700 focus:border-indigo-500 focus:outline-none"
+                                >
+                                  <option value="">Elegir variante…</option>
+                                  {productoVinculado.variantes.map((v) => (
+                                    <option key={v.id} value={v.id}>
+                                      {etiquetaVariante(v)} · Stock {v.stock}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-2">
                           <input
@@ -454,14 +750,20 @@ export default function PuntoDeVenta() {
               </div>
             </div>
 
+            {faltanVariantes && (
+              <p className="text-xs font-medium text-amber-700">
+                Elegí la variante de cada producto vinculado antes de facturar.
+              </p>
+            )}
+
             {/* Botón FACTURAR */}
             <button
               onClick={handleFacturar}
-              disabled={lineas.length === 0 || total <= 0}
+              disabled={lineas.length === 0 || total <= 0 || faltanVariantes || facturando}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-3 text-base font-bold text-white shadow-sm hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
               <ShoppingCart className="h-5 w-5" />
-              FACTURAR
+              {facturando ? 'FACTURANDO…' : 'FACTURAR'}
             </button>
           </div>
         </div>

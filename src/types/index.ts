@@ -24,6 +24,9 @@ export interface Cliente {
    * cotizar sus líneas -- null significa "seguir usando precioVenta",
    * comportamiento default sin cambios (Fase 6a del refactor de Productos). */
   lista_precio_comandas_id: string | null
+  /** Igual que lista_precio_comandas_id pero para el canal Ventas/
+   * Facturación (Fase 6c del refactor de Productos). */
+  lista_precio_ventas_id: string | null
   created_at: string
 }
 

@@ -365,7 +365,7 @@ export interface MovimientoStock {
   nota?: string
   costoUnitario?: number
   fecha: string
-  origen?: 'recepcion' | 'transferencia' | 'ajuste_manual' | 'formula'
+  origen?: 'recepcion' | 'transferencia' | 'ajuste_manual' | 'formula' | 'venta'
   origenId?: string
   /** Vencimiento del lote que ingresó con este movimiento (perecederos).
    * Se copia desde LineaRecepcion.fechaVencimiento al confirmar la
