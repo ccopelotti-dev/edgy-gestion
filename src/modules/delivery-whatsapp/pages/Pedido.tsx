@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Truck, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Truck, CheckCircle2, AlertTriangle, ShieldCheck, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -33,6 +33,10 @@ import { useCatalogoDelivery } from '../lib/catalogoDelivery'
 // entregar se valida stock (bloqueante, mismo criterio que Ventas 6c)
 // y se descuenta stock + activa garantía (mismo criterio que Ventas 6b)
 // automáticamente.
+//
+// Fase 7b: si el pedido llegó solo desde el Menú QR (origen ===
+// 'menu_qr'), se muestra la etiqueta acá también -- el resto del
+// circuito (marcar en camino, entregar y cobrar) es idéntico.
 export default function Pedido() {
   const { pedidoId } = useParams<{ pedidoId: string }>()
   const navigate = useNavigate()
@@ -107,7 +111,15 @@ export default function Pedido() {
             <ArrowLeft className="mr-1.5 h-4 w-4" />
             Delivery
           </Button>
-          <h1 className="text-2xl font-bold tracking-tight">{pedido.clienteNombre}</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            {pedido.clienteNombre}
+            {pedido.origen === 'menu_qr' && (
+              <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-medium text-indigo-700">
+                <QrCode className="h-3 w-3" />
+                Desde Menú QR
+              </span>
+            )}
+          </h1>
           <p className="text-muted-foreground text-sm">
             {pedido.direccion}
             {pedido.telefono ? ` · ${pedido.telefono}` : ''}

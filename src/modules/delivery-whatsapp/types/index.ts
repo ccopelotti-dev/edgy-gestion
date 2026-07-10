@@ -3,8 +3,17 @@
 // Scope acordado: "Registro manual del pedido" -- el operador recibe
 // el pedido por WhatsApp fuera del sistema y lo carga acá a mano. No
 // hay integración técnica con la API de WhatsApp.
+//
+// Fase 7b (Menú QR con acción comercial): un pedido también puede
+// llegar solo, generado por el cliente final desde el menú público
+// (src/pages/MenuPublico.tsx vía la función crear_pedido_menu_publico)
+// -- `origen` distingue ambos casos. A partir de ahí sigue exactamente
+// el mismo circuito (pendiente -> en camino -> entregado, con la Venta
+// real generándose recién al entregar), no hay nada especial que
+// tratar distinto en el resto del módulo.
 
 export type EstadoPedidoDelivery = 'pendiente' | 'en_camino' | 'entregado' | 'cancelado'
+export type OrigenPedidoDelivery = 'operador' | 'menu_qr'
 
 export interface ItemPedidoDelivery {
   descripcion: string
@@ -35,6 +44,9 @@ export interface PedidoDelivery {
   notas?: string
   fecha: string
   createdAt: string
+  /** 'operador' (default) si lo cargó el operador a mano, 'menu_qr' si
+   * lo generó el cliente final desde el menú público -- Fase 7b. */
+  origen: OrigenPedidoDelivery
 }
 
 export interface DeliveryWhatsappState {

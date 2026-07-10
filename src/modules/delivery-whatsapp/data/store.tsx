@@ -7,6 +7,13 @@
 // cliente_venta real (opcional) o simplemente un nombre libre escrito
 // por el operador -- el pedido llega por WhatsApp y no siempre es de
 // un cliente ya registrado en Ventas.
+//
+// Fase 7b: los pedidos generados desde el Menú QR (src/pages/
+// MenuPublico.tsx) se insertan directo vía la función SQL
+// crear_pedido_menu_publico -- no pasan por este reducer/dispatch en
+// absoluto (esa página no tiene sesión ni este Provider montado).
+// Este store solo los LEE de vuelta (fetchDeliveryState) igual que
+// cualquier otro pedido, distinguiéndolos por `origen`.
 // ============================================================
 
 import {
@@ -22,6 +29,7 @@ import type {
   PedidoDelivery,
   ItemPedidoDelivery,
   EstadoPedidoDelivery,
+  OrigenPedidoDelivery,
 } from '../types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
@@ -73,6 +81,7 @@ function reducer(state: DeliveryWhatsappState, action: Action): DeliveryWhatsapp
         notas: action.payload.notas,
         fecha: todayISO(),
         createdAt: todayISO(),
+        origen: 'operador',
       }
       return { ...state, pedidos: [...state.pedidos, nuevo] }
     }
@@ -130,6 +139,7 @@ function pedidoToRow(p: PedidoDelivery, clienteId: string) {
     comprobante_id: p.comprobanteId ?? null,
     notas: p.notas ?? null,
     fecha: p.fecha,
+    origen: p.origen,
   }
 }
 
@@ -200,6 +210,7 @@ async function fetchDeliveryState(): Promise<DeliveryWhatsappState> {
     notas: r.notas ?? undefined,
     fecha: r.fecha,
     createdAt: r.created_at,
+    origen: (r.origen ?? 'operador') as OrigenPedidoDelivery,
   }))
 
   return { pedidos }

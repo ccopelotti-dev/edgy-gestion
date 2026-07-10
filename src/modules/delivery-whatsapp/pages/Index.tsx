@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Trash2, ShieldCheck } from 'lucide-react'
+import { Plus, Trash2, ShieldCheck, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -41,6 +41,13 @@ const ITEM_VACIO: ItemPedidoDelivery = { descripcion: '', cantidad: 1, precioUni
 // tiene garantía asignada, el teléfono pasa a ser obligatorio: se va a
 // necesitar para activar la garantía automáticamente al entregar (ver
 // Pedido.tsx / activarGarantiasVenta.ts).
+//
+// Fase 7b: los pedidos que llegan solos desde el Menú QR (el cliente
+// arma su propio pedido en src/pages/MenuPublico.tsx, sin operador de
+// por medio) aparecen acá mezclados con los que carga el operador a
+// mano -- se distinguen con la etiqueta "Desde Menú QR" (campo
+// `origen`). A partir de acá siguen el mismo circuito exactamente
+// igual (marcar en camino, entregar y cobrar).
 export default function Index() {
   const { cliente } = useClienteActual()
   const { dispatch } = useDeliveryWhatsapp()
@@ -157,7 +164,8 @@ export default function Index() {
           <h1 className="text-2xl font-bold tracking-tight">Delivery por WhatsApp</h1>
           <p className="text-muted-foreground text-sm">
             Cargá acá los pedidos que te llegan por WhatsApp para hacer el seguimiento de entrega y
-            que se reflejen en Ventas y Tesorería.
+            que se reflejen en Ventas y Tesorería. Los pedidos que el cliente arma solo desde el
+            Menú QR también aparecen acá, marcados como "Desde Menú QR".
           </p>
         </div>
         <Button onClick={() => setMostrarForm((v) => !v)}>
@@ -383,6 +391,12 @@ export default function Index() {
                       <Link to={p.id} className="font-medium hover:underline">
                         {p.clienteNombre}
                       </Link>
+                      {p.origen === 'menu_qr' && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                          <QrCode className="h-3 w-3" />
+                          Desde Menú QR
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">{p.direccion}</td>
                     <td className="px-3 py-2 text-right">{formatARS(p.total)}</td>
@@ -425,6 +439,12 @@ export default function Index() {
                       <Link to={p.id} className="font-medium hover:underline">
                         {p.clienteNombre}
                       </Link>
+                      {p.origen === 'menu_qr' && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                          <QrCode className="h-3 w-3" />
+                          Desde Menú QR
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">{formatFecha(p.fecha)}</td>
                     <td className="px-3 py-2 text-right">{formatARS(p.total)}</td>
