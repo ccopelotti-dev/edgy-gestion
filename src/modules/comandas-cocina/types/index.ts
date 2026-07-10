@@ -38,6 +38,13 @@ export interface Comanda {
   comprobanteId?: string
   notas?: string
   items: ComandaItem[]
+  /** Cliente registrado (Ventas → Clientes) opcional -- Fase 7a. Sin
+   * elegir uno, la comanda sigue facturando a "Consumidor Final" como
+   * siempre (comportamiento default sin cambios). Elegir uno habilita
+   * facturar a cuenta corriente, que necesita una ficha real a la que
+   * imputarle el saldo pendiente. */
+  clienteVentaId?: string
+  clienteVentaNombre?: string
 }
 
 export interface ComandasCocinaState {

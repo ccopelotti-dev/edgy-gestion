@@ -14,6 +14,11 @@
 // origenId: comanda.id) pasa por el dispatch de Ventas, afuera de este
 // store, antes de despachar CERRAR_COMANDA acá — mismo criterio que
 // Ventas/Compras resolviendo `numero` antes de llegar al reducer.
+//
+// ASIGNAR_CLIENTE (Fase 7a): vincula la comanda a un cliente registrado
+// de Ventas (clientes_venta), opcional. Sin esto, la comanda sigue
+// facturando a "Consumidor Final" -- elegir un cliente habilita cobrar
+// a cuenta corriente (ver cerrarComandaComoVenta.ts).
 // ============================================================
 
 import {
@@ -55,6 +60,10 @@ type Action =
   | { type: 'ACTUALIZAR_CANTIDAD_ITEM'; payload: { comandaId: string; itemId: string; cantidad: number } }
   | { type: 'QUITAR_ITEM'; payload: { comandaId: string; itemId: string } }
   | { type: 'ACTUALIZAR_ESTADO_ITEM'; payload: { comandaId: string; itemId: string; estadoCocina: EstadoCocina } }
+  | {
+      type: 'ASIGNAR_CLIENTE'
+      payload: { comandaId: string; clienteVentaId?: string; clienteVentaNombre?: string }
+    }
   | { type: 'PASAR_A_COBRO'; payload: { comandaId: string } }
   | { type: 'CERRAR_COMANDA'; payload: { comandaId: string; comprobanteId?: string } }
   | { type: 'CANCELAR_COMANDA'; payload: { comandaId: string } }
@@ -141,6 +150,16 @@ function reducer(state: ComandasCocinaState, action: Action): ComandasCocinaStat
       }
     }
 
+    case 'ASIGNAR_CLIENTE': {
+      const { comandaId, clienteVentaId, clienteVentaNombre } = action.payload
+      return {
+        ...state,
+        comandas: state.comandas.map((c) =>
+          c.id === comandaId ? { ...c, clienteVentaId, clienteVentaNombre } : c,
+        ),
+      }
+    }
+
     case 'PASAR_A_COBRO':
       return {
         ...state,
@@ -181,6 +200,7 @@ function comandaToRow(c: Comanda, clienteId: string) {
     mesa_id: c.mesaId,
     turno_id: c.turnoId,
     mozo_usuario_id: c.mozoUsuarioId ?? null,
+    cliente_venta_id: c.clienteVentaId ?? null,
     estado: c.estado,
     fecha_apertura: c.fechaApertura,
     fecha_cierre: c.fechaCierre ?? null,
@@ -254,6 +274,14 @@ function syncToSupabase(action: Action, nextState: ComandasCocinaState, clienteI
       supabase.from('comanda_items').update({ estado_cocina: action.payload.estadoCocina }).eq('id', action.payload.itemId).then(logErr('estado de cocina de ítem'))
       return
 
+    case 'ASIGNAR_CLIENTE':
+      supabase
+        .from('comandas')
+        .update({ cliente_venta_id: action.payload.clienteVentaId ?? null })
+        .eq('id', action.payload.comandaId)
+        .then(logErr('asignar cliente a comanda'))
+      return
+
     case 'PASAR_A_COBRO': {
       const c = nextState.comandas.find((x) => x.id === action.payload.comandaId)
       if (!c) return
@@ -295,7 +323,11 @@ async function fetchComandasCocinaState(): Promise<ComandasCocinaState> {
   // momento. El historial completo, si hace falta, se consulta desde
   // Reportes como el resto de los movimientos.
   const [comandasRes, itemsRes] = await Promise.all([
-    supabase.from('comandas').select('*').in('estado', ['abierta', 'cobro']).order('fecha_apertura'),
+    supabase
+      .from('comandas')
+      .select('*, clientes_venta(nombre)')
+      .in('estado', ['abierta', 'cobro'])
+      .order('fecha_apertura'),
     supabase.from('comanda_items').select('*'),
   ])
 
@@ -321,6 +353,8 @@ async function fetchComandasCocinaState(): Promise<ComandasCocinaState> {
     mesaId: r.mesa_id,
     turnoId: r.turno_id,
     mozoUsuarioId: r.mozo_usuario_id ?? undefined,
+    clienteVentaId: r.cliente_venta_id ?? undefined,
+    clienteVentaNombre: r.clientes_venta?.nombre ?? undefined,
     estado: r.estado,
     fechaApertura: r.fecha_apertura,
     fechaCierre: r.fecha_cierre ?? undefined,

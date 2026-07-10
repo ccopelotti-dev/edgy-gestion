@@ -11,6 +11,11 @@ import { formatARS, formatHora } from '../lib/format'
 // consulta directa a la tabla `mesas` (no via MesasSalonProvider, que
 // no esta montado aca -- mismo criterio cross-modulo que
 // useTurnoActivo).
+//
+// Fase 7a: "Lista para cobrar" es el mismo derivado que usa Mesa.tsx
+// (todos los ítems en listo/entregado) -- se calcula acá también para
+// que el resto del equipo vea de un vistazo qué mesas ya puede cerrar
+// el mozo, sin tener que entrar a cada una.
 export default function ComandasIndex() {
   const navigate = useNavigate()
   const { cliente } = useClienteActual()
@@ -57,29 +62,37 @@ export default function ComandasIndex() {
               </tr>
             </thead>
             <tbody>
-              {comandasActivas.map((c) => (
-                <tr
-                  key={c.id}
-                  className="cursor-pointer border-t hover:bg-gray-50"
-                  onClick={() => navigate(`/m/comandas-cocina/mesa/${c.mesaId}`)}
-                >
-                  <td className="px-3 py-2 font-medium">Mesa {numeroPorMesa[c.mesaId] ?? '—'}</td>
-                  <td className="px-3 py-2">
-                    {c.estado === 'abierta' ? (
-                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                        Abierta
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-                        En cobro
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">{formatHora(c.fechaApertura)}</td>
-                  <td className="px-3 py-2 text-right">{c.items.length}</td>
-                  <td className="px-3 py-2 text-right font-medium">{formatARS(c.total)}</td>
-                </tr>
-              ))}
+              {comandasActivas.map((c) => {
+                const todosListos =
+                  c.items.length > 0 && c.items.every((i) => i.estadoCocina === 'listo' || i.estadoCocina === 'entregado')
+                return (
+                  <tr
+                    key={c.id}
+                    className="cursor-pointer border-t hover:bg-gray-50"
+                    onClick={() => navigate(`/m/comandas-cocina/mesa/${c.mesaId}`)}
+                  >
+                    <td className="px-3 py-2 font-medium">Mesa {numeroPorMesa[c.mesaId] ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      {c.estado === 'cobro' ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                          En cobro
+                        </span>
+                      ) : todosListos ? (
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                          Lista para cobrar
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                          Abierta
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">{formatHora(c.fechaApertura)}</td>
+                    <td className="px-3 py-2 text-right">{c.items.length}</td>
+                    <td className="px-3 py-2 text-right font-medium">{formatARS(c.total)}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
