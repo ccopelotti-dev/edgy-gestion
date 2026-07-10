@@ -2,21 +2,36 @@
 // Módulo Delivery por WhatsApp — State Management
 // Edgy Gestión · Context + useReducer + Supabase
 //
-// Fase 8b/8c: el pedido dejó de ser una sola fila en
-// `pedidos_delivery` -- ahora son dos tablas: `ordenes_venta` (el
-// motor central del pedido: cliente, ítems, total, medio de pago,
-// comprobante, origen) y `pedidos_delivery` como extensión logística
-// liviana (solo `estado` de reparto: pendiente/en_camino/entregado/
-// cancelado). Este archivo es el único que lo sabe -- reconstruye la
-// misma forma de `PedidoDelivery` que siempre devolvió, así que
-// Index.tsx y Pedido.tsx no cambian ni una línea.
+// Retrofit (post Fase 8b/8c): las Fases 8a-8c se construyeron sobre
+// una tabla `ordenes_venta` que se pensó nueva pero en realidad ya
+// existía -- con OTRO esquema -- como motor de Presupuestos/Órdenes
+// de venta manuales (Ordenes.tsx/Presupuestos.tsx). Este archivo se
+// reescribe para usar el esquema REAL: `ordenes_venta` (cliente,
+// numero, tipo='pedido', cliente_venta_id opcional + contacto_nombre/
+// contacto_telefono para pedidos sin cliente registrado, estado,
+// notas) + `orden_venta_items` (ítems normalizados, no jsonb) +
+// `pedidos_delivery` como extensión logística liviana (estado de
+// reparto, dirección, modalidad retiro/delivery). El comprobante de
+// venta se sigue generando en cerrarPedidoComoVenta.ts (sin cambios
+// de fondo, solo ahora vincula `orden_id`).
+//
+// Index.tsx y Pedido.tsx no cambian ni una línea -- este archivo sigue
+// devolviendo exactamente la misma forma de `PedidoDelivery`.
 //
 // Los pedidos generados desde el Catálogo Público (src/pages/
 // MenuPublico.tsx) se insertan directo vía la función SQL
 // crear_orden_venta_publica -- no pasan por este reducer/dispatch en
-// absoluto (esa página no tiene sesión ni este Provider montado).
-// Este store solo los LEE de vuelta (fetchDeliveryState) igual que
-// cualquier otro pedido, distinguiéndolos por `origen`.
+// absoluto. Este store solo los LEE de vuelta (fetchDeliveryState)
+// igual que cualquier otro pedido, distinguiéndolos por
+// `origen_modulo`.
+//
+// Limitación conocida y aceptada: `orden_venta_items` (la tabla real,
+// compartida con Presupuestos/Ordenes.tsx) no tiene columna de
+// variante -- lo mismo pasa en el `OrdenItem` de Ventas. Un pedido de
+// delivery vinculado a un producto CON variante pierde la variante
+// específica al pasar por acá (el descuento de stock/activación de
+// garantía cae al nivel de producto base). No es una regresión de
+// este retrofit: la tabla real nunca tuvo esa columna.
 // ============================================================
 
 import {
@@ -126,31 +141,51 @@ function reducer(state: DeliveryWhatsappState, action: Action): DeliveryWhatsapp
   }
 }
 
-// ─── Mapeo dominio -> filas de Supabase ───────────────────────
-//
-// Fase 8b/8c: una alta de pedido ahora escribe en DOS tablas -- la
-// orden de venta primero (tiene la FK que pedidos_delivery necesita),
-// recién después la extensión logística. El resto de las acciones
-// (marcar en camino/entregado/cancelado) actualizan una o ambas según
-// qué dato cambie.
+// ─── Mapeo dominio -> filas de Supabase (esquema real) ─────────
 
-function ordenVentaToRow(p: PedidoDelivery, clienteId: string) {
+function ordenVentaToRow(p: PedidoDelivery, clienteId: string, numero: number) {
   return {
     id: p.ordenVentaId,
     cliente_id: clienteId,
+    numero,
+    tipo: 'pedido',
     cliente_venta_id: p.clienteVentaId ?? null,
-    cliente_nombre: p.clienteNombre,
-    telefono: p.telefono ?? null,
-    direccion: p.direccion,
-    canal_cumplimiento: 'delivery',
-    origen: 'operador',
-    items: p.items,
-    subtotal: p.total,
-    total: p.total,
-    estado: 'pendiente',
-    notas: p.notas ?? null,
+    contacto_nombre: p.clienteNombre,
+    contacto_telefono: p.telefono ?? null,
     fecha: p.fecha,
+    estado: 'pendiente',
+    subtotal: p.total,
+    descuento_general: 0,
+    total: p.total,
+    notas: p.notas ?? null,
+    origen_modulo: 'delivery-whatsapp',
+    origen_canal: 'operador',
   }
+}
+
+function itemToRow(i: ItemPedidoDelivery, ordenId: string) {
+  return {
+    id: crypto.randomUUID(),
+    orden_id: ordenId,
+    producto_id: i.productoId ?? null,
+    descripcion: i.descripcion,
+    cantidad: i.cantidad,
+    precio_unitario: i.precioUnitario,
+    descuento: 0,
+    subtotal: i.cantidad * i.precioUnitario,
+    cantidad_entregada: 0,
+  }
+}
+
+async function proximoNumeroOrden(clienteId: string): Promise<number> {
+  const { data } = await supabase
+    .from('ordenes_venta')
+    .select('numero')
+    .eq('cliente_id', clienteId)
+    .eq('tipo', 'pedido')
+    .order('numero', { ascending: false })
+    .limit(1)
+  return (data?.[0]?.numero ?? 0) + 1
 }
 
 function logErr(label: string) {
@@ -161,22 +196,35 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
   switch (action.type) {
     case 'CREAR_PEDIDO': {
       const p = nextState.pedidos[nextState.pedidos.length - 1]
-      // La orden de venta tiene que existir antes que la extensión
-      // logística (FK) -- se encadena en vez de disparar las dos en
-      // paralelo.
-      supabase
-        .from('ordenes_venta')
-        .insert(ordenVentaToRow(p, clienteId))
-        .then(({ error }) => {
-          if (error) {
-            console.error('Delivery WhatsApp · error en alta de orden_venta:', error)
-            return
-          }
-          supabase
-            .from('pedidos_delivery')
-            .insert({ id: p.id, orden_venta_id: p.ordenVentaId, estado: 'pendiente' })
-            .then(logErr('alta de extensión logística'))
+      // La orden de venta tiene que existir antes que sus ítems y que
+      // la extensión logística (FK) -- se encadena en vez de disparar
+      // todo en paralelo. `numero` se calcula acá porque el alta
+      // corre autenticada (no es la función SQL pública, que sí lo
+      // calcula del lado del servidor).
+      ;(async () => {
+        const numero = await proximoNumeroOrden(clienteId)
+        const { error: errOrden } = await supabase
+          .from('ordenes_venta')
+          .insert(ordenVentaToRow(p, clienteId, numero))
+        if (errOrden) {
+          console.error('Delivery WhatsApp · error en alta de orden_venta:', errOrden)
+          return
+        }
+        if (p.items.length) {
+          const { error: errItems } = await supabase
+            .from('orden_venta_items')
+            .insert(p.items.map((i) => itemToRow(i, p.ordenVentaId)))
+          if (errItems) console.error('Delivery WhatsApp · error en ítems de la orden:', errItems)
+        }
+        const { error: errExt } = await supabase.from('pedidos_delivery').insert({
+          id: p.id,
+          orden_venta_id: p.ordenVentaId,
+          estado: 'pendiente',
+          direccion: p.direccion,
+          modalidad: 'delivery',
         })
+        if (errExt) console.error('Delivery WhatsApp · error en alta de extensión logística:', errExt)
+      })()
       return
     }
     case 'MARCAR_EN_CAMINO': {
@@ -192,13 +240,25 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
       if (!p) return
       supabase
         .from('ordenes_venta')
-        .update({
-          estado: 'facturada',
-          medio_pago: action.payload.medioPago,
-          comprobante_id: action.payload.comprobanteId,
-        })
+        .update({ estado: 'entregado', fecha_completada: todayISO() })
         .eq('id', p.ordenVentaId)
-        .then(logErr('facturación de la orden de venta'))
+        .then(logErr('cierre de la orden de venta'))
+      // Marca los ítems como entregados en su totalidad -- mismo
+      // criterio que "Marcar entregado" en Ordenes.tsx (Ventas).
+      supabase
+        .from('orden_venta_items')
+        .select('id, cantidad')
+        .eq('orden_id', p.ordenVentaId)
+        .then(({ data, error }) => {
+          if (error || !data) return
+          for (const i of data) {
+            supabase
+              .from('orden_venta_items')
+              .update({ cantidad_entregada: i.cantidad })
+              .eq('id', i.id)
+              .then(logErr('marcar ítem entregado'))
+          }
+        })
       supabase
         .from('pedidos_delivery')
         .update({ estado: 'entregado' })
@@ -211,7 +271,7 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
       if (!p) return
       supabase
         .from('ordenes_venta')
-        .update({ estado: 'cancelada' })
+        .update({ estado: 'cancelado' })
         .eq('id', p.ordenVentaId)
         .then(logErr('cancelación de la orden de venta'))
       supabase
@@ -231,32 +291,53 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
 async function fetchDeliveryState(): Promise<DeliveryWhatsappState> {
   const { data } = await supabase
     .from('pedidos_delivery')
-    .select('*, ordenes_venta(*, clientes_venta(nombre))')
+    .select('*, ordenes_venta(*, orden_venta_items(*), clientes_venta(nombre))')
     .order('created_at', { ascending: false })
 
-  const pedidos: PedidoDelivery[] = (data ?? [])
-    .filter((r: any) => r.ordenes_venta)
-    .map((r: any) => {
-      const ov = r.ordenes_venta
-      return {
-        id: r.id,
-        ordenVentaId: ov.id,
-        clienteVentaId: ov.cliente_venta_id ?? undefined,
-        clienteVentaNombre: ov.clientes_venta?.nombre ?? undefined,
-        clienteNombre: ov.cliente_nombre,
-        telefono: ov.telefono ?? undefined,
-        direccion: ov.direccion,
-        items: (ov.items ?? []) as ItemPedidoDelivery[],
-        total: Number(ov.total),
-        medioPago: ov.medio_pago ?? undefined,
-        estado: r.estado as EstadoPedidoDelivery,
-        comprobanteId: ov.comprobante_id ?? undefined,
-        notas: ov.notas ?? undefined,
-        fecha: ov.fecha,
-        createdAt: r.created_at,
-        origen: (ov.origen === 'catalogo_publico' ? 'menu_qr' : 'operador') as OrigenPedidoDelivery,
-      }
-    })
+  const rows = (data ?? []).filter((r: any) => r.ordenes_venta)
+  const ordenIds = rows.map((r: any) => r.ordenes_venta.id)
+
+  // El comprobante se busca aparte (no anidado): `comprobantes_venta`
+  // apunta a la orden vía `orden_id`, pero no asumimos que esa
+  // relación esté registrada para el embed automático de PostgREST.
+  const comprobantesPorOrden = new Map<string, { id: string; medioPago: string | null }>()
+  if (ordenIds.length) {
+    const { data: comprobantes } = await supabase
+      .from('comprobantes_venta')
+      .select('id, orden_id, medio_pago')
+      .in('orden_id', ordenIds)
+    for (const c of comprobantes ?? []) {
+      if (c.orden_id) comprobantesPorOrden.set(c.orden_id, { id: c.id, medioPago: c.medio_pago ?? null })
+    }
+  }
+
+  const pedidos: PedidoDelivery[] = rows.map((r: any) => {
+    const ov = r.ordenes_venta
+    const comprobante = comprobantesPorOrden.get(ov.id)
+    return {
+      id: r.id,
+      ordenVentaId: ov.id,
+      clienteVentaId: ov.cliente_venta_id ?? undefined,
+      clienteVentaNombre: ov.clientes_venta?.nombre ?? undefined,
+      clienteNombre: ov.contacto_nombre ?? ov.clientes_venta?.nombre ?? 'Sin nombre',
+      telefono: ov.contacto_telefono ?? undefined,
+      direccion: r.direccion ?? '',
+      items: (ov.orden_venta_items ?? []).map((i: any) => ({
+        descripcion: i.descripcion,
+        cantidad: Number(i.cantidad),
+        precioUnitario: Number(i.precio_unitario),
+        productoId: i.producto_id ?? undefined,
+      })),
+      total: Number(ov.total),
+      medioPago: comprobante?.medioPago ?? undefined,
+      estado: r.estado as EstadoPedidoDelivery,
+      comprobanteId: comprobante?.id,
+      notas: ov.notas ?? undefined,
+      fecha: ov.fecha,
+      createdAt: r.created_at,
+      origen: (ov.origen_modulo === 'menu-publico' ? 'menu_qr' : 'operador') as OrigenPedidoDelivery,
+    }
+  })
 
   return { pedidos }
 }
