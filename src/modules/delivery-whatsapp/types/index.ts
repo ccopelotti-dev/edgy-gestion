@@ -6,11 +6,19 @@
 //
 // Fase 7b (Menú QR con acción comercial): un pedido también puede
 // llegar solo, generado por el cliente final desde el menú público
-// (src/pages/MenuPublico.tsx vía la función crear_pedido_menu_publico)
-// -- `origen` distingue ambos casos. A partir de ahí sigue exactamente
-// el mismo circuito (pendiente -> en camino -> entregado, con la Venta
-// real generándose recién al entregar), no hay nada especial que
-// tratar distinto en el resto del módulo.
+// (src/pages/MenuPublico.tsx) -- `origen` distingue ambos casos.
+//
+// Fase 8b/8c (Catálogo Público genérico + convergencia): el pedido ya
+// no vive solo, entero, en `pedidos_delivery` -- ahora es una fila de
+// `ordenes_venta` (el motor central que también usan otros rubros sin
+// Kit Gastronómico) más una fila de extensión logística acá, unidas
+// por `orden_venta_id`. `ordenVentaId` es el único campo nuevo en el
+// tipo de dominio: Index.tsx y Pedido.tsx no lo necesitan, solo lo usa
+// store.tsx para saber a qué `ordenes_venta` hay que escribirle cuando
+// cambia el medio de pago, el comprobante o el estado general. El
+// resto de los campos (cliente, ítems, total, etc.) siguen viniendo
+// desde `ordenes_venta` como siempre, así que el resto del módulo no
+// nota la diferencia.
 
 export type EstadoPedidoDelivery = 'pendiente' | 'en_camino' | 'entregado' | 'cancelado'
 export type OrigenPedidoDelivery = 'operador' | 'menu_qr'
@@ -31,6 +39,11 @@ export interface ItemPedidoDelivery {
 
 export interface PedidoDelivery {
   id: string
+  /** Fase 8b/8c: id de la fila en `ordenes_venta` que contiene los
+   * datos reales del pedido (cliente, ítems, total, medio de pago,
+   * comprobante). `id` en cambio identifica la fila de extensión
+   * logística en `pedidos_delivery` -- son dos tablas distintas. */
+  ordenVentaId: string
   clienteVentaId?: string
   clienteVentaNombre?: string
   clienteNombre: string
@@ -45,7 +58,7 @@ export interface PedidoDelivery {
   fecha: string
   createdAt: string
   /** 'operador' (default) si lo cargó el operador a mano, 'menu_qr' si
-   * lo generó el cliente final desde el menú público -- Fase 7b. */
+   * lo generó el cliente final desde el catálogo público -- Fase 7b. */
   origen: OrigenPedidoDelivery
 }
 

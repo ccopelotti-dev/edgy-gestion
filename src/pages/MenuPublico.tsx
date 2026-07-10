@@ -3,28 +3,29 @@ import { useParams } from 'react-router-dom'
 import { ShoppingCart, Plus, Minus, X, CheckCircle2, ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
-// Página pública del Menú QR -- sin login, sin DashboardLayout.
+// Página pública del Catálogo -- sin login, sin DashboardLayout.
 //
 // Fase 7b (auditoría de conexiones Ventas↔Productos): hasta acá esta
-// página era "solo menú visual, sin pedidos" (scope original, ver
-// 0020_menu_qr.sql) -- una oferta pasiva sin ninguna acción comercial.
-// Ahora el cliente arma un carrito y lo manda: el pedido aterriza en
-// Delivery por WhatsApp (pedidos_delivery, estado 'pendiente', origen
-// 'menu_qr') a través de la función SQL crear_pedido_menu_publico, que
-// corre sin sesión (rol anon) y resuelve el precio real del lado del
-// servidor -- nunca se confía en el precio que manda el navegador.
+// página era "solo menú visual, sin pedidos" -- una oferta pasiva sin
+// ninguna acción comercial. Ahora el cliente arma un carrito y lo
+// manda.
 //
-// A partir de ahí sigue exactamente el mismo circuito que ya existe y
-// está probado (Fase 6d): el operador lo ve en Delivery, lo marca "en
-// camino" y al entregarlo recién se genera la Venta real, se descuenta
-// stock (bloqueante si falta) y se activa garantía si corresponde. Acá
-// no se duplica nada de esa lógica -- solo se crea el pedido, igual
-// que si el operador lo hubiera tipeado a mano.
+// Fase 8b/8c: esta MISMA página (y esta misma URL, /menu/:slug) sirve
+// para CUALQUIER rubro, no solo Gastronomía -- fue decisión explícita
+// del usuario no duplicar el motor de catálogo/carrito por kit. El
+// pedido aterriza como una `orden_venta` (el motor central que
+// también van a usar Presupuestos/Órdenes de venta manuales, Fase 8e)
+// vía la función SQL crear_orden_venta_publica, que corre sin sesión
+// (rol anon) y resuelve el precio real del lado del servidor -- nunca
+// se confía en el precio que manda el navegador. Si el negocio tiene
+// el Kit Gastronómico activo, esa orden además genera una fila de
+// extensión logística que la hace aparecer en Delivery por WhatsApp,
+// igual que antes de esta fase (ver store.tsx de delivery-whatsapp).
 //
 // Los datos se resuelven con una única llamada RPC a la función
 // SECURITY DEFINER `edgy_gestion.menu_publico(p_slug)` -- esa función
 // ya filtra disponible/activo, resuelve el precio con la lista de
-// Delivery si está configurada, y arma el JSON completo.
+// precio configurada si existe, y arma el JSON completo.
 
 interface ProductoPublico {
   id: string
@@ -52,7 +53,7 @@ interface MenuPublicoData {
 }
 
 type Vista = 'menu' | 'checkout' | 'enviando' | 'exito' | 'error'
-type Modalidad = 'retiro' | 'envio'
+type Modalidad = 'retiro' | 'delivery'
 
 function formatARS(monto: number): string {
   return new Intl.NumberFormat('es-AR', {
@@ -85,7 +86,7 @@ export default function MenuPublico() {
       .then(({ data: resultado, error }) => {
         if (!activo) return
         if (error) {
-          console.error('Menú público · error:', error)
+          console.error('Catálogo público · error:', error)
           setData(null)
         } else {
           setData(resultado as MenuPublicoData)
@@ -130,22 +131,23 @@ export default function MenuPublico() {
   async function confirmarPedido() {
     if (!slug || itemsCarrito.length === 0) return
     if (!nombre.trim() || !telefono.trim()) return
-    if (modalidad === 'envio' && !direccion.trim()) return
+    if (modalidad === 'delivery' && !direccion.trim()) return
 
     setVista('enviando')
     setErrorMsg('')
 
-    const { error } = await supabase.rpc('crear_pedido_menu_publico', {
+    const { error } = await supabase.rpc('crear_orden_venta_publica', {
       p_slug: slug,
       p_cliente_nombre: nombre.trim(),
       p_telefono: telefono.trim(),
+      p_canal_cumplimiento: modalidad,
       p_direccion: modalidad === 'retiro' ? 'Retiro en el local' : direccion.trim(),
       p_notas: notas.trim() || null,
       p_items: itemsCarrito.map((i) => ({ productoId: i.producto.id, cantidad: i.cantidad })),
     })
 
     if (error) {
-      console.error('Menú público · error creando el pedido:', error)
+      console.error('Catálogo público · error creando el pedido:', error)
       setErrorMsg(error.message || 'No se pudo enviar el pedido. Probá de nuevo.')
       setVista('error')
       return
@@ -273,16 +275,16 @@ export default function MenuPublico() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setModalidad('envio')}
+                  onClick={() => setModalidad('delivery')}
                   disabled={vista === 'enviando'}
-                  className={`flex-1 rounded-md border px-3 py-2 text-sm ${modalidad === 'envio' ? 'border-current font-medium' : 'border-gray-200 text-gray-500'}`}
-                  style={modalidad === 'envio' ? { color } : undefined}
+                  className={`flex-1 rounded-md border px-3 py-2 text-sm ${modalidad === 'delivery' ? 'border-current font-medium' : 'border-gray-200 text-gray-500'}`}
+                  style={modalidad === 'delivery' ? { color } : undefined}
                 >
                   Envío a domicilio
                 </button>
               </div>
             </div>
-            {modalidad === 'envio' && (
+            {modalidad === 'delivery' && (
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-600">Dirección</label>
                 <input
@@ -312,7 +314,7 @@ export default function MenuPublico() {
               vista === 'enviando' ||
               !nombre.trim() ||
               !telefono.trim() ||
-              (modalidad === 'envio' && !direccion.trim())
+              (modalidad === 'delivery' && !direccion.trim())
             }
             className="rounded-md px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
             style={{ backgroundColor: color }}
