@@ -27,6 +27,9 @@ export interface Cliente {
   /** Igual que lista_precio_comandas_id pero para el canal Ventas/
    * Facturación (Fase 6c del refactor de Productos). */
   lista_precio_ventas_id: string | null
+  /** Igual que lista_precio_comandas_id pero para el canal Delivery por
+   * WhatsApp (Fase 6d del refactor de Productos). */
+  lista_precio_delivery_id: string | null
   created_at: string
 }
 

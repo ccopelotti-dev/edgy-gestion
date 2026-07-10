@@ -25,14 +25,16 @@ import type { ListaPrecio, Producto, ProductoPrecio } from '../types'
 // toca esta config.
 //
 // Fase 6c: se suma un segundo selector para Ventas/Facturación
-// (clientes.lista_precio_ventas_id), mismo criterio. Delivery todavía
-// no lee esta configuración (queda para la próxima sub-fase de Fase 6);
-// Menú QR no genera ventas, así que no aplica.
+// (clientes.lista_precio_ventas_id), mismo criterio.
+//
+// Fase 6d: se suma un tercer selector para Delivery
+// (clientes.lista_precio_delivery_id), mismo criterio -- cierra la Fase 6
+// del refactor de Productos (Menú QR no genera ventas, así que no aplica).
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
 
-// ─── Uso por canal de venta (Fase 6a / 6c) ─────────────────────────────────────
+// ─── Uso por canal de venta (Fase 6a / 6c / 6d) ─────────────────────────────────
 
 interface SelectorCanalProps {
   label: string
@@ -58,24 +60,30 @@ function SelectorCanal({ label, listasPrecio, valor, guardando, onChange }: Sele
   )
 }
 
+type CampoCanal = 'lista_precio_comandas_id' | 'lista_precio_ventas_id' | 'lista_precio_delivery_id'
+
 function UsoPorCanal({ listasPrecio }: { listasPrecio: ListaPrecio[] }) {
   const { cliente } = useClienteActual()
   const [listaComandasId, setListaComandasId] = useState('')
   const [listaVentasId, setListaVentasId] = useState('')
+  const [listaDeliveryId, setListaDeliveryId] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     setListaComandasId(cliente?.lista_precio_comandas_id ?? '')
     setListaVentasId(cliente?.lista_precio_ventas_id ?? '')
-  }, [cliente?.lista_precio_comandas_id, cliente?.lista_precio_ventas_id])
+    setListaDeliveryId(cliente?.lista_precio_delivery_id ?? '')
+  }, [cliente?.lista_precio_comandas_id, cliente?.lista_precio_ventas_id, cliente?.lista_precio_delivery_id])
 
-  async function handleChangeCanal(campo: 'lista_precio_comandas_id' | 'lista_precio_ventas_id', value: string) {
+  async function handleChangeCanal(campo: CampoCanal, value: string) {
     if (!cliente?.id) return
     const anteriorComandas = listaComandasId
     const anteriorVentas = listaVentasId
+    const anteriorDelivery = listaDeliveryId
     if (campo === 'lista_precio_comandas_id') setListaComandasId(value)
-    else setListaVentasId(value)
+    else if (campo === 'lista_precio_ventas_id') setListaVentasId(value)
+    else setListaDeliveryId(value)
     setGuardando(true)
     setError('')
     const { error: errUpdate } = await supabase
@@ -86,6 +94,7 @@ function UsoPorCanal({ listasPrecio }: { listasPrecio: ListaPrecio[] }) {
     if (errUpdate) {
       setListaComandasId(anteriorComandas)
       setListaVentasId(anteriorVentas)
+      setListaDeliveryId(anteriorDelivery)
       setError('No se pudo guardar. Probá de nuevo.')
     }
   }
@@ -100,7 +109,7 @@ function UsoPorCanal({ listasPrecio }: { listasPrecio: ListaPrecio[] }) {
         Elegí qué lista de precio usa cada canal. Si dejás "Precio de venta (default)", ese
         canal sigue funcionando exactamente como hasta ahora.
       </p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 max-w-lg">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 max-w-2xl">
         <SelectorCanal
           label="Comandas / Mostrador"
           listasPrecio={listasPrecio}
@@ -114,6 +123,13 @@ function UsoPorCanal({ listasPrecio }: { listasPrecio: ListaPrecio[] }) {
           valor={listaVentasId}
           guardando={guardando}
           onChange={(v) => handleChangeCanal('lista_precio_ventas_id', v)}
+        />
+        <SelectorCanal
+          label="Delivery"
+          listasPrecio={listasPrecio}
+          valor={listaDeliveryId}
+          guardando={guardando}
+          onChange={(v) => handleChangeCanal('lista_precio_delivery_id', v)}
         />
       </div>
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
@@ -323,8 +339,8 @@ export default function ListasPrecio() {
           )}
 
           <p className="text-muted-foreground text-xs">
-            El precio de venta del producto sigue siendo el default -- Comandas y Ventas ya
-            pueden usar una lista propia (arriba, "Uso por canal"). Delivery todavía no.
+            El precio de venta del producto sigue siendo el default -- Comandas, Ventas y Delivery
+            ya pueden usar una lista propia (arriba, "Uso por canal").
           </p>
         </div>
 

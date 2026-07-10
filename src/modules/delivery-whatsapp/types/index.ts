@@ -10,6 +10,14 @@ export interface ItemPedidoDelivery {
   descripcion: string
   cantidad: number
   precioUnitario: number
+  /** Vínculo permanente al catálogo real (productos-stock) -- opcional:
+   * si se deja sin vincular, el ítem sigue siendo texto libre como
+   * siempre (comportamiento default sin cambios). Vinculado, permite
+   * descontar stock y activar garantía automáticamente al marcar el
+   * pedido como "Entregado" -- Fase 6d del refactor de Productos,
+   * mismo criterio que el selector de catálogo de Ventas (Fase 6c). */
+  productoId?: string
+  varianteId?: string
 }
 
 export interface PedidoDelivery {

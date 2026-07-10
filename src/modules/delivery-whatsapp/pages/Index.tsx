@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,6 +18,7 @@ import { usePedidosDelivery, useDeliveryWhatsapp } from '../data/store'
 import { formatARS, formatFecha } from '../lib/format'
 import { ESTADO_PEDIDO_DELIVERY_LABEL } from '../types'
 import type { ItemPedidoDelivery } from '../types'
+import { useCatalogoDelivery, etiquetaVarianteDelivery, type ProductoCatalogoDelivery } from '../lib/catalogoDelivery'
 
 interface ClienteVentaLite {
   id: string
@@ -31,10 +32,23 @@ const ITEM_VACIO: ItemPedidoDelivery = { descripcion: '', cantidad: 1, precioUni
 // separada" que el resto del pack gastronómico. El cliente es
 // opcional: si no está registrado en Ventas alcanza con nombre y
 // dirección sueltos.
+//
+// Fase 6d del refactor de Productos: además de texto libre, cada ítem
+// se puede vincular a un producto real del catálogo (buscador debajo
+// de "Ítems del pedido") -- el precio se autocompleta con la lista de
+// precio de Delivery (Productos → Listas de precio → "Uso por canal")
+// si está configurada, o precioVenta si no. Si algún ítem vinculado
+// tiene garantía asignada, el teléfono pasa a ser obligatorio: se va a
+// necesitar para activar la garantía automáticamente al entregar (ver
+// Pedido.tsx / activarGarantiasVenta.ts).
 export default function Index() {
   const { cliente } = useClienteActual()
   const { dispatch } = useDeliveryWhatsapp()
   const pedidos = usePedidosDelivery()
+  const { productos: productosCatalogo, porId: catalogoPorId } = useCatalogoDelivery(
+    cliente?.id,
+    cliente?.lista_precio_delivery_id,
+  )
 
   const [clientesVenta, setClientesVenta] = useState<ClienteVentaLite[]>([])
   const [mostrarForm, setMostrarForm] = useState(false)
@@ -44,6 +58,7 @@ export default function Index() {
   const [direccion, setDireccion] = useState('')
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<ItemPedidoDelivery[]>([{ ...ITEM_VACIO }])
+  const [busquedaProducto, setBusquedaProducto] = useState('')
 
   useEffect(() => {
     if (!cliente?.id) return
@@ -56,7 +71,20 @@ export default function Index() {
       .then(({ data }) => setClientesVenta(data ?? []))
   }, [cliente?.id])
 
+  const sugerenciasProducto = useMemo(() => {
+    const q = busquedaProducto.trim().toLowerCase()
+    if (!q) return []
+    return productosCatalogo.filter((p) => p.nombre.toLowerCase().includes(q)).slice(0, 8)
+  }, [busquedaProducto, productosCatalogo])
+
   const total = items.reduce((sum, i) => sum + i.cantidad * i.precioUnitario, 0)
+
+  // Fase 6d: si algún ítem está vinculado a un producto con garantía
+  // asignada, hace falta el teléfono para poder activarla al entregar.
+  const tieneItemConGarantia = items.some(
+    (i) => i.productoId && catalogoPorId.get(i.productoId)?.plantillaGarantia,
+  )
+  const faltaTelefonoGarantia = tieneItemConGarantia && !telefono.trim()
 
   function actualizarItem(idx: number, campo: keyof ItemPedidoDelivery, valor: string | number) {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, [campo]: valor } : it)))
@@ -64,6 +92,22 @@ export default function Index() {
 
   function agregarItem() {
     setItems((prev) => [...prev, { ...ITEM_VACIO }])
+  }
+
+  function agregarItemCatalogo(producto: ProductoCatalogoDelivery) {
+    setItems((prev) => {
+      const limpio = prev.filter((it) => it.descripcion.trim() || it.productoId)
+      return [
+        ...limpio,
+        {
+          descripcion: producto.nombre,
+          cantidad: 1,
+          precioUnitario: producto.precioVenta,
+          productoId: producto.id,
+        },
+      ]
+    })
+    setBusquedaProducto('')
   }
 
   function quitarItem(idx: number) {
@@ -78,11 +122,12 @@ export default function Index() {
     setDireccion('')
     setNotas('')
     setItems([{ ...ITEM_VACIO }])
+    setBusquedaProducto('')
   }
 
   function crearPedido() {
     const itemsValidos = items.filter((i) => i.descripcion.trim() && i.cantidad > 0)
-    if (!clienteNombre.trim() || !direccion.trim() || itemsValidos.length === 0) return
+    if (!clienteNombre.trim() || !direccion.trim() || itemsValidos.length === 0 || faltaTelefonoGarantia) return
 
     const clienteVenta = clientesVenta.find((c) => c.id === clienteVentaId)
 
@@ -157,13 +202,20 @@ export default function Index() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="telefono">Teléfono</Label>
+                <Label htmlFor="telefono">
+                  Teléfono{tieneItemConGarantia ? ' *' : ''}
+                </Label>
                 <Input
                   id="telefono"
                   value={telefono}
                   onChange={(e) => setTelefono(e.target.value)}
                   placeholder="11 5555-5555"
                 />
+                {tieneItemConGarantia && (
+                  <p className="text-[11px] text-emerald-700">
+                    Obligatorio: hay un producto con garantía en el pedido.
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="direccion">Dirección</Label>
@@ -178,42 +230,107 @@ export default function Index() {
 
             <div className="flex flex-col gap-2">
               <Label>Ítems del pedido</Label>
-              {items.map((item, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <Input
-                    value={item.descripcion}
-                    onChange={(e) => actualizarItem(idx, 'descripcion', e.target.value)}
-                    placeholder="2 empanadas de carne..."
-                    className="flex-1"
-                  />
-                  <Input
-                    type="number"
-                    min={1}
-                    value={item.cantidad}
-                    onChange={(e) => actualizarItem(idx, 'cantidad', Number(e.target.value) || 1)}
-                    className="w-20"
-                  />
-                  <Input
-                    type="number"
-                    min={0}
-                    value={item.precioUnitario}
-                    onChange={(e) => actualizarItem(idx, 'precioUnitario', Number(e.target.value) || 0)}
-                    className="w-28"
-                    placeholder="Precio unit."
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => quitarItem(idx)}
-                    disabled={items.length === 1}
-                  >
-                    <Trash2 className="h-4 w-4 text-red-600" />
-                  </Button>
-                </div>
-              ))}
+
+              {/* Fase 6d: buscador de catálogo -- alternativa a texto libre */}
+              <div className="relative">
+                <Input
+                  value={busquedaProducto}
+                  onChange={(e) => setBusquedaProducto(e.target.value)}
+                  placeholder="Buscar producto del catálogo..."
+                />
+                {sugerenciasProducto.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-md border bg-white shadow-lg">
+                    {sugerenciasProducto.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => agregarItemCatalogo(p)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/50"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          {p.nombre}
+                          {p.plantillaGarantia && (
+                            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                          )}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {formatARS(p.precioVenta)}
+                          {p.controlaStock ? ` · Stock ${p.stock}` : ''}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {items.map((item, idx) => {
+                const producto = item.productoId ? catalogoPorId.get(item.productoId) : undefined
+                return (
+                  <div key={idx} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={item.descripcion}
+                        onChange={(e) => actualizarItem(idx, 'descripcion', e.target.value)}
+                        placeholder="2 empanadas de carne..."
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        min={1}
+                        value={item.cantidad}
+                        onChange={(e) => actualizarItem(idx, 'cantidad', Number(e.target.value) || 1)}
+                        className="w-20"
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        value={item.precioUnitario}
+                        onChange={(e) => actualizarItem(idx, 'precioUnitario', Number(e.target.value) || 0)}
+                        className="w-28"
+                        placeholder="Precio unit."
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => quitarItem(idx)}
+                        disabled={items.length === 1}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-600" />
+                      </Button>
+                    </div>
+                    {producto && (
+                      <div className="ml-1 flex items-center gap-2">
+                        <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                          Catálogo
+                        </span>
+                        {producto.plantillaGarantia && (
+                          <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700">
+                            <ShieldCheck className="h-3 w-3" />
+                            Garantía {producto.plantillaGarantia.duracionMeses}m
+                          </span>
+                        )}
+                        {producto.tipo === 'con_variantes' && (
+                          <select
+                            value={item.varianteId ?? ''}
+                            onChange={(e) => actualizarItem(idx, 'varianteId', e.target.value)}
+                            className="rounded border border-input px-1 py-0.5 text-[11px]"
+                          >
+                            <option value="">Elegir variante…</option>
+                            {producto.variantes.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {etiquetaVarianteDelivery(v)} · Stock {v.stock}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
               <Button variant="outline" size="sm" onClick={agregarItem} className="w-fit">
                 <Plus className="mr-1.5 h-4 w-4" />
-                Agregar ítem
+                Agregar ítem libre
               </Button>
             </div>
 
@@ -231,7 +348,7 @@ export default function Index() {
               <span className="text-lg font-semibold">Total: {formatARS(total)}</span>
               <Button
                 onClick={crearPedido}
-                disabled={!clienteNombre.trim() || !direccion.trim() || total <= 0}
+                disabled={!clienteNombre.trim() || !direccion.trim() || total <= 0 || faltaTelefonoGarantia}
               >
                 Cargar pedido
               </Button>
