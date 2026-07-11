@@ -67,6 +67,12 @@ type Action =
   | { type: 'PASAR_A_COBRO'; payload: { comandaId: string } }
   | { type: 'CERRAR_COMANDA'; payload: { comandaId: string; comprobanteId?: string } }
   | { type: 'CANCELAR_COMANDA'; payload: { comandaId: string } }
+  // Fase 13a: el traslado ya se persistió (mesa origen liberada, mesa
+  // destino ocupada, comanda.mesa_id actualizado) vía el RPC
+  // `trasladar_comanda` ANTES de despachar esto -- mismo criterio que
+  // CERRAR_COMANDA con comprobanteId ya resuelto. Este action solo
+  // actualiza el estado local, no dispara ningún sync adicional.
+  | { type: 'TRASLADAR_COMANDA'; payload: { comandaId: string; mesaDestinoId: string } }
   | { type: 'SET_STATE'; payload: ComandasCocinaState }
 
 function reducer(state: ComandasCocinaState, action: Action): ComandasCocinaState {
@@ -183,6 +189,14 @@ function reducer(state: ComandasCocinaState, action: Action): ComandasCocinaStat
         ...state,
         comandas: state.comandas.map((c) =>
           c.id === action.payload.comandaId ? { ...c, estado: 'cancelada' as const, fechaCierre: nowISO() } : c,
+        ),
+      }
+
+    case 'TRASLADAR_COMANDA':
+      return {
+        ...state,
+        comandas: state.comandas.map((c) =>
+          c.id === action.payload.comandaId ? { ...c, mesaId: action.payload.mesaDestinoId } : c,
         ),
       }
 
@@ -309,6 +323,13 @@ function syncToSupabase(action: Action, nextState: ComandasCocinaState, clienteI
       actualizarEstadoMesa(c.mesaId, 'libre', null)
       return
     }
+
+    // TRASLADAR_COMANDA: ya se persistió por completo (mesas origen y
+    // destino + comanda.mesa_id) vía el RPC `trasladar_comanda`, llamado
+    // desde la UI antes de despachar este action -- acá no hay nada
+    // más que sincronizar.
+    case 'TRASLADAR_COMANDA':
+      return
 
     default:
       return

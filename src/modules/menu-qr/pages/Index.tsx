@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { ExternalLink, Copy, Check } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ExternalLink, Copy, Check, Table2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { useClienteActual } from '@/hooks/useClienteActual'
+import { supabase } from '@/lib/supabase'
 
 // Módulo Menú QR -- lado administrativo. Scope acordado: "solo menú
 // visual (sin pedidos)". Esta página no gestiona productos (eso ya
@@ -10,9 +11,32 @@ import { useClienteActual } from '@/hooks/useClienteActual'
 // dueño el link público y el QR para imprimir/compartir. La página
 // que ve el cliente final es src/pages/MenuPublico.tsx, servida sin
 // login en /menu/:slug (fuera del DashboardLayout).
+//
+// Fase 13c (Mejoras de Salón): si el negocio tiene mesas cargadas
+// (módulo Mesas y Salón -- lectura cross-módulo directa a `mesas`,
+// mismo criterio que el dashboard leyendo tablas de otros módulos),
+// se puede imprimir un QR POR MESA (`/menu/:slug?mesa=<numero>`) en
+// vez de -- o adicional a -- el QR genérico del local. Ese parámetro
+// es lo que habilita el botón "Llamar mozo" en MenuPublico.tsx.
+interface MesaLite {
+  id: string
+  numero: number
+}
+
 export default function Index() {
   const { cliente } = useClienteActual()
   const [copiado, setCopiado] = useState(false)
+  const [mesas, setMesas] = useState<MesaLite[]>([])
+
+  useEffect(() => {
+    if (!cliente?.id) return
+    supabase
+      .from('mesas')
+      .select('id, numero')
+      .eq('cliente_id', cliente.id)
+      .order('numero')
+      .then(({ data }) => setMesas((data ?? []).map((m: any) => ({ id: m.id, numero: m.numero }))))
+  }, [cliente?.id])
 
   if (!cliente?.slug) {
     return (
@@ -88,6 +112,41 @@ export default function Index() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Fase 13c: QR por mesa -- solo si el negocio tiene mesas
+          cargadas en Mesas y Salón. Habilita "Llamar mozo" desde el
+          celular del comensal (MenuPublico.tsx lee ?mesa=<numero>). */}
+      {mesas.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <Table2 className="h-4 w-4 text-muted-foreground" />
+            <h2 className="font-medium">QR por mesa</h2>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            Un QR distinto para cada mesa: además del menú, le suma al comensal el botón "Llamar
+            mozo" desde su celular. Imprimí el que corresponda y pegalo en cada mesa.
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {mesas.map((m) => {
+              const urlMesa = `${publicUrl}?mesa=${m.numero}`
+              const qrMesa = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(urlMesa)}`
+              return (
+                <Card key={m.id}>
+                  <CardContent className="flex flex-col items-center gap-2 py-4">
+                    <span className="text-sm font-semibold">Mesa {m.numero}</span>
+                    <img src={qrMesa} alt={`QR mesa ${m.numero}`} className="h-32 w-32 rounded-md border" />
+                    <a href={qrMesa} download={`menu-qr-mesa-${m.numero}.png`}>
+                      <Button variant="outline" size="sm">
+                        Descargar
+                      </Button>
+                    </a>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

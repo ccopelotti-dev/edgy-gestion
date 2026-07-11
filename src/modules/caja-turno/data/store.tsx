@@ -40,6 +40,7 @@ type Action =
       payload: {
         turnoId: string
         montoCierreDeclarado: number
+        montoEsperado: number
         diferencia: number
         usuarioCierreId?: string
         notas?: string
@@ -65,7 +66,7 @@ function reducer(state: CajaTurnoState, action: Action): CajaTurnoState {
     }
 
     case 'CERRAR_TURNO': {
-      const { turnoId, montoCierreDeclarado, diferencia, usuarioCierreId, notas } = action.payload
+      const { turnoId, montoCierreDeclarado, montoEsperado, diferencia, usuarioCierreId, notas } = action.payload
       return {
         ...state,
         turnos: state.turnos.map((t) =>
@@ -75,6 +76,7 @@ function reducer(state: CajaTurnoState, action: Action): CajaTurnoState {
                 estado: 'cerrado' as const,
                 fechaCierre: nowISO(),
                 montoCierreDeclarado,
+                montoEsperado,
                 diferencia,
                 usuarioCierreId,
                 notas: notas ?? t.notas,
@@ -101,6 +103,7 @@ function turnoToRow(t: TurnoCaja, clienteId: string) {
     usuario_cierre_id: t.usuarioCierreId ?? null,
     fecha_cierre: t.fechaCierre ?? null,
     monto_cierre_declarado: t.montoCierreDeclarado ?? null,
+    monto_esperado: t.montoEsperado ?? null,
     diferencia: t.diferencia ?? null,
     estado: t.estado,
     notas: t.notas ?? null,
@@ -127,6 +130,7 @@ function syncToSupabase(action: Action, nextState: CajaTurnoState, clienteId: st
           estado: t.estado,
           fecha_cierre: t.fechaCierre,
           monto_cierre_declarado: t.montoCierreDeclarado,
+          monto_esperado: t.montoEsperado,
           diferencia: t.diferencia,
           usuario_cierre_id: t.usuarioCierreId ?? null,
           notas: t.notas ?? null,
@@ -158,6 +162,7 @@ async function fetchCajaTurnoState(): Promise<CajaTurnoState> {
     usuarioCierreNombre: r.usuario_cierre?.nombre ?? r.usuario_cierre?.email ?? undefined,
     fechaCierre: r.fecha_cierre ?? undefined,
     montoCierreDeclarado: r.monto_cierre_declarado != null ? Number(r.monto_cierre_declarado) : undefined,
+    montoEsperado: r.monto_esperado != null ? Number(r.monto_esperado) : undefined,
     diferencia: r.diferencia != null ? Number(r.diferencia) : undefined,
     estado: r.estado,
     notas: r.notas ?? undefined,

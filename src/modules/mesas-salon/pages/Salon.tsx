@@ -1,14 +1,26 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutGrid, Map as MapIcon, AlertTriangle } from 'lucide-react'
+import { LayoutGrid, Map as MapIcon, AlertTriangle, BellRing, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { useTurnoActivo } from '@/hooks/useTurnoActivo'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import { useMesasSalon, useSectoresConMesas, useResumenEstados } from '../data/store'
+import {
+  listarLlamadosPendientes,
+  suscribirLlamadosMozo,
+  marcarLlamadoAtendido,
+  type LlamadoMozo,
+} from '../lib/llamadosMozo'
 import type { EstadoMesa } from '../types'
+
+const ORIGEN_LLAMADO_LABEL: Record<LlamadoMozo['origen'], string> = {
+  cliente: 'Desde la mesa (Menú QR)',
+  personal: 'Aviso interno',
+}
 
 const COLOR_ESTADO: Record<EstadoMesa, string> = {
   libre: 'bg-emerald-500 hover:bg-emerald-600',
@@ -33,6 +45,7 @@ const LABEL_ESTADO: Record<EstadoMesa, string> = {
 
 export default function Salon() {
   const navigate = useNavigate()
+  const { cliente } = useClienteActual()
   const { dispatch } = useMesasSalon()
   const sectoresConMesas = useSectoresConMesas()
   const resumen = useResumenEstados()
@@ -42,6 +55,29 @@ export default function Salon() {
   const [nombreSector, setNombreSector] = useState('Salón principal')
   const [cantidadMesas, setCantidadMesas] = useState(8)
   const [sillasPorMesa, setSillasPorMesa] = useState(4)
+
+  // Fase 13c: llamados a mozo en tiempo real -- ver ../lib/llamadosMozo.ts.
+  const [llamados, setLlamados] = useState<LlamadoMozo[]>([])
+
+  useEffect(() => {
+    if (!cliente?.id) return
+    let activo = true
+    listarLlamadosPendientes(cliente.id).then((lista) => {
+      if (activo) setLlamados(lista)
+    })
+    const cancelar = suscribirLlamadosMozo(cliente.id, (nuevo) => {
+      setLlamados((actual) => (actual.some((l) => l.id === nuevo.id) ? actual : [...actual, nuevo]))
+    })
+    return () => {
+      activo = false
+      cancelar()
+    }
+  }, [cliente?.id])
+
+  async function atenderLlamado(id: string) {
+    const ok = await marcarLlamadoAtendido(id)
+    if (ok) setLlamados((actual) => actual.filter((l) => l.id !== id))
+  }
 
   const totalMesas = sectoresConMesas.reduce((sum, s) => sum + s.mesas.length, 0)
   const soloLectura = !cargandoTurno && !turno
@@ -81,6 +117,41 @@ export default function Salon() {
             </Button>
           </CardContent>
         </Card>
+      )}
+
+      {/* Fase 13c: llamados a mozo pendientes, en tiempo real -- ver
+          ../lib/llamadosMozo.ts. Aparecen apenas se crean (Realtime),
+          sin necesidad de refrescar la pantalla. */}
+      {llamados.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {llamados.map((l) => {
+            const numeroMesa = sectoresConMesas
+              .flatMap((s) => s.mesas)
+              .find((m) => m.id === l.mesaId)?.numero
+            return (
+              <Card key={l.id} className="border-violet-300 bg-violet-50">
+                <CardContent className="flex items-center justify-between gap-3 py-3">
+                  <div className="flex items-center gap-2 text-violet-900">
+                    <BellRing className="h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium">
+                        Mesa {numeroMesa ?? '—'} llama al mozo
+                      </p>
+                      <p className="text-xs text-violet-800">
+                        {ORIGEN_LLAMADO_LABEL[l.origen]}
+                        {l.motivo ? ` · ${l.motivo}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => atenderLlamado(l.id)}>
+                    <Check className="mr-1.5 h-4 w-4" />
+                    Atendido
+                  </Button>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
       )}
 
       {totalMesas > 0 && (

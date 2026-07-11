@@ -22,6 +22,11 @@ export interface TurnoCaja {
   usuarioCierreNombre?: string
   fechaCierre?: string
   montoCierreDeclarado?: number
+  // Fase 13b (arqueo ciego): monto esperado (apertura + neto de
+  // efectivo en Tesorería) calculado al cerrar -- se guarda para poder
+  // auditar el arqueo después, nunca se le muestra al cajero antes de
+  // que declare su conteo físico.
+  montoEsperado?: number
   diferencia?: number
   estado: EstadoTurno
   notas?: string

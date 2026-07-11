@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { ShoppingCart, Plus, Minus, X, CheckCircle2, ArrowLeft } from 'lucide-react'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { ShoppingCart, Plus, Minus, X, CheckCircle2, ArrowLeft, BellRing } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 // Página pública del Catálogo -- sin login, sin DashboardLayout.
@@ -26,6 +26,14 @@ import { supabase } from '@/lib/supabase'
 // SECURITY DEFINER `edgy_gestion.menu_publico(p_slug)` -- esa función
 // ya filtra disponible/activo, resuelve el precio con la lista de
 // precio configurada si existe, y arma el JSON completo.
+//
+// Fase 13c (Mejoras de Salón): si la URL trae `?mesa=<numero>` (QR
+// impreso por mesa, ver menu-qr/pages/Index.tsx), aparece un botón
+// flotante "Llamar mozo" que dispara el RPC público
+// `crear_llamado_mozo_publico` -- mismo mecanismo security definer que
+// crear_orden_venta_publica, resuelve cliente_id y mesa_id del lado
+// del servidor a partir de slug + número de mesa. Sin ese parámetro
+// (QR genérico del local, sin mesa asociada) el botón no se muestra.
 
 interface ProductoPublico {
   id: string
@@ -66,6 +74,12 @@ function formatARS(monto: number): string {
 
 export default function MenuPublico() {
   const { slug } = useParams<{ slug: string }>()
+  const [searchParams] = useSearchParams()
+  const numeroMesa = (() => {
+    const raw = searchParams.get('mesa')
+    const n = raw ? Number(raw) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  })()
   const [data, setData] = useState<MenuPublicoData | null>(null)
   const [cargando, setCargando] = useState(true)
   const [carrito, setCarrito] = useState<Map<string, number>>(new Map())
@@ -76,6 +90,26 @@ export default function MenuPublico() {
   const [direccion, setDireccion] = useState('')
   const [notas, setNotas] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+
+  // Fase 13c: "Llamar mozo" -- solo disponible si el QR escaneado es de
+  // una mesa específica (?mesa=<numero>).
+  const [llamandoMozo, setLlamandoMozo] = useState(false)
+  const [avisoMozoEnviado, setAvisoMozoEnviado] = useState(false)
+
+  async function llamarMozo() {
+    if (!slug || !numeroMesa) return
+    setLlamandoMozo(true)
+    const { error } = await supabase.rpc('crear_llamado_mozo_publico', {
+      p_slug: slug,
+      p_numero_mesa: numeroMesa,
+      p_motivo: null,
+    })
+    setLlamandoMozo(false)
+    if (!error) {
+      setAvisoMozoEnviado(true)
+      setTimeout(() => setAvisoMozoEnviado(false), 4000)
+    }
+  }
 
   useEffect(() => {
     if (!slug) return
@@ -328,6 +362,19 @@ export default function MenuPublico() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
+      {/* Fase 13c: solo aparece si el QR era de una mesa específica. */}
+      {numeroMesa && (
+        <button
+          onClick={llamarMozo}
+          disabled={llamandoMozo || avisoMozoEnviado}
+          className="fixed right-3 top-3 z-20 flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-xs font-semibold shadow-md disabled:opacity-70"
+          style={{ color }}
+        >
+          <BellRing className="h-3.5 w-3.5" />
+          {avisoMozoEnviado ? 'Aviso enviado' : llamandoMozo ? 'Enviando…' : 'Llamar mozo'}
+        </button>
+      )}
+
       <div className="flex flex-col items-center gap-3 px-4 pb-8 pt-10 text-center text-white" style={{ backgroundColor: color }}>
         {cliente.logoUrl && (
           <img src={cliente.logoUrl} alt={cliente.nombre} className="h-16 w-16 rounded-full border-2 border-white object-cover" />

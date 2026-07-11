@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Minus, Plus, Receipt, Trash2, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Minus, Plus, Receipt, Trash2, AlertTriangle, ShieldCheck, ArrowRightLeft, BellRing } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -20,6 +20,8 @@ import { useComandasCocina, useComandaDeMesa } from '../data/store'
 import { formatARS, formatHora, ESTADO_COCINA_LABEL } from '../lib/format'
 import { cerrarComandaComoVenta, validarStockComanda, type ErrorStockComanda } from '../lib/cerrarComandaVenta'
 import { useCatalogoComandas } from '../lib/catalogoComandas'
+import { listarMesasLibres, trasladarComanda, type MesaLibre } from '../lib/trasladarMesa'
+import { crearLlamadoPersonal } from '@/modules/mesas-salon/lib/llamadosMozo'
 
 interface MesaLite {
   id: string
@@ -56,6 +58,16 @@ interface ClienteVentaLite {
 // operador -- los nombres de variables/funciones internas (`comanda`,
 // `abrirComanda`, `ABRIR_COMANDA`, etc.) no cambian, es puramente una
 // aclaración de UI.
+//
+// Fase 13a (Mejoras de Salón): se agrega el traslado de esta comanda a
+// otra mesa libre -- ver ../lib/trasladarMesa.ts. Se persiste con el
+// RPC `trasladar_comanda` (transaccional) ANTES de despachar
+// TRASLADAR_COMANDA al store local, mismo criterio que CERRAR_COMANDA
+// con el comprobanteId ya resuelto.
+//
+// Fase 13c: botón "Llamar mozo" (aviso interno, origen='personal') --
+// ver src/modules/mesas-salon/lib/llamadosMozo.ts. Se muestra en
+// Salon.tsx en tiempo real vía Supabase Realtime.
 export default function Mesa() {
   const { mesaId } = useParams<{ mesaId: string }>()
   const navigate = useNavigate()
@@ -76,6 +88,19 @@ export default function Mesa() {
   const [erroresStock, setErroresStock] = useState<ErrorStockComanda[] | null>(null)
   const [contactoNombre, setContactoNombre] = useState('')
   const [contactoTelefono, setContactoTelefono] = useState('')
+
+  // Fase 13a: traslado de mesas -- ver ../lib/trasladarMesa.ts.
+  const [trasladoAbierto, setTrasladoAbierto] = useState(false)
+  const [mesasLibres, setMesasLibres] = useState<MesaLibre[]>([])
+  const [mesaDestinoId, setMesaDestinoId] = useState('')
+  const [trasladando, setTrasladando] = useState(false)
+  const [errorTraslado, setErrorTraslado] = useState('')
+
+  // Fase 13c: aviso interno de "llamar mozo" (origen='personal') -- ver
+  // src/modules/mesas-salon/lib/llamadosMozo.ts. El otro origen
+  // ('cliente', desde el Menú QR) no pasa por acá.
+  const [llamandoMozo, setLlamandoMozo] = useState(false)
+  const [avisoEnviado, setAvisoEnviado] = useState(false)
 
   useEffect(() => {
     if (!mesaId) return
@@ -224,6 +249,41 @@ export default function Mesa() {
     navigate('/m/mesas-salon')
   }
 
+  async function abrirTraslado() {
+    if (!mesaId) return
+    setErrorTraslado('')
+    setMesaDestinoId('')
+    setTrasladoAbierto(true)
+    setMesasLibres(await listarMesasLibres(mesaId))
+  }
+
+  async function confirmarTraslado() {
+    if (!comanda || !mesaDestinoId) return
+    setTrasladando(true)
+    setErrorTraslado('')
+    const resultado = await trasladarComanda(comanda.id, mesaDestinoId)
+    if (!resultado.ok) {
+      setErrorTraslado(resultado.error ?? 'No se pudo trasladar la comanda de salón.')
+      setTrasladando(false)
+      return
+    }
+    dispatch({ type: 'TRASLADAR_COMANDA', payload: { comandaId: comanda.id, mesaDestinoId } })
+    setTrasladando(false)
+    setTrasladoAbierto(false)
+    navigate(`/m/comandas-cocina/mesa/${mesaDestinoId}`)
+  }
+
+  async function llamarMozo() {
+    if (!mesaId || !cliente?.id) return
+    setLlamandoMozo(true)
+    const ok = await crearLlamadoPersonal(cliente.id, mesaId)
+    setLlamandoMozo(false)
+    if (ok) {
+      setAvisoEnviado(true)
+      setTimeout(() => setAvisoEnviado(false), 4000)
+    }
+  }
+
   if (cargandoMesa) {
     return <div className="text-muted-foreground py-12 text-center text-sm">Cargando mesa…</div>
   }
@@ -253,6 +313,21 @@ export default function Mesa() {
           <h1 className="text-2xl font-bold tracking-tight">Mesa {mesa.numero}</h1>
           <p className="text-muted-foreground text-sm">{mesa.capacidad} sillas</p>
         </div>
+        {comanda && (comanda.estado === 'abierta' || comanda.estado === 'cobro') && (
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={llamarMozo} disabled={llamandoMozo}>
+                <BellRing className="mr-1.5 h-4 w-4" />
+                Llamar mozo
+              </Button>
+              <Button variant="outline" size="sm" onClick={abrirTraslado}>
+                <ArrowRightLeft className="mr-1.5 h-4 w-4" />
+                Trasladar
+              </Button>
+            </div>
+            {avisoEnviado && <span className="text-xs font-medium text-violet-700">Aviso enviado</span>}
+          </div>
+        )}
         {comanda && (
           <div className="text-right">
             <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium">
@@ -266,6 +341,46 @@ export default function Mesa() {
           </div>
         )}
       </div>
+
+      {/* Fase 13a: traslado de esta comanda a otra mesa libre. */}
+      {trasladoAbierto && comanda && (
+        <Card className="max-w-sm border-indigo-200 bg-indigo-50/50">
+          <CardContent className="flex flex-col gap-3 py-4">
+            <h3 className="flex items-center gap-1.5 font-medium">
+              <ArrowRightLeft className="h-4 w-4" />
+              Trasladar a otra mesa
+            </h3>
+            {mesasLibres.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No hay mesas libres en este momento.</p>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="mesa-destino">Mesa destino</Label>
+                <Select value={mesaDestinoId} onValueChange={setMesaDestinoId}>
+                  <SelectTrigger id="mesa-destino">
+                    <SelectValue placeholder="Elegir mesa libre" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {mesasLibres.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        Mesa {m.numero}{m.sectorNombre ? ` · ${m.sectorNombre}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {errorTraslado && <p className="text-sm text-red-600">{errorTraslado}</p>}
+            <div className="flex gap-2">
+              <Button onClick={confirmarTraslado} disabled={!mesaDestinoId || trasladando}>
+                {trasladando ? 'Trasladando…' : 'Confirmar traslado'}
+              </Button>
+              <Button variant="outline" onClick={() => setTrasladoAbierto(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Bloqueo por stock insuficiente -- Fase 7a, mismo criterio que
           Ventas (6c) y Delivery (6d): un faltante de stock es un desvío
