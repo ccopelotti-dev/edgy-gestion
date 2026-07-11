@@ -16,8 +16,15 @@ import {
   Receipt,
   BadgeCheck,
   Ban,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
+import {
+  generarComprobantePdf,
+  type EmpresaParaPdf,
+} from '@/lib/comprobantes-pdf/generarComprobantePdf';
 import {
   useComprobantes,
   useClientes,
@@ -89,6 +96,10 @@ export default function Comprobantes() {
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
   const [cobroDialogOpen, setCobroDialogOpen] = useState(false);
   const [cobroClienteId, setCobroClienteId] = useState<string | null>(null);
+  // Fase 10: motor de PDF -- id del comprobante que se está generando
+  // en este momento (deshabilita su botón mientras descarga el logo).
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  const { cliente: empresaActual } = useClienteActual();
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -214,6 +225,50 @@ export default function Comprobantes() {
   const handleAnular = (id: string) => {
     if (!confirm('Esta seguro de anular este comprobante? Esta accion no se puede deshacer.')) return;
     dispatch({ type: 'ANULAR_COMPROBANTE', payload: { id } });
+  };
+
+  // Fase 10: descarga el comprobante como PDF usando el motor
+  // compartido (src/lib/comprobantes-pdf) -- toma el logo y el color
+  // de marca del cliente (empresa) actual, cargados en Configuración >
+  // Empresa. Disponible para cualquier comprobante, esté o no anulado
+  // (sirve como respaldo aunque ya no tenga efecto comercial).
+  const handleDescargarPdf = async (comp: Comprobante) => {
+    if (!empresaActual) return;
+    setGenerandoPdfId(comp.id);
+    try {
+      const cliente = clienteById(comp.clienteId);
+      const empresaPdf: EmpresaParaPdf = {
+        nombre: empresaActual.nombre,
+        cuit: empresaActual.cuit,
+        direccion: empresaActual.direccion,
+        telefono: empresaActual.telefono,
+        logoUrl: empresaActual.logo_url,
+        colorMarca: empresaActual.color_marca,
+      };
+      await generarComprobantePdf(
+        empresaPdf,
+        {
+          tipoLabel: TIPO_COMPROBANTE_LABEL[comp.tipo],
+          numero: formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
+          fecha: formatDate(comp.fecha),
+          clienteNombre: cliente?.nombre ?? clienteNombre(comp.clienteId),
+          clienteDocumento: cliente?.documento || null,
+          items: comp.items.map((i) => ({
+            descripcion: i.descripcion,
+            cantidad: i.cantidad,
+            precioUnitario: i.precioUnitario,
+            subtotal: i.subtotal,
+          })),
+          subtotal: comp.subtotal,
+          descuentoGeneral: comp.descuentoGeneral,
+          montoIva: comp.montoIva,
+          total: comp.total,
+        },
+        formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
+      );
+    } finally {
+      setGenerandoPdfId(null);
+    }
   };
 
   const handleRegistrarCobro = (clienteId: string) => {
@@ -407,6 +462,8 @@ export default function Comprobantes() {
                     onToggleExpand={() => setExpandedId(isExpanded ? null : comp.id)}
                     onAnular={() => handleAnular(comp.id)}
                     onRegistrarCobro={() => handleRegistrarCobro(comp.clienteId)}
+                    onDescargarPdf={() => handleDescargarPdf(comp)}
+                    generandoPdf={generandoPdfId === comp.id}
                   />
                 );
               })}
@@ -454,6 +511,8 @@ interface ComprobanteRowProps {
   onToggleExpand: () => void;
   onAnular: () => void;
   onRegistrarCobro: () => void;
+  onDescargarPdf: () => void;
+  generandoPdf: boolean;
 }
 
 function ComprobanteRow({
@@ -465,6 +524,8 @@ function ComprobanteRow({
   onToggleExpand,
   onAnular,
   onRegistrarCobro,
+  onDescargarPdf,
+  generandoPdf,
 }: ComprobanteRowProps) {
   const c = comprobante;
   const prefijo = PREFIJO_COMPROBANTE[c.tipo];
@@ -535,10 +596,27 @@ function ComprobanteRow({
             <div className="space-y-5">
               {/* Tabla de items */}
               <div>
-                <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900">
-                  <FileText className="h-4 w-4 text-indigo-600" />
-                  Detalle de items
-                </h3>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <FileText className="h-4 w-4 text-indigo-600" />
+                    Detalle de items
+                  </h3>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDescargarPdf();
+                    }}
+                    disabled={generandoPdf}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    {generandoPdf ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                    Descargar PDF
+                  </button>
+                </div>
                 <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
                   <table className="w-full text-sm">
                     <thead>
