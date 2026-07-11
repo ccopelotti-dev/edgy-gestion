@@ -331,6 +331,21 @@ export interface Formula {
   unidadProducida: UnidadMedida
   lineas: LineaFormula[]
   notas: string
+  /**
+   * Fase 9 (recetas/costeo real): % de merma DE PROCESO -- la pérdida
+   * esperada y repetible de este proceso puntual (ej: un salame que en
+   * salazón pierde 30% de su peso). Es solo informativo: no cambia el
+   * cálculo de costo (que sigue siendo total / cantidadProducida), pero
+   * hace explícito y auditable un dato que hoy quedaba escondido dentro
+   * de `cantidadProducida` cargado a mano.
+   *
+   * OJO con el nombre: no es lo mismo que `MotivoAjuste.merma` en Stock
+   * (ver más abajo) -- ese es un ajuste IRREGULAR y puntual (se pudrió,
+   * se rompió, faltante de conteo). Este campo es la pérdida NORMAL y
+   * esperada de la receta, se repite en cada lote. Por eso en pantalla
+   * se llama "Merma de proceso", para no pisarse con el otro concepto.
+   */
+  mermaPorcentaje: number
   createdAt: string
 }
 

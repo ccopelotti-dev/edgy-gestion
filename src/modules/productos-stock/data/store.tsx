@@ -169,6 +169,31 @@ type Action =
         nota?: string
       }
     }
+  | {
+      /**
+       * Fase 9 (recetas/costeo real): ejecuta una Fórmula como un lote de
+       * producción real -- descuenta el stock de los insumos consumidos
+       * (escalados por `factor`) y suma el stock del producto terminado
+       * usando `cantidadRealProducida` (el rendimiento REAL de este lote
+       * puntual, que puede diferir del teórico por variación normal del
+       * proceso). Genera movimientos de stock con origen: 'formula' (ya
+       * estaba previsto en el tipo `MovimientoStock`, nunca se había
+       * implementado). Todos los movimientos de un mismo lote comparten
+       * `origenId` (un uuid generado acá, no el id de la fórmula) para
+       * poder agruparlos como "un mismo lote" sin necesitar una tabla
+       * nueva de producciones.
+       */
+      type: 'REGISTRAR_PRODUCCION'
+      payload: {
+        formulaId: string
+        /** Multiplicador de lote (1 = la receta tal cual, 2 = el doble, etc). */
+        factor: number
+        /** Rendimiento real de ESTE lote (puede diferir de cantidadProducida * factor). */
+        cantidadRealProducida: number
+        fecha: string
+        notas?: string
+      }
+    }
   | { type: 'RESET' }
   | { type: 'SET_STATE'; payload: ProductosStockState }
 
@@ -389,6 +414,61 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         ...state,
         formulas: state.formulas.filter((f) => f.id !== action.payload),
       }
+
+    case 'REGISTRAR_PRODUCCION': {
+      const { formulaId, factor, cantidadRealProducida, fecha, notas } = action.payload
+      const formula = state.formulas.find((f) => f.id === formulaId)
+      if (!formula) return state
+
+      // Un id de lote propio (no el id de la fórmula) para poder agrupar
+      // todos los movimientos de ESTA ejecución puntual -- dos lotes de la
+      // misma fórmula en fechas distintas quedan distinguibles.
+      const loteId = uid()
+      const nuevosMovimientos: MovimientoStock[] = []
+      let insumos = state.insumos
+      let productos = state.productos
+
+      for (const linea of formula.lineas) {
+        if (linea.tipo !== 'insumo' || !linea.insumoId) continue
+        const cantidadConsumida = linea.cantidad * factor
+        nuevosMovimientos.push({
+          id: uid(),
+          tipo: 'egreso',
+          itemTipo: 'insumo',
+          itemId: linea.insumoId,
+          cantidad: cantidadConsumida,
+          nota: notas,
+          fecha,
+          origen: 'formula',
+          origenId: loteId,
+        })
+        insumos = insumos.map((i) =>
+          i.id === linea.insumoId ? { ...i, stock: i.stock - cantidadConsumida } : i,
+        )
+      }
+
+      nuevosMovimientos.push({
+        id: uid(),
+        tipo: 'ingreso',
+        itemTipo: 'producto',
+        itemId: formula.productoId,
+        cantidad: cantidadRealProducida,
+        nota: notas,
+        fecha,
+        origen: 'formula',
+        origenId: loteId,
+      })
+      productos = productos.map((p) =>
+        p.id === formula.productoId ? { ...p, stock: p.stock + cantidadRealProducida } : p,
+      )
+
+      return {
+        ...state,
+        productos,
+        insumos,
+        movimientos: [...state.movimientos, ...nuevosMovimientos],
+      }
+    }
 
     // ── Movimientos ───────────────────────────────────────────────────────────
     case 'ADD_MOVIMIENTO': {
@@ -806,6 +886,7 @@ function formulaToRow(f: Formula, clienteId: string) {
     cantidad_producida: f.cantidadProducida,
     unidad_producida: f.unidadProducida,
     notas: f.notas,
+    merma_porcentaje: f.mermaPorcentaje,
   }
 }
 
@@ -1126,6 +1207,28 @@ function syncToSupabase(
       // formula_lineas tiene ON DELETE CASCADE en la migración.
       supabase.from('formulas').delete().eq('id', action.payload).then(logErr('borrado de fórmula'))
       return
+
+    case 'REGISTRAR_PRODUCCION': {
+      // Mismo patrón que CONFIRMAR_RECEPCION: los movimientos nuevos son
+      // los que el reducer agregó al final del array.
+      const nuevosMovimientos = nextState.movimientos.slice(prevState.movimientos.length)
+      if (nuevosMovimientos.length) {
+        supabase.from('movimientos_stock').insert(nuevosMovimientos.map((m) => movimientoToRow(m, clienteId))).then(logErr('movimientos de producción'))
+      }
+      for (const i of nextState.insumos) {
+        const prev = prevState.insumos.find((x) => x.id === i.id)
+        if (prev && prev.stock !== i.stock) {
+          supabase.from('insumos').update({ stock: i.stock }).eq('id', i.id).then(logErr('stock de insumo tras producción'))
+        }
+      }
+      for (const p of nextState.productos) {
+        const prev = prevState.productos.find((x) => x.id === p.id)
+        if (prev && prev.stock !== p.stock) {
+          supabase.from('productos').update({ stock: p.stock }).eq('id', p.id).then(logErr('stock de producto tras producción'))
+        }
+      }
+      return
+    }
 
     case 'ADD_MOVIMIENTO': {
       const m = nextState.movimientos[nextState.movimientos.length - 1]
@@ -1457,6 +1560,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     lineas: formulaLineasByFormula.get(r.id) ?? [],
     notas: r.notas ?? '',
     createdAt: (r.created_at ?? '').slice(0, 10),
+    mermaPorcentaje: Number(r.merma_porcentaje ?? 0),
   }))
 
   const movimientos: MovimientoStock[] = (movimientosRes.data ?? []).map((r: any) => ({

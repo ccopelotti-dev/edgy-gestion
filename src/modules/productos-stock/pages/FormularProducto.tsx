@@ -9,12 +9,13 @@ import {
   PackageOpen,
   Wrench,
   Cog,
+  Factory,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useProductosStock } from '../data/store'
 import { Amount, EmptyState } from '../components/productos/display'
-import { formatARS } from '../lib/format'
+import { formatARS, todayISO } from '../lib/format'
 import {
   UNIDADES,
   unidadAbrev,
@@ -57,6 +58,8 @@ interface FormulaLocal {
   unidadProducida: UnidadMedida
   lineas: LocalLinea[]
   notas: string
+  /** Fase 9: % de merma de proceso (informativo, ver comentario en types/index.ts). */
+  mermaPorcentaje: number
 }
 
 function emptyFormula(): FormulaLocal {
@@ -65,6 +68,7 @@ function emptyFormula(): FormulaLocal {
     unidadProducida: 'unidad',
     lineas: [],
     notas: '',
+    mermaPorcentaje: 0,
   }
 }
 
@@ -82,6 +86,7 @@ function formulaToLocal(f: Formula): FormulaLocal {
       costoUnitario: l.costoUnitario,
     })),
     notas: f.notas,
+    mermaPorcentaje: f.mermaPorcentaje ?? 0,
   }
 }
 
@@ -269,6 +274,15 @@ export default function FormularProducto() {
   const [formula, setFormula] = useState<FormulaLocal | null>(null)
   const [dirty, setDirty] = useState(false)
 
+  // Fase 9: "Registrar producción" -- ejecutar la fórmula guardada como un
+  // lote real (descuenta insumos, suma stock del producto terminado). Solo
+  // tiene sentido para una fórmula ya guardada (existingFormula), no para
+  // un borrador que todavía no tiene id persistido.
+  const [produccionFactor, setProduccionFactor] = useState(1)
+  const [produccionCantidadReal, setProduccionCantidadReal] = useState<number | ''>('')
+  const [produccionFecha, setProduccionFecha] = useState(todayISO())
+  const [produccionNotas, setProduccionNotas] = useState('')
+
   // Find existing formula for selected product
   const existingFormula = useMemo(
     () => state.formulas.find((f) => f.productoId === selectedProductoId) ?? null,
@@ -412,6 +426,7 @@ export default function FormularProducto() {
           unidadProducida: formula.unidadProducida,
           lineas,
           notas: formula.notas,
+          mermaPorcentaje: formula.mermaPorcentaje,
         },
       })
     } else {
@@ -423,10 +438,41 @@ export default function FormularProducto() {
           unidadProducida: formula.unidadProducida,
           lineas,
           notas: formula.notas,
+          mermaPorcentaje: formula.mermaPorcentaje,
         },
       })
     }
     setDirty(false)
+  }
+
+  // Fase 9: sugerencia de rendimiento teórico para este lote (factor ×
+  // cantidadProducida) -- el operador la puede pisar con el rendimiento
+  // REAL de este lote puntual, que varía de lote a lote.
+  const cantidadTeoricaLote = existingFormula
+    ? existingFormula.cantidadProducida * produccionFactor
+    : 0
+
+  function handleRegistrarProduccion() {
+    if (!existingFormula) return
+    const cantidadReal =
+      produccionCantidadReal === '' ? cantidadTeoricaLote : produccionCantidadReal
+    if (cantidadReal <= 0 || produccionFactor <= 0) return
+
+    dispatch({
+      type: 'REGISTRAR_PRODUCCION',
+      payload: {
+        formulaId: existingFormula.id,
+        factor: produccionFactor,
+        cantidadRealProducida: cantidadReal,
+        fecha: produccionFecha,
+        notas: produccionNotas || undefined,
+      },
+    })
+
+    setProduccionFactor(1)
+    setProduccionCantidadReal('')
+    setProduccionFecha(todayISO())
+    setProduccionNotas('')
   }
 
   // Separate lines by type
@@ -530,8 +576,35 @@ export default function FormularProducto() {
                     </option>
                   ))}
                 </select>
+                <label className="text-sm text-muted-foreground">Merma de proceso (%):</label>
+                <input
+                  className={cn(inputClass, 'w-20 text-right')}
+                  type="number"
+                  min={0}
+                  max={99}
+                  step={0.1}
+                  value={formula.mermaPorcentaje || ''}
+                  onChange={(e) => {
+                    const nuevaMerma = parseFloat(e.target.value) || 0
+                    setFormula((prev) =>
+                      prev ? { ...prev, mermaPorcentaje: nuevaMerma } : prev,
+                    )
+                    setDirty(true)
+                  }}
+                />
               </div>
             </div>
+            {formula.mermaPorcentaje > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Con {formula.mermaPorcentaje}% de merma de proceso, la cantidad de insumos antes
+                de la pérdida sería de aprox.{' '}
+                <span className="font-medium">
+                  {(formula.cantidadProducida / (1 - formula.mermaPorcentaje / 100)).toFixed(2)}{' '}
+                  {unidadAbrev(formula.unidadProducida)}
+                </span>
+                . Es solo informativo, no cambia el costo calculado.
+              </p>
+            )}
           </div>
 
           {/* Section 1: Insumos / Materiales */}
@@ -648,6 +721,85 @@ export default function FormularProducto() {
               {existingFormula ? 'Guardar cambios' : 'Guardar formula'}
             </Button>
           </div>
+
+          {/* Fase 9: Registrar producción -- solo para una fórmula ya guardada */}
+          {existingFormula && (
+            <div className="rounded-lg border bg-card p-4 shadow-sm">
+              <div className="flex items-center gap-2 mb-1">
+                <Factory className="h-4 w-4 text-muted-foreground" />
+                <h4 className="text-sm font-semibold">Registrar producción</h4>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Ejecuta esta formula como un lote real: descuenta el stock de los insumos
+                consumidos y suma el stock de {selectedProducto.nombre}. El rendimiento real de
+                este lote puede diferir del teorico (variacion normal de merma).
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Factor de lote
+                  </label>
+                  <input
+                    className={cn(inputClass, 'text-right')}
+                    type="number"
+                    min={0.01}
+                    step={0.5}
+                    value={produccionFactor || ''}
+                    onChange={(e) => setProduccionFactor(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Rendimiento real ({unidadAbrev(existingFormula.unidadProducida)})
+                  </label>
+                  <input
+                    className={cn(inputClass, 'text-right')}
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    placeholder={cantidadTeoricaLote.toFixed(2)}
+                    value={produccionCantidadReal}
+                    onChange={(e) =>
+                      setProduccionCantidadReal(
+                        e.target.value === '' ? '' : parseFloat(e.target.value) || 0,
+                      )
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Fecha</label>
+                  <input
+                    className={inputClass}
+                    type="date"
+                    value={produccionFecha}
+                    onChange={(e) => setProduccionFecha(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Notas (opcional)
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={produccionNotas}
+                    onChange={(e) => setProduccionNotas(e.target.value)}
+                    placeholder="Ej: lote de prueba"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Teorico para este factor: {cantidadTeoricaLote.toFixed(2)}{' '}
+                {unidadAbrev(existingFormula.unidadProducida)}. Si dejas el campo de rendimiento
+                vacio, se usa el teorico.
+              </p>
+              <div className="flex justify-end">
+                <Button onClick={handleRegistrarProduccion} variant="outline">
+                  <Factory className="h-4 w-4 mr-2" />
+                  Registrar produccion
+                </Button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
