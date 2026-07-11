@@ -215,6 +215,19 @@ export interface ComprobanteItem {
 export interface DatosAfip {
   puntoVenta: number;
   tipoFiscal: TipoFiscal;
+  // Fase 11: código AFIP del tipo de comprobante (1=Factura A, 6=B,
+  // 11=C, 2/7/12=Nota Débito A/B/C, 3/8/13=Nota Crédito A/B/C) y
+  // número asignado por ARCA (CbteNro) -- distinto del `numero` interno
+  // de Edgy (ver Comprobante.numero), que sigue existiendo como
+  // numeración propia del sistema. Se guardan acá porque son los que
+  // hay que mostrar en el PDF fiscal y codificar en el QR (ver
+  // src/lib/comprobantes-pdf/arcaQr.ts) -- no tiene sentido volver a
+  // pedírselos a ARCA cada vez que se regenera el PDF.
+  tipoComprobanteAfip?: number;
+  numeroComprobante?: number;
+  // Código AFIP del tipo de documento del receptor (80=CUIT, 86=CUIL,
+  // 96=DNI, 99=Consumidor Final), también necesario para el QR.
+  docTipoReceptor?: number;
   cae?: string;                   // devuelto por AFIP
   vencimientoCae?: string;        // devuelto por AFIP
   fechaEmisionAfip?: string;

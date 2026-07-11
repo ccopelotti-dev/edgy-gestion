@@ -40,6 +40,7 @@ import {
   EmptyState,
 } from '../components/ventas/display';
 import { ComprobanteDialog, CobroDialog } from '../components/ventas/dialogs';
+import { autorizarComprobanteArca } from '../lib/arca';
 import {
   formatDate,
   formatARS,
@@ -102,6 +103,10 @@ export default function Comprobantes() {
   // en este momento (deshabilita su botón mientras descarga el logo).
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   const { cliente: empresaActual } = useClienteActual();
+  // Fase 11: mensaje del último intento de autorización ARCA (aprobado,
+  // rechazado, o error técnico) -- se muestra arriba del listado hasta
+  // que el usuario emite otro comprobante electrónico.
+  const [mensajeArca, setMensajeArca] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -198,11 +203,12 @@ export default function Comprobantes() {
     const montoIva = items.reduce((s, i) => s + i.montoIva, 0);
     const totalBruto = subtotal + montoIva;
     const total = totalBruto * (1 - data.descuentoGeneral / 100);
+    const comprobanteId = generarId();
 
     dispatch({
       type: 'ADD_COMPROBANTE',
       payload: {
-        id: generarId(),
+        id: comprobanteId,
         tipo: data.tipo,
         modoEmision: data.modoEmision,
         clienteId: data.clienteId,
@@ -222,6 +228,33 @@ export default function Comprobantes() {
     });
 
     setComprobanteDialogOpen(false);
+
+    // Fase 11: si es electrónica, pedirle el CAE a ARCA justo después de
+    // guardar. No bloquea el cierre del diálogo -- el comprobante ya
+    // quedó creado (numeración interna propia); esto solo agrega el
+    // resultado de ARCA (aprobado/rechazado) apenas llega.
+    if (data.modoEmision === 'electronica' && empresaActual) {
+      setMensajeArca(null);
+      autorizarComprobanteArca(empresaActual.id, comprobanteId)
+        .then((resultado) => {
+          if (resultado.ok && resultado.afip) {
+            dispatch({ type: 'SET_AFIP_COMPROBANTE', payload: { id: comprobanteId, afip: resultado.afip } });
+            setMensajeArca(
+              resultado.afip.resultado === 'A'
+                ? { tipo: 'ok', texto: `ARCA aprobó el comprobante — CAE ${resultado.afip.cae}` }
+                : { tipo: 'error', texto: `ARCA rechazó el comprobante: ${resultado.afip.observaciones ?? 'sin detalle'}` },
+            );
+          } else {
+            setMensajeArca({ tipo: 'error', texto: resultado.error ?? 'No se pudo autorizar el comprobante ante ARCA' });
+          }
+        })
+        .catch((err) => {
+          setMensajeArca({
+            tipo: 'error',
+            texto: err instanceof Error ? err.message : 'No se pudo autorizar el comprobante ante ARCA',
+          });
+        });
+    }
   };
 
   const handleAnular = (id: string) => {
@@ -270,6 +303,26 @@ export default function Comprobantes() {
           descuentoGeneral: comp.descuentoGeneral,
           montoIva: comp.montoIva,
           total: comp.total,
+          // Fase 11: fecha ISO sin formatear (necesaria para el QR
+          // fiscal) y datos de ARCA solo si el comprobante ya tiene
+          // CAE aprobado -- si no, el bloque de CAE/QR simplemente no
+          // se dibuja en el PDF.
+          fechaIso: comp.fecha,
+          afip:
+            comp.afip?.resultado === 'A' &&
+            comp.afip.cae &&
+            comp.afip.vencimientoCae &&
+            comp.afip.tipoComprobanteAfip !== undefined &&
+            comp.afip.numeroComprobante !== undefined
+              ? {
+                  cae: comp.afip.cae,
+                  vencimientoCae: comp.afip.vencimientoCae,
+                  puntoVenta: comp.afip.puntoVenta,
+                  tipoComprobanteAfip: comp.afip.tipoComprobanteAfip,
+                  numeroComprobante: comp.afip.numeroComprobante,
+                  docTipoReceptor: comp.afip.docTipoReceptor,
+                }
+              : undefined,
         },
         formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
       );
@@ -332,6 +385,19 @@ export default function Comprobantes() {
           Nuevo comprobante
         </button>
       </div>
+
+      {/* Fase 11: resultado del último intento de autorización ARCA */}
+      {mensajeArca && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            mensajeArca.tipo === 'ok'
+              ? 'border-green-200 bg-green-50 text-green-700'
+              : 'border-red-200 bg-red-50 text-red-700'
+          }`}
+        >
+          {mensajeArca.texto}
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -577,15 +643,30 @@ function ComprobanteRow({
           <MedioPagoBadge medio={c.medioPago} />
         </td>
         <td className="px-4 py-3">
-          <span
-            className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${
-              c.modoEmision === 'electronica'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            {c.modoEmision === 'electronica' ? 'AFIP' : 'INT'}
-          </span>
+          {c.modoEmision === 'electronica' ? (
+            <span
+              title={
+                c.afip?.resultado === 'A'
+                  ? `CAE ${c.afip.cae}`
+                  : c.afip?.resultado === 'R'
+                    ? c.afip.observaciones
+                    : 'Todavía no se pidió el CAE a ARCA'
+              }
+              className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${
+                c.afip?.resultado === 'A'
+                  ? 'bg-green-100 text-green-700'
+                  : c.afip?.resultado === 'R'
+                    ? 'bg-red-100 text-red-700'
+                    : 'bg-blue-100 text-blue-700'
+              }`}
+            >
+              {c.afip?.resultado === 'A' ? 'CAE' : c.afip?.resultado === 'R' ? 'RECHAZADO' : 'AFIP'}
+            </span>
+          ) : (
+            <span className="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-gray-600">
+              INT
+            </span>
+          )}
         </td>
         <td className="px-4 py-3 text-center">
           {isExpanded ? (

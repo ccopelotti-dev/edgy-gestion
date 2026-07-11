@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save, ShieldCheck } from 'lucide-react'
+import { Loader2, Save, ShieldCheck, Zap } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -26,6 +26,7 @@ import {
   type CategoriaImpositiva,
   type Personeria,
 } from '../types'
+import { obtenerEstadoArca, guardarConfigArca, type EstadoArca } from '../lib/arcaConfig'
 
 // Color por defecto si el cliente todavía no tiene uno cargado (mismo
 // valor default que Paso1Identidad.tsx en el onboarding).
@@ -69,6 +70,28 @@ const FORM_VACIO: FormEmpresa = {
   colorMarca: COLOR_MARCA_DEFAULT,
 }
 
+// Fase 11: configuración de Facturación Electrónica ARCA -- vive en
+// una tabla aparte (clientes_arca_config, protegida por RLS sin
+// policies) y se administra vía Netlify Functions, nunca directo
+// contra Supabase desde acá (ver src/modules/configuracion/lib/arcaConfig.ts).
+interface FormArca {
+  puntoVenta: string
+  condicionIva: '' | 'responsable_inscripto' | 'monotributista' | 'exento'
+  modo: 'homologacion' | 'produccion'
+  habilitado: boolean
+  certificadoPem: string
+  clavePrivadaPem: string
+}
+
+const FORM_ARCA_VACIO: FormArca = {
+  puntoVenta: '',
+  condicionIva: '',
+  modo: 'homologacion',
+  habilitado: false,
+  certificadoPem: '',
+  clavePrivadaPem: '',
+}
+
 export default function Empresa() {
   const { empresa, cargando, guardando, error, guardar } = useEmpresa()
   const [form, setForm] = useState<FormEmpresa>(FORM_VACIO)
@@ -77,6 +100,12 @@ export default function Empresa() {
   // null, "Guardar cambios" no toca logo_url y se conserva el actual.
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [subiendoLogo, setSubiendoLogo] = useState(false)
+
+  const [arcaEstado, setArcaEstado] = useState<EstadoArca | null>(null)
+  const [formArca, setFormArca] = useState<FormArca>(FORM_ARCA_VACIO)
+  const [guardandoArca, setGuardandoArca] = useState(false)
+  const [mensajeArca, setMensajeArca] = useState<string | null>(null)
+  const [errorArca, setErrorArca] = useState<string | null>(null)
 
   // Precarga el formulario con los datos nativos de creación del
   // cliente (wizard) + lo que ya se haya completado en Configuración.
@@ -96,6 +125,69 @@ export default function Empresa() {
       colorMarca: empresa.colorMarca ?? COLOR_MARCA_DEFAULT,
     })
   }, [empresa])
+
+  // Carga el estado ARCA (no sensible) apenas se conoce el cliente.
+  useEffect(() => {
+    if (!empresa) return
+    let activo = true
+    obtenerEstadoArca(empresa.id)
+      .then((estado) => {
+        if (!activo) return
+        setArcaEstado(estado)
+        setFormArca((prev) => ({
+          ...prev,
+          puntoVenta: estado.puntoVenta ? String(estado.puntoVenta) : '',
+          condicionIva: estado.condicionIva ?? '',
+          modo: estado.modo ?? 'homologacion',
+          habilitado: estado.habilitado ?? false,
+        }))
+      })
+      .catch((err) => {
+        if (activo) setErrorArca(err instanceof Error ? err.message : 'No se pudo cargar el estado de ARCA')
+      })
+    return () => {
+      activo = false
+    }
+  }, [empresa?.id])
+
+  async function handleGuardarArca() {
+    if (!empresa) return
+    setMensajeArca(null)
+    setErrorArca(null)
+
+    const puntoVentaNum = Number(formArca.puntoVenta)
+    if (!puntoVentaNum || puntoVentaNum <= 0) {
+      setErrorArca('Ingresá un punto de venta válido.')
+      return
+    }
+    if (!formArca.condicionIva) {
+      setErrorArca('Seleccioná la condición de IVA del negocio.')
+      return
+    }
+
+    setGuardandoArca(true)
+    try {
+      await guardarConfigArca({
+        clienteId: empresa.id,
+        puntoVenta: puntoVentaNum,
+        condicionIva: formArca.condicionIva,
+        modo: formArca.modo,
+        habilitado: formArca.habilitado,
+        certificadoPem: formArca.certificadoPem || undefined,
+        clavePrivadaPem: formArca.clavePrivadaPem || undefined,
+      })
+      const estadoNuevo = await obtenerEstadoArca(empresa.id)
+      setArcaEstado(estadoNuevo)
+      // El certificado/clave nunca vuelven del backend -- se limpian los
+      // textareas después de guardar para no dejarlos pegados en pantalla.
+      setFormArca((prev) => ({ ...prev, certificadoPem: '', clavePrivadaPem: '' }))
+      setMensajeArca('Configuración de ARCA guardada.')
+    } catch (err) {
+      setErrorArca(err instanceof Error ? err.message : 'No se pudo guardar la configuración de ARCA')
+    } finally {
+      setGuardandoArca(false)
+    }
+  }
 
   if (cargando) {
     return <p className="text-muted-foreground text-sm">Cargando datos de la empresa...</p>
@@ -340,6 +432,122 @@ export default function Empresa() {
               onChange={(e) => setForm({ ...form, codigoPostal: e.target.value })}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="text-muted-foreground h-4 w-4" />
+            Facturación electrónica (ARCA)
+          </CardTitle>
+          <CardDescription>
+            Fase 11 — conexión con ARCA (ex AFIP) para emitir comprobantes electrónicos con CAE
+            real. Necesitás el CUIT ya cargado arriba, un punto de venta habilitado en ARCA, y un
+            certificado digital (WSASS para homologación/pruebas, o el Administrador de
+            Certificados Digitales de ARCA para producción).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label>CUIT</Label>
+            <Input value={arcaEstado?.cuit ?? empresa.cuit ?? '—'} disabled />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="puntoVenta">Punto de venta</Label>
+            <Input
+              id="puntoVenta"
+              type="number"
+              min={1}
+              value={formArca.puntoVenta}
+              onChange={(e) => setFormArca({ ...formArca, puntoVenta: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Condición de IVA del negocio</Label>
+            <Select
+              value={formArca.condicionIva}
+              onValueChange={(v) => setFormArca({ ...formArca, condicionIva: v as FormArca['condicionIva'] })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccioná" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
+                <SelectItem value="monotributista">Monotributista</SelectItem>
+                <SelectItem value="exento">Exento</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Modo</Label>
+            <Select
+              value={formArca.modo}
+              onValueChange={(v) => setFormArca({ ...formArca, modo: v as FormArca['modo'] })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="homologacion">Homologación (pruebas, sin facturar de verdad)</SelectItem>
+                <SelectItem value="produccion">Producción (factura real)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="certificado">Certificado (.crt, formato PEM)</Label>
+            <textarea
+              id="certificado"
+              className="min-h-[80px] rounded-md border px-3 py-2 font-mono text-xs"
+              placeholder={
+                arcaEstado?.tieneCertificado
+                  ? 'Ya hay un certificado cargado — pegá uno nuevo solo si lo querés reemplazar'
+                  : '-----BEGIN CERTIFICATE-----...'
+              }
+              value={formArca.certificadoPem}
+              onChange={(e) => setFormArca({ ...formArca, certificadoPem: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="clavePrivada">Clave privada (.key, formato PEM)</Label>
+            <textarea
+              id="clavePrivada"
+              className="min-h-[80px] rounded-md border px-3 py-2 font-mono text-xs"
+              placeholder={
+                arcaEstado?.tieneCertificado
+                  ? 'Ya hay una clave cargada — pegá una nueva solo si la querés reemplazar'
+                  : '-----BEGIN PRIVATE KEY-----...'
+              }
+              value={formArca.clavePrivadaPem}
+              onChange={(e) => setFormArca({ ...formArca, clavePrivadaPem: e.target.value })}
+            />
+            <p className="text-muted-foreground text-xs">
+              Nunca se vuelve a mostrar una vez guardada — solo se puede reemplazar.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <input
+              id="habilitado"
+              type="checkbox"
+              checked={formArca.habilitado}
+              onChange={(e) => setFormArca({ ...formArca, habilitado: e.target.checked })}
+            />
+            <Label htmlFor="habilitado">Habilitar facturación electrónica para este negocio</Label>
+          </div>
+        </CardContent>
+        <CardContent className="flex items-center gap-3 pt-0">
+          <Button onClick={handleGuardarArca} disabled={guardandoArca} variant="outline">
+            {guardandoArca ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            Guardar configuración ARCA
+          </Button>
+          {mensajeArca && <span className="text-sm text-green-600">{mensajeArca}</span>}
+          {errorArca && <span className="text-sm text-red-500">{errorArca}</span>}
         </CardContent>
       </Card>
 

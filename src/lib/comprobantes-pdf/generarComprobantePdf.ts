@@ -21,9 +21,18 @@
 // (texto + rectángulos + líneas) en vez de jspdf-autotable, porque los
 // comprobantes de Edgy suelen tener pocas líneas y no justifica sumar
 // una dependencia más.
+//
+// Fase 11 (ARCA): si el comprobante ya tiene CAE (electrónico y
+// aprobado), se agrega al pie el bloque obligatorio de CAE +
+// vencimiento + QR fiscal (RG 4892/2020, ver ./arcaQr.ts). Para
+// comprobantes internos o electrónicos todavía sin CAE, ese bloque
+// simplemente no se dibuja -- el PDF nunca falla por faltar datos
+// fiscales opcionales.
 // ============================================================
 
 import { jsPDF } from 'jspdf'
+import QRCode from 'qrcode'
+import { construirUrlQrFiscal, type DatosQrFiscal } from './arcaQr'
 
 const COLOR_DEFAULT = '#0F6E56'
 
@@ -46,6 +55,24 @@ export interface ItemParaPdf {
   subtotal: number
 }
 
+/**
+ * Datos de autorización ARCA para el bloque fiscal del pie del PDF.
+ * Solo se completa cuando el comprobante ya fue aprobado (CAE
+ * obtenido) -- ver Comprobante.afip en el módulo Ventas.
+ */
+export interface DatosAfipParaPdf {
+  cae: string
+  /** ISO (YYYY-MM-DD). */
+  vencimientoCae: string
+  puntoVenta: number
+  /** Código AFIP del tipo de comprobante (1=Factura A, 6=B, 11=C...). */
+  tipoComprobanteAfip: number
+  /** Número asignado por ARCA (CbteNro), no el número interno de Edgy. */
+  numeroComprobante: number
+  /** Código AFIP del tipo de documento del receptor (80=CUIT, 96=DNI...). */
+  docTipoReceptor?: number
+}
+
 export interface ComprobanteParaPdf {
   /** Ej: "Factura B", "Recibo", "Nota de crédito", "Presupuesto". */
   tipoLabel: string
@@ -53,6 +80,10 @@ export interface ComprobanteParaPdf {
   numero: string
   /** Ya formateada, ej: "11/07/2026". */
   fecha: string
+  /** Fecha ISO (YYYY-MM-DD) del comprobante, sin formatear -- hace
+   * falta así para armar el JSON del QR fiscal. Solo es obligatoria
+   * si `afip` está presente. */
+  fechaIso?: string
   clienteNombre: string
   clienteDocumento?: string | null
   items: ItemParaPdf[]
@@ -61,6 +92,10 @@ export interface ComprobanteParaPdf {
   montoIva?: number
   total: number
   notas?: string | null
+  /** Fase 11: presente solo si ARCA ya aprobó el comprobante (CAE
+   * obtenido). Dispara el bloque de CAE + QR fiscal obligatorio al
+   * pie del PDF. */
+  afip?: DatosAfipParaPdf
 }
 
 function formatARS(n: number): string {
@@ -68,6 +103,12 @@ function formatARS(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n)
+}
+
+function formatFechaCorta(iso: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso + (iso.includes('T') ? '' : 'T00:00:00'))
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -261,15 +302,79 @@ export async function generarComprobantePdf(
   doc.text(formatARS(comprobante.total), colSub, y, { align: 'right' })
   y += 16
 
-  // ─── Notas y pie ────────────────────────────────────────────
+  // ─── Notas ──────────────────────────────────────────────────
   if (comprobante.notas) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     doc.setTextColor('#666666')
     const lineasNotas = doc.splitTextToSize(comprobante.notas, pageWidth - marginX * 2)
     doc.text(lineasNotas, marginX, y)
+    y += 6 * (Array.isArray(lineasNotas) ? lineasNotas.length : 1)
   }
 
+  // ─── CAE + QR fiscal (Fase 11 -- RG 4892/2020) ───────────────
+  // Solo se dibuja si el comprobante ya tiene CAE (electrónico y
+  // aprobado por ARCA). Si falta algún dato o falla la generación del
+  // QR, se muestra igual el CAE en texto -- es válido como respaldo
+  // aunque no salga la imagen.
+  if (comprobante.afip && comprobante.fechaIso) {
+    const altoBloque = 32
+    if (y > pageHeight - altoBloque - 12) {
+      doc.addPage()
+      y = 20
+    }
+
+    let qrDataUrl: string | null = null
+    if (empresa.cuit) {
+      const datosQr: DatosQrFiscal = {
+        fecha: comprobante.fechaIso,
+        cuitEmisor: empresa.cuit.replace(/\D/g, ''),
+        puntoVenta: comprobante.afip.puntoVenta,
+        tipoComprobanteAfip: comprobante.afip.tipoComprobanteAfip,
+        numeroComprobante: comprobante.afip.numeroComprobante,
+        importeTotal: comprobante.total,
+        tipoDocumentoReceptor: comprobante.afip.docTipoReceptor,
+        numeroDocumentoReceptor: comprobante.clienteDocumento ?? undefined,
+        cae: comprobante.afip.cae,
+      }
+      const urlQr = construirUrlQrFiscal(datosQr)
+      if (urlQr) {
+        try {
+          qrDataUrl = await QRCode.toDataURL(urlQr, { margin: 0, width: 200 })
+        } catch {
+          qrDataUrl = null
+        }
+      }
+    }
+
+    doc.setDrawColor(230, 230, 230)
+    doc.line(marginX, y, pageWidth - marginX, y)
+    y += 8
+
+    const qrSize = 26
+    if (qrDataUrl) {
+      try {
+        doc.addImage(qrDataUrl, 'PNG', marginX, y, qrSize, qrSize)
+      } catch {
+        qrDataUrl = null
+      }
+    }
+
+    const textoX2 = qrDataUrl ? marginX + qrSize + 6 : marginX
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9.5)
+    doc.setTextColor('#222222')
+    doc.text(`CAE: ${comprobante.afip.cae}`, textoX2, y + 6)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor('#555555')
+    doc.text(`Vencimiento CAE: ${formatFechaCorta(comprobante.afip.vencimientoCae)}`, textoX2, y + 12)
+    doc.text('Comprobante autorizado por ARCA', textoX2, y + 18)
+
+    y += qrSize + 6
+  }
+
+  // ─── Pie de página ────────────────────────────────────────────
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor('#999999')

@@ -41,6 +41,7 @@ import type {
   ImputacionCobro,
   PresupuestoItem,
   ComprobanteItem,
+  DatosAfip,
 } from '../types';
 
 import { generarId, CONSUMIDOR_FINAL_ID, clienteConsumidorFinal } from '../types';
@@ -70,6 +71,13 @@ type VentasAction =
   | { type: 'REGISTRAR_ENTREGA_PARCIAL'; payload: { ordenId: string; items: { id: string; cantidadEntregada: number }[] } }
   | { type: 'ADD_COMPROBANTE'; payload: Omit<Comprobante, 'numero'> }
   | { type: 'ANULAR_COMPROBANTE'; payload: { id: string } }
+  // Fase 11: actualiza solo el campo `afip` en memoria después de que
+  // la Netlify Function arca-autorizar-comprobante.js ya lo escribió
+  // en Supabase (con la service role key) -- por eso NO tiene un caso
+  // en syncToSupabase más abajo, cae en el `default` y no reescribe
+  // nada: esta acción es puramente para que la UI se entere del
+  // resultado (CAE o rechazo) sin tener que recargar todo el estado.
+  | { type: 'SET_AFIP_COMPROBANTE'; payload: { id: string; afip: DatosAfip } }
   | { type: 'ACTUALIZAR_COBRO_COMPROBANTE'; payload: { comprobanteId: string; montoCobrado: number } }
   | { type: 'ADD_COBRO'; payload: Omit<Cobro, 'numero'> }
   | { type: 'UPDATE_CONFIG'; payload: Partial<VentasConfig> }
@@ -303,6 +311,14 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
           : state.clientes,
       };
     }
+
+    case 'SET_AFIP_COMPROBANTE':
+      return {
+        ...state,
+        comprobantes: state.comprobantes.map((c) =>
+          c.id === action.payload.id ? { ...c, afip: action.payload.afip, updatedAt: now } : c,
+        ),
+      };
 
     case 'ACTUALIZAR_COBRO_COMPROBANTE': {
       const { comprobanteId, montoCobrado } = action.payload;

@@ -42,6 +42,13 @@
 -- resuelve adentro de store.tsx, que sigue devolviendo exactamente
 -- la misma forma de `PedidoDelivery` (con un campo interno nuevo,
 -- `ordenVentaId`, que esas dos pantallas no necesitan leer).
+--
+-- v2: el primer intento falló -- 0021_delivery_whatsapp.sql tenía
+-- una cuarta política ("pedidos_delivery_delete", permiso 'admin')
+-- que no estaba en el relevamiento y bloqueaba el drop de la columna
+-- cliente_id. Se agrega su drop + se la recrea con el mismo patrón de
+-- join, y se vuelve idempotente el alta del constraint único por si
+-- hace falta reintentar de nuevo.
 -- ============================================================
 
 -- ─── 1) Reestructurar pedidos_delivery como extensión logística ──
@@ -52,6 +59,13 @@ truncate table edgy_gestion.pedidos_delivery;
 
 alter table edgy_gestion.pedidos_delivery
   add column if not exists orden_venta_id uuid references edgy_gestion.ordenes_venta(id) on delete cascade;
+
+-- Las 4 políticas originales (0021) dependen de cliente_id -- hay que
+-- soltarlas antes de poder tirar la columna.
+drop policy if exists "pedidos_delivery_select" on edgy_gestion.pedidos_delivery;
+drop policy if exists "pedidos_delivery_insert" on edgy_gestion.pedidos_delivery;
+drop policy if exists "pedidos_delivery_update" on edgy_gestion.pedidos_delivery;
+drop policy if exists "pedidos_delivery_delete" on edgy_gestion.pedidos_delivery;
 
 alter table edgy_gestion.pedidos_delivery
   drop column if exists cliente_id,
@@ -70,14 +84,17 @@ alter table edgy_gestion.pedidos_delivery
 alter table edgy_gestion.pedidos_delivery
   alter column orden_venta_id set not null;
 
-alter table edgy_gestion.pedidos_delivery
-  add constraint pedidos_delivery_orden_venta_id_key unique (orden_venta_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'pedidos_delivery_orden_venta_id_key'
+  ) then
+    alter table edgy_gestion.pedidos_delivery
+      add constraint pedidos_delivery_orden_venta_id_key unique (orden_venta_id);
+  end if;
+end $$;
 
 -- ─── RLS de pedidos_delivery: ahora resuelve el tenant vía join ──
-
-drop policy if exists "pedidos_delivery_select" on edgy_gestion.pedidos_delivery;
-drop policy if exists "pedidos_delivery_insert" on edgy_gestion.pedidos_delivery;
-drop policy if exists "pedidos_delivery_update" on edgy_gestion.pedidos_delivery;
 
 create policy "pedidos_delivery_select" on edgy_gestion.pedidos_delivery
   for select using (
@@ -106,6 +123,16 @@ create policy "pedidos_delivery_update" on edgy_gestion.pedidos_delivery
       select id from edgy_gestion.ordenes_venta
       where cliente_id = edgy_gestion.cliente_del_usuario_actual()
         and edgy_gestion.tiene_permiso('delivery-whatsapp', 'escritura')
+    )
+  );
+
+create policy "pedidos_delivery_delete" on edgy_gestion.pedidos_delivery
+  for delete using (
+    edgy_gestion.es_personal_edgy()
+    or orden_venta_id in (
+      select id from edgy_gestion.ordenes_venta
+      where cliente_id = edgy_gestion.cliente_del_usuario_actual()
+        and edgy_gestion.tiene_permiso('delivery-whatsapp', 'admin')
     )
   );
 
