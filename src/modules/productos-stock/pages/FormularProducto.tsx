@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import {
   Plus,
   Trash2,
@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useProductosStock } from '../data/store'
 import { Amount, EmptyState } from '../components/productos/display'
+import { ProductoDialog } from '../components/productos/dialogs'
 import { formatARS, todayISO } from '../lib/format'
 import {
   UNIDADES,
@@ -24,6 +25,7 @@ import {
   type TipoLineaFormula,
   type LineaFormula,
   type Formula,
+  type Producto,
 } from '../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -274,6 +276,14 @@ export default function FormularProducto() {
   const [formula, setFormula] = useState<FormulaLocal | null>(null)
   const [dirty, setDirty] = useState(false)
 
+  // Alta de producto nuevo directamente desde esta pantalla, sin tener que
+  // ir primero a la pestaña "Productos". Reutiliza el mismo ProductoDialog
+  // que usa esa pestaña (mismos catálogos, misma acción ADD_PRODUCTO) para
+  // no duplicar el formulario. Al guardar, se auto-selecciona el producto
+  // recién creado para que el usuario caiga directo en "Crear formula".
+  const [nuevoProductoOpen, setNuevoProductoOpen] = useState(false)
+  const productosLengthAntesDeCrear = useRef<number | null>(null)
+
   // Fase 9: "Registrar producción" -- ejecutar la fórmula guardada como un
   // lote real (descuenta insumos, suma stock del producto terminado). Solo
   // tiene sentido para una fórmula ya guardada (existingFormula), no para
@@ -322,6 +332,35 @@ export default function FormularProducto() {
     setFormula(emptyFormula())
     setDirty(true)
   }
+
+  function handleAbrirNuevoProducto() {
+    productosLengthAntesDeCrear.current = state.productos.length
+    setNuevoProductoOpen(true)
+  }
+
+  function handleGuardarNuevoProducto(
+    data: Omit<Producto, 'id' | 'stock' | 'createdAt' | 'tieneFormula'>,
+  ) {
+    dispatch({
+      type: 'ADD_PRODUCTO',
+      payload: { ...data, stock: 0, tieneFormula: false },
+    })
+  }
+
+  // ADD_PRODUCTO agrega el producto nuevo al final de state.productos (ver
+  // reducer en data/store.tsx). En cuanto el array crece respecto de la
+  // longitud registrada al abrir el diálogo, el último elemento es el
+  // producto recién creado -- se selecciona automáticamente.
+  useEffect(() => {
+    if (
+      productosLengthAntesDeCrear.current !== null &&
+      state.productos.length > productosLengthAntesDeCrear.current
+    ) {
+      const nuevo = state.productos[state.productos.length - 1]
+      productosLengthAntesDeCrear.current = null
+      handleProductoChange(nuevo.id)
+    }
+  }, [state.productos])
 
   // Line operations
   //
@@ -501,6 +540,11 @@ export default function FormularProducto() {
               </option>
             ))}
           </select>
+
+          <Button variant="outline" onClick={handleAbrirNuevoProducto}>
+            <Plus className="h-4 w-4 mr-1" />
+            Nuevo producto
+          </Button>
 
           {selectedProductoId && !formula && !existingFormula && (
             <Button onClick={handleCrearFormula}>
@@ -802,6 +846,18 @@ export default function FormularProducto() {
           )}
         </>
       )}
+
+      <ProductoDialog
+        open={nuevoProductoOpen}
+        onOpenChange={setNuevoProductoOpen}
+        onSave={handleGuardarNuevoProducto}
+        rubros={state.rubros}
+        subRubros={state.subRubros}
+        productos={state.productos}
+        marcas={state.marcas}
+        onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
+        plantillasGarantia={state.plantillasGarantia}
+      />
     </div>
   )
 }
