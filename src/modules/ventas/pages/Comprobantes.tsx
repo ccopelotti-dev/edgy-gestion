@@ -63,6 +63,8 @@ import type {
 import {
   TIPO_COMPROBANTE_LABEL,
   ESTADO_COMPROBANTE_LABEL,
+  CONSUMIDOR_FINAL_ID,
+  labelTipoComprobante,
   generarId,
 } from '../types';
 
@@ -248,11 +250,16 @@ export default function Comprobantes() {
       await generarComprobantePdf(
         empresaPdf,
         {
-          tipoLabel: TIPO_COMPROBANTE_LABEL[comp.tipo],
+          tipoLabel: labelTipoComprobante(comp.tipo, comp.modoEmision),
           numero: formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
           fecha: formatDate(comp.fecha),
           clienteNombre: cliente?.nombre ?? clienteNombre(comp.clienteId),
-          clienteDocumento: cliente?.documento || null,
+          // "Consumidor Final" usa '0' como documento placeholder (ver
+          // clienteConsumidorFinal en ../types) -- no tiene sentido
+          // mostrarlo en el PDF, así que se omite específicamente para
+          // ese cliente en vez de asumir que cualquier '0' es inválido.
+          clienteDocumento:
+            cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.documento : null,
           items: comp.items.map((i) => ({
             descripcion: i.descripcion,
             cantidad: i.cantidad,
@@ -541,7 +548,7 @@ function ComprobanteRow({
           {formatNumero(prefijo, c.numero)}
         </td>
         <td className="px-4 py-3 text-gray-700">
-          {TIPO_COMPROBANTE_LABEL[c.tipo]}
+          {labelTipoComprobante(c.tipo, c.modoEmision)}
         </td>
         <td className="px-4 py-3 text-gray-900">{clienteNombre}</td>
         <td className="px-4 py-3 text-gray-600">{formatDate(c.fecha)}</td>

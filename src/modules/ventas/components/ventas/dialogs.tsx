@@ -28,6 +28,7 @@ import {
   TIPO_DOCUMENTO_LABEL,
   CONDICION_IVA_LABEL,
   TIPO_COMPROBANTE_LABEL,
+  labelTipoComprobante,
   MEDIO_PAGO_LABEL,
 } from '../../types';
 
@@ -502,9 +503,11 @@ export function ComprobanteDialog({
                   value={tipo}
                   onChange={(e) => setTipo(e.target.value as TipoComprobante)}
                 >
-                  {(Object.entries(TIPO_COMPROBANTE_LABEL) as [TipoComprobante, string][]).map(
-                    ([val, label]) => (
-                      <option key={val} value={val}>{label}</option>
+                  {(Object.keys(TIPO_COMPROBANTE_LABEL) as TipoComprobante[]).map(
+                    (val) => (
+                      <option key={val} value={val}>
+                        {labelTipoComprobante(val, modoEmision)}
+                      </option>
                     ),
                   )}
                 </select>

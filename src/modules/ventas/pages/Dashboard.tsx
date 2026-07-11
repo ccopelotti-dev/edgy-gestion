@@ -31,7 +31,7 @@ import {
   formatQty,
 } from '../lib/format';
 import type { Comprobante } from '../types';
-import { TIPO_COMPROBANTE_LABEL } from '../types';
+import { labelTipoComprobante } from '../types';
 
 // ─── Tipos internos ─────────────────────────────────────────
 
@@ -264,7 +264,7 @@ export default function Dashboard() {
                     <td className="py-2.5">{nombreCliente(c.clienteId)}</td>
                     <td className="py-2.5">
                       <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
-                        {TIPO_COMPROBANTE_LABEL[c.tipo]}
+                        {labelTipoComprobante(c.tipo, c.modoEmision)}
                       </span>
                     </td>
                     <td className="py-2.5 text-gray-600">{formatDate(c.fecha)}</td>

@@ -339,6 +339,20 @@ export const TIPO_COMPROBANTE_LABEL: Record<TipoComprobante, string> = {
   nota_debito: 'Nota de débito',
 };
 
+/**
+ * Label a mostrar para un comprobante concreto. Una "factura" con
+ * modoEmision "interno" (sin AFIP, la única modalidad disponible hasta
+ * que se conecte ARCA en Fase 11) no es una factura fiscal real -- es
+ * una transacción informal -- así que se muestra como "Nota de
+ * entrega" para no confundirla con una factura de verdad. Cuando el
+ * comprobante sí pasa por AFIP (modoEmision "electronica") se muestra
+ * "Factura" tal cual, porque ahí sí lo es.
+ */
+export function labelTipoComprobante(tipo: TipoComprobante, modoEmision: ModoEmision): string {
+  if (tipo === 'factura' && modoEmision === 'interno') return 'Nota de entrega';
+  return TIPO_COMPROBANTE_LABEL[tipo];
+}
+
 export const MEDIO_PAGO_LABEL: Record<MedioPago, string> = {
   efectivo: 'Efectivo',
   tarjeta_debito: 'Tarjeta débito',

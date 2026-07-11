@@ -46,7 +46,7 @@ import type { Cliente, CategoriaCliente } from '../types';
 import {
   CONDICION_IVA_LABEL,
   TIPO_DOCUMENTO_LABEL,
-  TIPO_COMPROBANTE_LABEL,
+  labelTipoComprobante,
   MEDIO_PAGO_LABEL,
   generarId,
 } from '../types';
@@ -506,7 +506,7 @@ function ClienteRow({
                                 {formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero)}
                               </td>
                               <td className="px-3 py-2 text-gray-600">
-                                {TIPO_COMPROBANTE_LABEL[comp.tipo]}
+                                {labelTipoComprobante(comp.tipo, comp.modoEmision)}
                               </td>
                               <td className="px-3 py-2 text-gray-600">
                                 {formatDate(comp.fecha)}
