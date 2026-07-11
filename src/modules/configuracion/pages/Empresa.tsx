@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { supabase } from '@/lib/supabase'
 import { useEmpresa } from '../data/useEmpresa'
 import {
   CATEGORIAS_IMPOSITIVAS,
@@ -25,6 +26,20 @@ import {
   type CategoriaImpositiva,
   type Personeria,
 } from '../types'
+
+// Color por defecto si el cliente todavía no tiene uno cargado (mismo
+// valor default que Paso1Identidad.tsx en el onboarding).
+const COLOR_MARCA_DEFAULT = '#D4537E'
+
+// Mismo bucket y misma convención de nombre de archivo que el
+// onboarding (NuevoProyecto.tsx) -- así un logo subido acá o en el
+// alta inicial conviven sin chocar.
+async function subirLogo(file: File): Promise<string | null> {
+  const ruta = `${Date.now()}-${file.name}`
+  const { data: subida, error } = await supabase.storage.from('logos-clientes').upload(ruta, file)
+  if (error || !subida) return null
+  return supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
+}
 
 interface FormEmpresa {
   nombre: string
@@ -37,6 +52,7 @@ interface FormEmpresa {
   provincia: string
   localidad: string
   codigoPostal: string
+  colorMarca: string
 }
 
 const FORM_VACIO: FormEmpresa = {
@@ -50,12 +66,17 @@ const FORM_VACIO: FormEmpresa = {
   provincia: '',
   localidad: '',
   codigoPostal: '',
+  colorMarca: COLOR_MARCA_DEFAULT,
 }
 
 export default function Empresa() {
   const { empresa, cargando, guardando, error, guardar } = useEmpresa()
   const [form, setForm] = useState<FormEmpresa>(FORM_VACIO)
   const [mensaje, setMensaje] = useState<string | null>(null)
+  // Logo nuevo elegido en esta sesión (todavía no subido). Si queda en
+  // null, "Guardar cambios" no toca logo_url y se conserva el actual.
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [subiendoLogo, setSubiendoLogo] = useState(false)
 
   // Precarga el formulario con los datos nativos de creación del
   // cliente (wizard) + lo que ya se haya completado en Configuración.
@@ -72,6 +93,7 @@ export default function Empresa() {
       provincia: empresa.provincia ?? '',
       localidad: empresa.localidad ?? '',
       codigoPostal: empresa.codigoPostal ?? '',
+      colorMarca: empresa.colorMarca ?? COLOR_MARCA_DEFAULT,
     })
   }, [empresa])
 
@@ -85,6 +107,18 @@ export default function Empresa() {
 
   async function handleGuardar() {
     setMensaje(null)
+
+    let logoUrl: string | null | undefined = undefined
+    if (logoFile) {
+      setSubiendoLogo(true)
+      logoUrl = await subirLogo(logoFile)
+      setSubiendoLogo(false)
+      if (!logoUrl) {
+        setMensaje(null)
+        return
+      }
+    }
+
     const ok = await guardar({
       nombre: form.nombre,
       titular: form.titular || null,
@@ -96,7 +130,13 @@ export default function Empresa() {
       provincia: form.provincia || null,
       localidad: form.localidad || null,
       codigoPostal: form.codigoPostal || null,
+      colorMarca: form.colorMarca || COLOR_MARCA_DEFAULT,
+      // Solo se manda si se subió un logo nuevo en esta sesión -- si
+      // no, `guardar` no incluye logoUrl en el payload y se conserva
+      // el que ya estaba.
+      ...(logoUrl !== undefined ? { logoUrl } : {}),
     })
+    if (ok) setLogoFile(null)
     setMensaje(ok ? 'Cambios guardados.' : null)
   }
 
@@ -140,6 +180,57 @@ export default function Empresa() {
               id="telefono"
               value={form.telefono}
               onChange={(e) => setForm({ ...form, telefono: e.target.value })}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Marca</CardTitle>
+          <CardDescription>
+            Logo y color de identidad. Se usan en el menú, el sidebar y en los comprobantes en
+            PDF.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <div className="flex items-center gap-3">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border border-dashed">
+              {logoFile ? (
+                <img
+                  src={URL.createObjectURL(logoFile)}
+                  alt="Logo nuevo"
+                  className="h-full w-full object-cover"
+                />
+              ) : empresa.logoUrl ? (
+                <img src={empresa.logoUrl} alt="Logo actual" className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-muted-foreground text-xs">Sin logo</span>
+              )}
+            </div>
+            <label className="hover:bg-muted cursor-pointer rounded-lg border px-4 py-2.5 text-sm font-medium">
+              {subiendoLogo ? 'Subiendo...' : 'Cambiar logo'}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={subiendoLogo}
+                onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          </div>
+          <div className="flex items-center gap-3">
+            <Label className="whitespace-nowrap">Color de marca</Label>
+            <input
+              type="color"
+              value={form.colorMarca}
+              onChange={(e) => setForm({ ...form, colorMarca: e.target.value })}
+              className="h-10 w-10 cursor-pointer rounded-md border"
+            />
+            <Input
+              value={form.colorMarca}
+              onChange={(e) => setForm({ ...form, colorMarca: e.target.value })}
+              className="w-32"
             />
           </div>
         </CardContent>
@@ -253,8 +344,8 @@ export default function Empresa() {
       </Card>
 
       <div className="flex items-center gap-3">
-        <Button onClick={handleGuardar} disabled={guardando}>
-          {guardando ? (
+        <Button onClick={handleGuardar} disabled={guardando || subiendoLogo}>
+          {guardando || subiendoLogo ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
             <Save className="mr-2 h-4 w-4" />

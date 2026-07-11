@@ -42,6 +42,12 @@ export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unk
   if ('provincia' in cambios) fila.provincia = cambios.provincia
   if ('localidad' in cambios) fila.localidad = cambios.localidad
   if ('codigoPostal' in cambios) fila.codigo_postal = cambios.codigoPostal
+  // Logo y color de marca: antes solo se cargaban una vez en el
+  // onboarding (Paso 1) y no había forma de cambiarlos. Fase 10 los
+  // suma acá porque el motor de PDF de comprobantes los usa como
+  // identidad visual del cliente (ver Empresa.tsx).
+  if ('logoUrl' in cambios) fila.logo_url = cambios.logoUrl
+  if ('colorMarca' in cambios) fila.color_marca = cambios.colorMarca
   return fila
 }
 
