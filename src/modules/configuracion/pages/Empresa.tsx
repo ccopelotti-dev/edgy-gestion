@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save, ShieldCheck, Zap } from 'lucide-react'
+import { Loader2, Save, ShieldCheck, Zap, CreditCard } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -27,6 +27,7 @@ import {
   type Personeria,
 } from '../types'
 import { obtenerEstadoArca, guardarConfigArca, type EstadoArca } from '../lib/arcaConfig'
+import { obtenerEstadoPago, guardarConfigPago, type EstadoPago } from '../lib/pagoConfig'
 
 // Color por defecto si el cliente todavía no tiene uno cargado (mismo
 // valor default que Paso1Identidad.tsx en el onboarding).
@@ -92,6 +93,26 @@ const FORM_ARCA_VACIO: FormArca = {
   clavePrivadaPem: '',
 }
 
+// Fase 12: Cobro online -- primer proveedor: Mercado Pago (Checkout
+// Pro). El negocio pega su propio access_token (cuenta propia, sin
+// OAuth) y el webhook_secret que Mercado Pago le genera en "Tus
+// integraciones" > Webhooks. Vive en clientes_pago_config, factorizada
+// por proveedor (ver 0043_fase12_pago_online.sql) para poder sumar
+// otros proveedores más adelante sin tocar esta pantalla.
+interface FormPago {
+  modo: 'test' | 'produccion'
+  habilitado: boolean
+  accessToken: string
+  webhookSecret: string
+}
+
+const FORM_PAGO_VACIO: FormPago = {
+  modo: 'test',
+  habilitado: false,
+  accessToken: '',
+  webhookSecret: '',
+}
+
 export default function Empresa() {
   const { empresa, cargando, guardando, error, guardar } = useEmpresa()
   const [form, setForm] = useState<FormEmpresa>(FORM_VACIO)
@@ -106,6 +127,12 @@ export default function Empresa() {
   const [guardandoArca, setGuardandoArca] = useState(false)
   const [mensajeArca, setMensajeArca] = useState<string | null>(null)
   const [errorArca, setErrorArca] = useState<string | null>(null)
+
+  const [pagoEstado, setPagoEstado] = useState<EstadoPago | null>(null)
+  const [formPago, setFormPago] = useState<FormPago>(FORM_PAGO_VACIO)
+  const [guardandoPago, setGuardandoPago] = useState(false)
+  const [mensajePago, setMensajePago] = useState<string | null>(null)
+  const [errorPago, setErrorPago] = useState<string | null>(null)
 
   // Precarga el formulario con los datos nativos de creación del
   // cliente (wizard) + lo que ya se haya completado en Configuración.
@@ -149,6 +176,57 @@ export default function Empresa() {
       activo = false
     }
   }, [empresa?.id])
+
+  // Carga el estado de Cobro Online (no sensible) apenas se conoce el
+  // cliente -- mismo criterio que ARCA arriba.
+  useEffect(() => {
+    if (!empresa) return
+    let activo = true
+    obtenerEstadoPago(empresa.id)
+      .then((estado) => {
+        if (!activo) return
+        setPagoEstado(estado)
+        setFormPago((prev) => ({
+          ...prev,
+          modo: estado.modo ?? 'test',
+          habilitado: estado.habilitado ?? false,
+        }))
+      })
+      .catch((err) => {
+        if (activo) setErrorPago(err instanceof Error ? err.message : 'No se pudo cargar el estado de Cobro Online')
+      })
+    return () => {
+      activo = false
+    }
+  }, [empresa?.id])
+
+  async function handleGuardarPago() {
+    if (!empresa) return
+    setMensajePago(null)
+    setErrorPago(null)
+
+    setGuardandoPago(true)
+    try {
+      await guardarConfigPago({
+        clienteId: empresa.id,
+        proveedor: 'mercadopago',
+        modo: formPago.modo,
+        habilitado: formPago.habilitado,
+        accessToken: formPago.accessToken || undefined,
+        webhookSecret: formPago.webhookSecret || undefined,
+      })
+      const estadoNuevo = await obtenerEstadoPago(empresa.id)
+      setPagoEstado(estadoNuevo)
+      // Igual que ARCA -- las credenciales nunca vuelven del backend,
+      // se limpian los campos después de guardar.
+      setFormPago((prev) => ({ ...prev, accessToken: '', webhookSecret: '' }))
+      setMensajePago('Configuración de Cobro Online guardada.')
+    } catch (err) {
+      setErrorPago(err instanceof Error ? err.message : 'No se pudo guardar la configuración de Cobro Online')
+    } finally {
+      setGuardandoPago(false)
+    }
+  }
 
   async function handleGuardarArca() {
     if (!empresa) return
@@ -548,6 +626,93 @@ export default function Empresa() {
           </Button>
           {mensajeArca && <span className="text-sm text-green-600">{mensajeArca}</span>}
           {errorArca && <span className="text-sm text-red-500">{errorArca}</span>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="text-muted-foreground h-4 w-4" />
+            Cobro online (Mercado Pago)
+          </CardTitle>
+          <CardDescription>
+            Fase 12 — dejá que tus clientes paguen desde el Menú QR/Delivery con Mercado Pago
+            Checkout Pro. Necesitás tu propio access_token (Credenciales, en Tus integraciones de
+            Mercado Pago) y el secreto de webhook (Webhooks &gt; Configurar notificaciones, misma
+            sección). Empezá en modo Test hasta confirmar que el link de pago funciona.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label>Modo</Label>
+            <Select
+              value={formPago.modo}
+              onValueChange={(v) => setFormPago({ ...formPago, modo: v as FormPago['modo'] })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="test">Test (credenciales de prueba)</SelectItem>
+                <SelectItem value="produccion">Producción (cobros reales)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div />
+
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="mpAccessToken">Access Token</Label>
+            <Input
+              id="mpAccessToken"
+              type="password"
+              placeholder={
+                pagoEstado?.tieneAccessToken
+                  ? 'Ya hay un access token cargado — pegá uno nuevo solo si lo querés reemplazar'
+                  : 'APP_USR-...'
+              }
+              value={formPago.accessToken}
+              onChange={(e) => setFormPago({ ...formPago, accessToken: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="mpWebhookSecret">Secreto de webhook</Label>
+            <Input
+              id="mpWebhookSecret"
+              type="password"
+              placeholder={
+                pagoEstado?.tieneWebhookSecret
+                  ? 'Ya hay un secreto cargado — pegá uno nuevo solo si lo querés reemplazar'
+                  : 'Se genera en Tus integraciones > Webhooks'
+              }
+              value={formPago.webhookSecret}
+              onChange={(e) => setFormPago({ ...formPago, webhookSecret: e.target.value })}
+            />
+            <p className="text-muted-foreground text-xs">
+              Nunca se vuelven a mostrar una vez guardados — solo se pueden reemplazar.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <input
+              id="pagoHabilitado"
+              type="checkbox"
+              checked={formPago.habilitado}
+              onChange={(e) => setFormPago({ ...formPago, habilitado: e.target.checked })}
+            />
+            <Label htmlFor="pagoHabilitado">Habilitar cobro online para este negocio</Label>
+          </div>
+        </CardContent>
+        <CardContent className="flex items-center gap-3 pt-0">
+          <Button onClick={handleGuardarPago} disabled={guardandoPago} variant="outline">
+            {guardandoPago ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            Guardar configuración de Cobro Online
+          </Button>
+          {mensajePago && <span className="text-sm text-green-600">{mensajePago}</span>}
+          {errorPago && <span className="text-sm text-red-500">{errorPago}</span>}
         </CardContent>
       </Card>
 

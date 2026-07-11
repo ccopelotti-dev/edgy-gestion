@@ -34,6 +34,15 @@ import { supabase } from '@/lib/supabase'
 // crear_orden_venta_publica, resuelve cliente_id y mesa_id del lado
 // del servidor a partir de slug + número de mesa. Sin ese parámetro
 // (QR genérico del local, sin mesa asociada) el botón no se muestra.
+//
+// Fase 12 (Cobro online): si el negocio tiene Mercado Pago habilitado
+// (menu_publico() ya trae `pagoOnlineHabilitado`), la pantalla de
+// éxito ofrece además "Pagar online ahora" -- llama a la Netlify
+// Function pública crear-preferencia-pago.js (crea la Preference de
+// Checkout Pro para la orden recién creada) y redirige al comprador al
+// checkout de Mercado Pago. Vuelve acá con `?pago=exito|pendiente|
+// error` (back_urls de la Preference), lo que dispara una de las tres
+// pantallas de retorno nuevas (ver tipo Vista).
 
 interface ProductoPublico {
   id: string
@@ -56,11 +65,16 @@ interface MenuPublicoData {
     slug: string
     logoUrl: string | null
     colorMarca: string | null
+    // Fase 12 (Cobro online): si el negocio tiene Mercado Pago
+    // configurado y habilitado (clientes_pago_config), se ofrece
+    // "Pagar online" después de confirmar el pedido -- ver
+    // netlify/functions/crear-preferencia-pago.js.
+    pagoOnlineHabilitado?: boolean
   } | null
   categorias: CategoriaPublica[]
 }
 
-type Vista = 'menu' | 'checkout' | 'enviando' | 'exito' | 'error'
+type Vista = 'menu' | 'checkout' | 'enviando' | 'exito' | 'error' | 'pago-exito' | 'pago-pendiente' | 'pago-error'
 type Modalidad = 'retiro' | 'delivery'
 
 function formatARS(monto: number): string {
@@ -83,13 +97,28 @@ export default function MenuPublico() {
   const [data, setData] = useState<MenuPublicoData | null>(null)
   const [cargando, setCargando] = useState(true)
   const [carrito, setCarrito] = useState<Map<string, number>>(new Map())
-  const [vista, setVista] = useState<Vista>('menu')
+  // Fase 12: si volvemos de Mercado Pago (?pago=exito|pendiente|error),
+  // arrancamos directo en la pantalla de retorno correspondiente.
+  const [vista, setVista] = useState<Vista>(() => {
+    const p = searchParams.get('pago')
+    if (p === 'exito') return 'pago-exito'
+    if (p === 'pendiente') return 'pago-pendiente'
+    if (p === 'error') return 'pago-error'
+    return 'menu'
+  })
   const [nombre, setNombre] = useState('')
   const [telefono, setTelefono] = useState('')
   const [modalidad, setModalidad] = useState<Modalidad>('retiro')
   const [direccion, setDireccion] = useState('')
   const [notas, setNotas] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+
+  // Fase 12: id de la orden recién creada -- lo necesita "Pagar online
+  // ahora" para pedirle a crear-preferencia-pago.js que arme el
+  // checkout de esa orden puntual.
+  const [ordenIdCreada, setOrdenIdCreada] = useState<string | null>(null)
+  const [pagandoOnline, setPagandoOnline] = useState(false)
+  const [errorPago, setErrorPago] = useState('')
 
   // Fase 13c: "Llamar mozo" -- solo disponible si el QR escaneado es de
   // una mesa específica (?mesa=<numero>).
@@ -170,7 +199,7 @@ export default function MenuPublico() {
     setVista('enviando')
     setErrorMsg('')
 
-    const { error } = await supabase.rpc('crear_orden_venta_publica', {
+    const { data: resultado, error } = await supabase.rpc('crear_orden_venta_publica', {
       p_slug: slug,
       p_cliente_nombre: nombre.trim(),
       p_telefono: telefono.trim(),
@@ -187,7 +216,36 @@ export default function MenuPublico() {
       return
     }
 
+    // Fase 12: guardamos el id de la orden por si el negocio tiene
+    // cobro online habilitado y el comensal elige "Pagar online ahora"
+    // en la pantalla de éxito.
+    const idOrden = (resultado as { id?: string } | null)?.id ?? null
+    setOrdenIdCreada(idOrden)
     setVista('exito')
+  }
+
+  async function pagarOnline() {
+    if (!slug || !ordenIdCreada) return
+    setPagandoOnline(true)
+    setErrorPago('')
+    try {
+      const res = await fetch('/.netlify/functions/crear-preferencia-pago', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, ordenId: ordenIdCreada }),
+      })
+      const resultado = await res.json()
+      if (!res.ok || !resultado.ok) {
+        setErrorPago(resultado.error || 'No se pudo iniciar el pago online.')
+        setPagandoOnline(false)
+        return
+      }
+      window.location.href = resultado.initPoint
+    } catch (err) {
+      console.error('Catálogo público · error iniciando el pago online:', err)
+      setErrorPago('No se pudo iniciar el pago online. Probá de nuevo.')
+      setPagandoOnline(false)
+    }
   }
 
   function hacerOtroPedido() {
@@ -198,6 +256,8 @@ export default function MenuPublico() {
     setDireccion('')
     setNotas('')
     setErrorMsg('')
+    setOrdenIdCreada(null)
+    setErrorPago('')
     setVista('menu')
   }
 
@@ -231,12 +291,93 @@ export default function MenuPublico() {
         <p className="text-muted-foreground max-w-sm text-sm">
           {cliente.nombre} se va a contactar al {telefono} para coordinar la entrega.
         </p>
+
+        {/* Fase 12: solo si el negocio tiene Mercado Pago habilitado --
+            pagar al recibir sigue siendo la opción por defecto. */}
+        {cliente.pagoOnlineHabilitado && ordenIdCreada && (
+          <div className="mt-2 flex flex-col items-center gap-2">
+            <button
+              onClick={pagarOnline}
+              disabled={pagandoOnline}
+              className="rounded-md border-2 px-4 py-2 text-sm font-semibold disabled:opacity-60"
+              style={{ borderColor: color, color }}
+            >
+              {pagandoOnline ? 'Redirigiendo…' : 'Pagar online ahora'}
+            </button>
+            {errorPago && <p className="text-xs text-red-600">{errorPago}</p>}
+          </div>
+        )}
+
         <button
           onClick={hacerOtroPedido}
           className="mt-2 rounded-md px-4 py-2 text-sm font-medium text-white"
           style={{ backgroundColor: color }}
         >
           Hacer otro pedido
+        </button>
+      </div>
+    )
+  }
+
+  // Fase 12: pantallas de retorno de Mercado Pago (back_urls de la
+  // Preference, ver crear-preferencia-pago.js). El estado real y
+  // definitivo del pago lo termina de confirmar el webhook (mp-
+  // webhook.js) -- estas pantallas son solo feedback inmediato al
+  // comprador, no la fuente de verdad.
+  if (vista === 'pago-exito') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+        <CheckCircle2 className="h-12 w-12" style={{ color }} />
+        <h1 className="text-xl font-semibold">¡Pago acreditado!</h1>
+        <p className="text-muted-foreground max-w-sm text-sm">
+          Tu pedido en {cliente.nombre} ya está pagado y confirmado.
+        </p>
+        <button
+          onClick={hacerOtroPedido}
+          className="mt-2 rounded-md px-4 py-2 text-sm font-medium text-white"
+          style={{ backgroundColor: color }}
+        >
+          Hacer otro pedido
+        </button>
+      </div>
+    )
+  }
+
+  if (vista === 'pago-pendiente') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+        <CheckCircle2 className="h-12 w-12" style={{ color }} />
+        <h1 className="text-xl font-semibold">Pago en proceso</h1>
+        <p className="text-muted-foreground max-w-sm text-sm">
+          Tu pago todavía se está procesando. En cuanto se acredite, {cliente.nombre} confirma tu
+          pedido.
+        </p>
+        <button
+          onClick={hacerOtroPedido}
+          className="mt-2 rounded-md px-4 py-2 text-sm font-medium text-white"
+          style={{ backgroundColor: color }}
+        >
+          Volver al menú
+        </button>
+      </div>
+    )
+  }
+
+  if (vista === 'pago-error') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+        <X className="h-12 w-12 text-red-500" />
+        <h1 className="text-xl font-semibold">El pago no se pudo procesar</h1>
+        <p className="text-muted-foreground max-w-sm text-sm">
+          Podés reintentarlo o coordinar el pago directamente con {cliente.nombre} al recibir el
+          pedido.
+        </p>
+        <button
+          onClick={hacerOtroPedido}
+          className="mt-2 rounded-md px-4 py-2 text-sm font-medium text-white"
+          style={{ backgroundColor: color }}
+        >
+          Volver al menú
         </button>
       </div>
     )
