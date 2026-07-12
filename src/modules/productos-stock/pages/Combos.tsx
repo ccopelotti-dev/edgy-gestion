@@ -193,6 +193,7 @@ export default function Combos() {
         onSave={handleGuardar}
         productos={state.productos}
         rubros={state.rubros}
+        combos={state.combos}
         editData={editing}
       />
 

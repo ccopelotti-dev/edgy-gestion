@@ -55,6 +55,8 @@ interface ComboDialogProps {
   onSave: (data: ComboFormData) => void
   productos: Producto[]
   rubros: Rubro[]
+  /** Combos existentes del cliente, para validar que el nombre no se repita. */
+  combos: Combo[]
   editData?: Combo
 }
 
@@ -75,12 +77,24 @@ export function ComboDialog({
   onSave,
   productos,
   rubros,
+  combos,
   editData,
 }: ComboDialogProps) {
   const [form, setForm] = useState<ComboFormData>(emptyCombo)
   const [subiendo, setSubiendo] = useState(false)
   const [errorImagen, setErrorImagen] = useState('')
+  const [errorNombre, setErrorNombre] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Borradores de texto para las cantidades de componentes fijos/elección --
+  // permiten tipear libremente (ej. "0", "0.", "0.1") sin que el input se
+  // vacíe solo. Usar directamente `value={cf.cantidad || ''}` rompía esto:
+  // en cuanto el número parseado quedaba en 0 (típico al arrancar a tipear
+  // "0.1"), `0 || ''` da '' y el campo se veía vacío de nuevo -- el usuario
+  // quedaba trabado sin poder completar el decimal. Bug real reportado por
+  // el usuario al cargar 0.100 kg de jamón crudo.
+  const [textoCantidadFijo, setTextoCantidadFijo] = useState<Record<string, string>>({})
+  const [textoCantidadEleccion, setTextoCantidadEleccion] = useState<Record<string, string>>({})
 
   // Carpeta estable para esta sesión de edición (id real si ya existe, o un
   // id temporal si el combo todavía se está creando) -- mismo patrón que
@@ -100,6 +114,7 @@ export function ComboDialog({
         editData?.id ?? `nuevo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       subidasEnEstaSesionRef.current = new Set()
       setErrorImagen('')
+      setErrorNombre('')
       if (editData) {
         const { id, createdAt, ...rest } = editData
         setForm({
@@ -109,11 +124,19 @@ export function ComboDialog({
           componentesFijos: rest.componentesFijos.map((cf) => ({ ...cf })),
           componentesEleccion: rest.componentesEleccion.map((ce) => ({ ...ce })),
         })
+        setTextoCantidadFijo(
+          Object.fromEntries(rest.componentesFijos.map((cf) => [cf.id, String(cf.cantidad)])),
+        )
+        setTextoCantidadEleccion(
+          Object.fromEntries(rest.componentesEleccion.map((ce) => [ce.id, String(ce.cantidad)])),
+        )
         // Al editar respetamos el precio ya guardado -- no lo pisamos solo
         // por abrir el diálogo, aunque no coincida con el sugerido.
         setPrecioManual(true)
       } else {
         setForm(emptyCombo)
+        setTextoCantidadFijo({})
+        setTextoCantidadEleccion({})
         setPrecioManual(false)
       }
     }
@@ -211,13 +234,15 @@ export function ComboDialog({
 
   // ── Componentes fijos ─────────────────────────────────────────────────────
   function handleAddFijo() {
+    const nuevoId = cUid()
     setForm((f) => ({
       ...f,
       componentesFijos: [
         ...f.componentesFijos,
-        { id: cUid(), productoId: '', cantidad: 1 },
+        { id: nuevoId, productoId: '', cantidad: 1 },
       ],
     }))
+    setTextoCantidadFijo((prev) => ({ ...prev, [nuevoId]: '1' }))
   }
 
   function handleUpdateFijo(id: string, updates: Partial<ComboComponenteFijo>) {
@@ -229,22 +254,38 @@ export function ComboDialog({
     }))
   }
 
+  // Cambia el borrador de texto libremente (acepta dígitos y un separador
+  // decimal, "." o ",") y solo actualiza la cantidad numérica real cuando el
+  // texto ya se puede parsear -- así "0", "0." o "0,1" no se pisan solos.
+  function handleCantidadFijoTexto(id: string, raw: string) {
+    const limpio = raw.replace(/[^0-9.,]/g, '')
+    setTextoCantidadFijo((prev) => ({ ...prev, [id]: limpio }))
+    const parsed = parseFloat(limpio.replace(',', '.'))
+    handleUpdateFijo(id, { cantidad: isNaN(parsed) ? 0 : parsed })
+  }
+
   function handleDeleteFijo(id: string) {
     setForm((f) => ({
       ...f,
       componentesFijos: f.componentesFijos.filter((cf) => cf.id !== id),
     }))
+    setTextoCantidadFijo((prev) => {
+      const { [id]: _quitado, ...resto } = prev
+      return resto
+    })
   }
 
   // ── Componentes a elección ────────────────────────────────────────────────
   function handleAddEleccion() {
+    const nuevoId = cUid()
     setForm((f) => ({
       ...f,
       componentesEleccion: [
         ...f.componentesEleccion,
-        { id: cUid(), rubroId: '', cantidad: 1 },
+        { id: nuevoId, rubroId: '', cantidad: 1 },
       ],
     }))
+    setTextoCantidadEleccion((prev) => ({ ...prev, [nuevoId]: '1' }))
   }
 
   function handleUpdateEleccion(id: string, updates: Partial<ComboComponenteEleccion>) {
@@ -256,11 +297,24 @@ export function ComboDialog({
     }))
   }
 
+  // "Elegí N" siempre es un entero (no tiene sentido "elegí 1.5 bebidas"),
+  // pero igual usamos texto libre para evitar el mismo bug de "0 || ''".
+  function handleCantidadEleccionTexto(id: string, raw: string) {
+    const limpio = raw.replace(/[^0-9]/g, '')
+    setTextoCantidadEleccion((prev) => ({ ...prev, [id]: limpio }))
+    const parsed = parseInt(limpio, 10)
+    handleUpdateEleccion(id, { cantidad: isNaN(parsed) ? 0 : parsed })
+  }
+
   function handleDeleteEleccion(id: string) {
     setForm((f) => ({
       ...f,
       componentesEleccion: f.componentesEleccion.filter((ce) => ce.id !== id),
     }))
+    setTextoCantidadEleccion((prev) => {
+      const { [id]: _quitado, ...resto } = prev
+      return resto
+    })
   }
 
   const componentesValidos =
@@ -271,12 +325,23 @@ export function ComboDialog({
     form.componentesFijos.length > 0 || form.componentesEleccion.length > 0
 
   function handleSave() {
-    if (!form.nombre.trim()) return
+    const nombreLimpio = form.nombre.trim()
+    if (!nombreLimpio) return
     if (!tieneComponentes || !componentesValidos) return
+
+    const yaExiste = combos.some(
+      (c) => c.id !== editData?.id && c.nombre.trim().toLowerCase() === nombreLimpio.toLowerCase(),
+    )
+    if (yaExiste) {
+      setErrorNombre('Ya existe un combo con ese nombre.')
+      return
+    }
+    setErrorNombre('')
+
     subidasEnEstaSesionRef.current = new Set()
     onSave({
       ...form,
-      nombre: form.nombre.trim(),
+      nombre: nombreLimpio,
       descripcion: form.descripcion.trim(),
       descuentoPorcentaje: Math.min(Math.max(form.descuentoPorcentaje || 0, 0), 100),
     })
@@ -379,10 +444,14 @@ export function ComboDialog({
             <input
               className={inputClass}
               value={form.nombre}
-              onChange={(e) => update('nombre', e.target.value)}
+              onChange={(e) => {
+                update('nombre', e.target.value)
+                if (errorNombre) setErrorNombre('')
+              }}
               placeholder="Ej: Combo Menú"
               autoFocus
             />
+            {errorNombre && <p className="text-xs text-red-500">{errorNombre}</p>}
           </div>
 
           {/* Descripcion */}
@@ -507,13 +576,10 @@ export function ComboDialog({
                       </label>
                       <input
                         className={inputClass}
-                        type="number"
-                        min={0.001}
-                        step={0.001}
-                        value={cf.cantidad || ''}
-                        onChange={(e) =>
-                          handleUpdateFijo(cf.id, { cantidad: parseFloat(e.target.value) || 0 })
-                        }
+                        type="text"
+                        inputMode="decimal"
+                        value={textoCantidadFijo[cf.id] ?? String(cf.cantidad || '')}
+                        onChange={(e) => handleCantidadFijoTexto(cf.id, e.target.value)}
                       />
                     </div>
                     <Button
@@ -573,15 +639,10 @@ export function ComboDialog({
                       <label className="text-xs text-muted-foreground">Cant. a elegir</label>
                       <input
                         className={inputClass}
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={ce.cantidad || ''}
-                        onChange={(e) =>
-                          handleUpdateEleccion(ce.id, {
-                            cantidad: parseInt(e.target.value, 10) || 0,
-                          })
-                        }
+                        type="text"
+                        inputMode="numeric"
+                        value={textoCantidadEleccion[ce.id] ?? String(ce.cantidad || '')}
+                        onChange={(e) => handleCantidadEleccionTexto(ce.id, e.target.value)}
                       />
                     </div>
                     <Button
