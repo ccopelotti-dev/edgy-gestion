@@ -18,7 +18,7 @@ import {
   ACCEPT_IMAGENES,
 } from '../../lib/imagenes'
 import type { Combo, ComboComponenteFijo, ComboComponenteEleccion, Producto, Rubro } from '../../types'
-import { MAX_IMAGENES_PRODUCTO } from '../../types'
+import { MAX_IMAGENES_PRODUCTO, unidadAbrev } from '../../types'
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -497,15 +497,22 @@ export function ComboDialog({
                       </select>
                     </div>
                     <div className="grid gap-1 w-24">
-                      <label className="text-xs text-muted-foreground">Cantidad</label>
+                      <label className="text-xs text-muted-foreground">
+                        Cantidad
+                        {cf.productoId &&
+                          (() => {
+                            const p = productos.find((x) => x.id === cf.productoId)
+                            return p ? ` (${unidadAbrev(p.unidadVenta)})` : ''
+                          })()}
+                      </label>
                       <input
                         className={inputClass}
                         type="number"
-                        min={1}
-                        step={1}
+                        min={0.001}
+                        step={0.001}
                         value={cf.cantidad || ''}
                         onChange={(e) =>
-                          handleUpdateFijo(cf.id, { cantidad: parseInt(e.target.value, 10) || 0 })
+                          handleUpdateFijo(cf.id, { cantidad: parseFloat(e.target.value) || 0 })
                         }
                       />
                     </div>
