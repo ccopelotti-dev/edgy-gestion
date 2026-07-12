@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -10,8 +10,15 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ImagePlus, X, Loader2, Star } from 'lucide-react'
+import { formatARS } from '../../lib/format'
+import {
+  subirImagenProducto,
+  eliminarImagenProducto,
+  ACCEPT_IMAGENES,
+} from '../../lib/imagenes'
 import type { Combo, ComboComponenteFijo, ComboComponenteEleccion, Producto, Rubro } from '../../types'
+import { MAX_IMAGENES_PRODUCTO } from '../../types'
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -27,9 +34,18 @@ function cUid(): string {
 //
 // Fase 5 del refactor de Productos. Un combo agrupa componentes FIJOS
 // (producto + cantidad exacta) y slots de ELECCIÓN (rubro + cantidad a
-// elegir de ese rubro, ej. "elegí 1 bebida"). El precio es fijo, cargado a
-// mano -- no se calcula a partir del costo/precio de los componentes. El
-// combo no maneja stock propio (ver comentario en types/index.ts).
+// elegir de ese rubro, ej. "elegí 1 bebida"). El combo no maneja stock
+// propio (ver comentario en types/index.ts).
+//
+// Fase 5b (mejoras, a pedido del usuario):
+//   - Galería de fotos: mismo patrón que ProductoDialog (subirImagenProducto/
+//     eliminarImagenProducto, carpeta estable, limpieza al cancelar).
+//   - Precio sugerido: se calcula sumando cantidad x precioVenta de cada
+//     componente FIJO (los de elección no entran porque el producto puntual
+//     se define recién al vender) y restando el % de descuento. El campo de
+//     precio de venta queda SIEMPRE editable -- el sugerido es una
+//     referencia que se autocompleta mientras el usuario no lo haya tocado
+//     a mano, y siempre se puede volver a aplicar con "Usar sugerido".
 
 type ComboFormData = Omit<Combo, 'id' | 'createdAt'>
 
@@ -46,6 +62,8 @@ const emptyCombo: ComboFormData = {
   nombre: '',
   descripcion: '',
   precioVenta: 0,
+  descuentoPorcentaje: 0,
+  imagenes: [],
   disponible: true,
   componentesFijos: [],
   componentesEleccion: [],
@@ -60,24 +78,135 @@ export function ComboDialog({
   editData,
 }: ComboDialogProps) {
   const [form, setForm] = useState<ComboFormData>(emptyCombo)
+  const [subiendo, setSubiendo] = useState(false)
+  const [errorImagen, setErrorImagen] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Carpeta estable para esta sesión de edición (id real si ya existe, o un
+  // id temporal si el combo todavía se está creando) -- mismo patrón que
+  // ProductoDialog.
+  const carpetaIdRef = useRef<string>('')
+  // Fotos subidas durante esta apertura del diálogo que todavía no son parte
+  // del combo guardado -- si se cancela, se borran del bucket.
+  const subidasEnEstaSesionRef = useRef<Set<string>>(new Set())
+
+  // Una vez que el usuario edita el precio a mano, dejamos de pisarlo con el
+  // sugerido automáticamente (sigue disponible el botón "Usar sugerido").
+  const [precioManual, setPrecioManual] = useState(false)
 
   useEffect(() => {
     if (open) {
+      carpetaIdRef.current =
+        editData?.id ?? `nuevo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      subidasEnEstaSesionRef.current = new Set()
+      setErrorImagen('')
       if (editData) {
         const { id, createdAt, ...rest } = editData
         setForm({
           ...rest,
+          imagenes: rest.imagenes ?? [],
+          descuentoPorcentaje: rest.descuentoPorcentaje ?? 0,
           componentesFijos: rest.componentesFijos.map((cf) => ({ ...cf })),
           componentesEleccion: rest.componentesEleccion.map((ce) => ({ ...ce })),
         })
+        // Al editar respetamos el precio ya guardado -- no lo pisamos solo
+        // por abrir el diálogo, aunque no coincida con el sugerido.
+        setPrecioManual(true)
       } else {
         setForm(emptyCombo)
+        setPrecioManual(false)
       }
     }
   }, [open, editData])
 
   function update<K extends keyof ComboFormData>(key: K, value: ComboFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  // ── Precio sugerido ───────────────────────────────────────────────────────
+  // Suma precioVenta base x cantidad de cada componente fijo (confirmado con
+  // el usuario: no se usa ninguna lista de precios, solo el precio de venta
+  // base del producto) y aplica el % de descuento.
+  const precioSugerido = useMemo(() => {
+    const base = form.componentesFijos.reduce((acc, cf) => {
+      const producto = productos.find((p) => p.id === cf.productoId)
+      if (!producto) return acc
+      return acc + producto.precioVenta * (cf.cantidad || 0)
+    }, 0)
+    const descuento = Math.min(Math.max(form.descuentoPorcentaje || 0, 0), 100)
+    return Math.max(base * (1 - descuento / 100), 0)
+  }, [form.componentesFijos, form.descuentoPorcentaje, productos])
+
+  // Mientras el usuario no haya tocado el precio a mano, lo mantenemos
+  // sincronizado con el sugerido (ej: recién arrancando a cargar el combo).
+  useEffect(() => {
+    if (!precioManual) {
+      setForm((f) => ({ ...f, precioVenta: precioSugerido }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [precioSugerido, precioManual])
+
+  function handlePrecioChange(value: number) {
+    setPrecioManual(true)
+    update('precioVenta', value)
+  }
+
+  function handleUsarSugerido() {
+    setPrecioManual(false)
+    update('precioVenta', precioSugerido)
+  }
+
+  // ── Galería de fotos (mismo patrón que ProductoDialog) ───────────────────
+  async function handleFilesSelected(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setErrorImagen('')
+
+    const disponibles = MAX_IMAGENES_PRODUCTO - form.imagenes.length
+    if (disponibles <= 0) {
+      setErrorImagen(`Máximo ${MAX_IMAGENES_PRODUCTO} fotos por combo.`)
+      return
+    }
+
+    const aProcesar = Array.from(files).slice(0, disponibles)
+    setSubiendo(true)
+    try {
+      for (const file of aProcesar) {
+        try {
+          const { url } = await subirImagenProducto(file, carpetaIdRef.current)
+          subidasEnEstaSesionRef.current.add(url)
+          setForm((prev) => ({ ...prev, imagenes: [...prev.imagenes, url] }))
+        } catch (err) {
+          setErrorImagen(err instanceof Error ? err.message : 'No se pudo subir una foto.')
+        }
+      }
+    } finally {
+      setSubiendo(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  function handleRemoveImagen(url: string) {
+    update(
+      'imagenes',
+      form.imagenes.filter((u) => u !== url),
+    )
+    if (subidasEnEstaSesionRef.current.has(url)) {
+      subidasEnEstaSesionRef.current.delete(url)
+      void eliminarImagenProducto(url)
+    }
+  }
+
+  function handleHacerPrincipal(url: string) {
+    const resto = form.imagenes.filter((u) => u !== url)
+    update('imagenes', [url, ...resto])
+  }
+
+  function handleCancelar() {
+    for (const url of subidasEnEstaSesionRef.current) {
+      void eliminarImagenProducto(url)
+    }
+    subidasEnEstaSesionRef.current = new Set()
+    onOpenChange(false)
   }
 
   // ── Componentes fijos ─────────────────────────────────────────────────────
@@ -144,26 +273,106 @@ export function ComboDialog({
   function handleSave() {
     if (!form.nombre.trim()) return
     if (!tieneComponentes || !componentesValidos) return
+    subidasEnEstaSesionRef.current = new Set()
     onSave({
       ...form,
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim(),
+      descuentoPorcentaje: Math.min(Math.max(form.descuentoPorcentaje || 0, 0), 100),
     })
     onOpenChange(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) handleCancelar()
+        else onOpenChange(v)
+      }}
+    >
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editData ? 'Editar combo' : 'Nuevo combo'}</DialogTitle>
           <DialogDescription>
-            Agrupa productos existentes en un ítem vendible a precio fijo. El combo no
+            Agrupa productos existentes en un ítem vendible a precio propio. El combo no
             maneja stock propio -- descuenta el de sus componentes al venderse (fase futura).
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
+          {/* Galería de fotos */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">
+              Fotos del combo ({form.imagenes.length}/{MAX_IMAGENES_PRODUCTO})
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {form.imagenes.map((url, idx) => (
+                <div
+                  key={url}
+                  className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted"
+                >
+                  <img src={url} alt="" className="h-full w-full object-cover" />
+                  {idx === 0 && (
+                    <span className="absolute left-1 top-1 rounded-full bg-black/60 p-0.5">
+                      <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                    </span>
+                  )}
+                  <div className="absolute inset-0 hidden items-center justify-center gap-1 bg-black/50 group-hover:flex">
+                    {idx !== 0 && (
+                      <button
+                        type="button"
+                        title="Hacer principal"
+                        onClick={() => handleHacerPrincipal(url)}
+                        className="rounded-full bg-white/90 p-1 hover:bg-white"
+                      >
+                        <Star className="h-3.5 w-3.5 text-yellow-500" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Quitar foto"
+                      onClick={() => handleRemoveImagen(url)}
+                      className="rounded-full bg-white/90 p-1 hover:bg-white"
+                    >
+                      <X className="h-3.5 w-3.5 text-red-500" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {form.imagenes.length < MAX_IMAGENES_PRODUCTO && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={subiendo}
+                  className="flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed text-muted-foreground hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+                >
+                  {subiendo ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>
+                      <ImagePlus className="h-5 w-5" />
+                      <span className="text-[10px]">Agregar</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT_IMAGENES}
+              multiple
+              className="hidden"
+              onChange={(e) => handleFilesSelected(e.target.files)}
+            />
+            {errorImagen && <p className="text-xs text-red-500">{errorImagen}</p>}
+            <p className="text-xs text-muted-foreground">
+              La primera foto es la principal. JPG, PNG o WEBP, hasta 5 MB c/u.
+            </p>
+          </div>
+
           {/* Nombre */}
           <div className="grid gap-1.5">
             <label className="text-sm font-medium">Nombre *</label>
@@ -183,33 +392,71 @@ export function ComboDialog({
               className={`${inputClass} min-h-[50px] resize-y`}
               value={form.descripcion}
               onChange={(e) => update('descripcion', e.target.value)}
-              placeholder="Descripción opcional"
+              placeholder="Texto de promoción, ej: 'Combo ideal para compartir en familia'"
               rows={2}
             />
           </div>
 
-          {/* Precio y disponible */}
-          <div className="grid grid-cols-2 gap-4 items-end">
-            <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Precio de venta *</label>
-              <input
-                className={inputClass}
-                type="number"
-                min={0}
-                step={0.01}
-                value={form.precioVenta || ''}
-                onChange={(e) => update('precioVenta', parseFloat(e.target.value) || 0)}
-              />
+          {/* Descuento */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">% Descuento sobre el precio sugerido</label>
+            <input
+              className={inputClass + ' max-w-[140px]'}
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              value={form.descuentoPorcentaje || ''}
+              onChange={(e) => update('descuentoPorcentaje', parseFloat(e.target.value) || 0)}
+              placeholder="0"
+            />
+          </div>
+
+          {/* Precio sugerido + Precio final */}
+          <div className="grid gap-1.5 rounded-lg border p-3 bg-muted/30">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                Precio sugerido (suma de componentes fijos - descuento)
+              </span>
+              <span className="font-medium">{formatARS(precioSugerido)}</span>
             </div>
-            <label className="flex items-center gap-2 text-sm pb-2">
-              <input
-                type="checkbox"
-                checked={form.disponible}
-                onChange={(e) => update('disponible', e.target.checked)}
-                className="rounded border-input"
-              />
-              Disponible
-            </label>
+            <div className="grid grid-cols-2 gap-4 items-end">
+              <div className="grid gap-1.5">
+                <label className="text-sm font-medium">Precio de venta *</label>
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={form.precioVenta || ''}
+                  onChange={(e) => handlePrecioChange(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              <div className="flex items-center gap-3 pb-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleUsarSugerido}
+                  disabled={form.componentesFijos.length === 0}
+                >
+                  Usar sugerido
+                </Button>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.disponible}
+                    onChange={(e) => update('disponible', e.target.checked)}
+                    className="rounded border-input"
+                  />
+                  Disponible
+                </label>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              El precio final queda editable a mano en todo momento -- el sugerido es solo una
+              referencia.
+            </p>
           </div>
 
           {/* Componentes fijos */}
@@ -222,7 +469,8 @@ export function ComboDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Productos que siempre forman parte del combo, con la cantidad exacta.
+              Productos que siempre forman parte del combo, con la cantidad exacta. Su precio de
+              venta base es el que alimenta el precio sugerido de arriba.
             </p>
 
             {form.componentesFijos.length === 0 ? (
@@ -287,7 +535,8 @@ export function ComboDialog({
             </div>
             <p className="text-xs text-muted-foreground">
               Ej: "elegí 1 bebida" -- se define el rubro y cuántos ítems de ese rubro elige el
-              cliente. La elección real sucede al vender el combo (fase futura).
+              cliente. La elección real sucede al vender el combo (fase futura). No entra en el
+              cálculo del precio sugerido porque el producto puntual se define recién al vender.
             </p>
 
             {form.componentesEleccion.length === 0 ? (
@@ -351,7 +600,7 @@ export function ComboDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={handleCancelar}>
             Cancelar
           </Button>
           <Button

@@ -163,12 +163,21 @@ export interface PlantillaGarantia {
 //     slots de ELECCIÓN (rubro + cantidad a elegir de ese rubro, ej. "elegí
 //     1 bebida"). La elección real del cliente sucede recién al vender el
 //     combo -- acá solo se define el slot (de qué rubro, cuántos).
-//   - Precio: fijo, cargado a mano por el usuario (no se calcula a partir
-//     del precio/costo de los componentes).
+//   - Precio: el precio de venta final queda editable a mano por el usuario,
+//     pero la UI calcula un "precio sugerido" sumando el precio de venta
+//     base de cada componente fijo (cantidad x precioVenta del producto) y
+//     restando descuentoPorcentaje -- confirmado con el usuario (Fase 5b):
+//     no se usa ninguna lista de precios para esto, solo precioVenta base.
 //   - Stock: el combo NO tiene stock propio. Vender un combo (Fase 6) va a
 //     descontar stock de cada componente fijo; los slots de elección van a
 //     descontar del producto puntual que el cliente elija en ese momento.
 //     Acá solo se arma la "receta" del combo, sin tocar stock.
+//
+// Fase 5b (mejoras, a pedido del usuario): se suma galería de fotos (mismo
+// patrón que Productos, hasta MAX_IMAGENES_PRODUCTO), campo de % de
+// descuento para el cálculo del precio sugerido, y generación de una imagen
+// promocional JPG (logo + foto + nombre + precio + descripción) -- ver
+// lib/imagenPromocional.ts.
 //
 // Esta fase deja todo LISTO del lado de Productos -- igual que Listas de
 // precio (Fase 3) y Garantía (Fase 4), la venta real de un combo (con
@@ -192,8 +201,16 @@ export interface Combo {
   id: string
   nombre: string
   descripcion: string
-  /** Precio de venta fijo del combo (no se calcula a partir de los componentes). */
+  /**
+   * Precio de venta final del combo. Se sugiere automáticamente en la UI
+   * (suma de precioVenta de componentes fijos, menos descuentoPorcentaje)
+   * pero queda editable a mano -- el usuario puede pisar el valor sugerido.
+   */
   precioVenta: number
+  /** % de descuento aplicado sobre la suma de precioVenta de los componentes fijos para llegar al precio sugerido. */
+  descuentoPorcentaje: number
+  /** Galería de fotos del combo (mismo patrón que Producto.imagenes, hasta MAX_IMAGENES_PRODUCTO). La primera es la principal. */
+  imagenes: string[]
   disponible: boolean
   componentesFijos: ComboComponenteFijo[]
   componentesEleccion: ComboComponenteEleccion[]

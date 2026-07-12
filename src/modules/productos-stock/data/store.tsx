@@ -773,6 +773,8 @@ function comboToRow(c: Combo, clienteId: string) {
     descripcion: c.descripcion || null,
     precio_venta: c.precioVenta,
     disponible: c.disponible,
+    imagenes: c.imagenes ?? [],
+    descuento_porcentaje: c.descuentoPorcentaje ?? 0,
   }
 }
 
@@ -1530,6 +1532,8 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     descripcion: r.descripcion ?? '',
     precioVenta: Number(r.precio_venta),
     disponible: r.disponible,
+    imagenes: r.imagenes ?? [],
+    descuentoPorcentaje: Number(r.descuento_porcentaje ?? 0),
     componentesFijos: componentesFijosByCombo.get(r.id) ?? [],
     componentesEleccion: componentesEleccionByCombo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),

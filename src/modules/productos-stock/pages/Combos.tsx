@@ -1,11 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, PackagePlus } from 'lucide-react'
+import { Plus, Pencil, Trash2, PackagePlus, ImageIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useProductosStock } from '../data/store'
 import { EmptyState, Amount } from '../components/productos/display'
 import { ComboDialog } from '../components/productos/combo-dialogs'
+import { ImagenPromocionalDialog } from '../components/productos/imagen-promocional-dialog'
 import type { Combo } from '../types'
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -21,6 +22,8 @@ export default function Combos() {
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Combo | undefined>()
+  const [imagenDialogOpen, setImagenDialogOpen] = useState(false)
+  const [comboImagen, setComboImagen] = useState<Combo | undefined>()
 
   const productosMap = useMemo(
     () => new Map(state.productos.map((p) => [p.id, p])),
@@ -44,6 +47,11 @@ export default function Combos() {
     } else {
       dispatch({ type: 'ADD_COMBO', payload: data })
     }
+  }
+
+  function handleImagenPromocional(c: Combo) {
+    setComboImagen(c)
+    setImagenDialogOpen(true)
   }
 
   function handleEliminar(c: Combo) {
@@ -95,6 +103,7 @@ export default function Combos() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
+                <th className="px-4 py-3 font-medium"></th>
                 <th className="px-4 py-3 font-medium">Combo</th>
                 <th className="px-4 py-3 font-medium">Composición</th>
                 <th className="px-4 py-3 font-medium text-right">Precio</th>
@@ -105,6 +114,17 @@ export default function Combos() {
             <tbody>
               {state.combos.map((c) => (
                 <tr key={c.id} className="border-b last:border-0 hover:bg-muted/50">
+                  <td className="px-4 py-3">
+                    {c.imagenes?.[0] ? (
+                      <img
+                        src={c.imagenes[0]}
+                        alt=""
+                        className="h-10 w-10 rounded-md border object-cover"
+                      />
+                    ) : (
+                      <div className="h-10 w-10 rounded-md border bg-muted" />
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <p className="font-medium">{c.nombre}</p>
                     {c.descripcion && (
@@ -130,6 +150,15 @@ export default function Combos() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => handleImagenPromocional(c)}
+                        title="Generar imagen promocional"
+                      >
+                        <ImageIcon className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -165,6 +194,12 @@ export default function Combos() {
         productos={state.productos}
         rubros={state.rubros}
         editData={editing}
+      />
+
+      <ImagenPromocionalDialog
+        open={imagenDialogOpen}
+        onOpenChange={setImagenDialogOpen}
+        combo={comboImagen}
       />
     </div>
   )
