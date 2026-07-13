@@ -70,6 +70,14 @@ interface MenuPublicoData {
     // "Pagar online" después de confirmar el pedido -- ver
     // netlify/functions/crear-preferencia-pago.js.
     pagoOnlineHabilitado?: boolean
+    // Fase 16 (Backlog menor): horario de atención opcional. Si
+    // horarioActivo es false (default), el Catálogo acepta pedidos las
+    // 24 hs como siempre. horarioDias usa la convención de
+    // Date.getDay(): 0 = domingo … 6 = sábado.
+    horarioActivo?: boolean
+    horarioApertura?: string | null
+    horarioCierre?: string | null
+    horarioDias?: number[]
   } | null
   categorias: CategoriaPublica[]
 }
@@ -84,6 +92,40 @@ function formatARS(monto: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(monto)
+}
+
+// Fase 16: horario de atención opcional del Catálogo público. Mismo
+// criterio de días que Date.getDay(): 0 = domingo … 6 = sábado.
+const DIA_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+
+function estaAbiertoAhora(cliente: MenuPublicoData['cliente']): boolean {
+  if (!cliente?.horarioActivo || !cliente.horarioApertura || !cliente.horarioCierre) return true
+
+  const dias = cliente.horarioDias && cliente.horarioDias.length > 0 ? cliente.horarioDias : [0, 1, 2, 3, 4, 5, 6]
+  const ahora = new Date()
+  if (!dias.includes(ahora.getDay())) return false
+
+  const [hA, mA] = cliente.horarioApertura.slice(0, 5).split(':').map(Number)
+  const [hC, mC] = cliente.horarioCierre.slice(0, 5).split(':').map(Number)
+  const minutosApertura = hA * 60 + mA
+  const minutosCierre = hC * 60 + mC
+  const minutosAhora = ahora.getHours() * 60 + ahora.getMinutes()
+
+  if (minutosApertura <= minutosCierre) {
+    return minutosAhora >= minutosApertura && minutosAhora <= minutosCierre
+  }
+  // Horario que cruza medianoche (ej. 20:00 a 02:00).
+  return minutosAhora >= minutosApertura || minutosAhora <= minutosCierre
+}
+
+function textoHorario(cliente: MenuPublicoData['cliente']): string {
+  if (!cliente?.horarioApertura || !cliente.horarioCierre) return ''
+  const dias = cliente.horarioDias && cliente.horarioDias.length > 0 ? cliente.horarioDias : [0, 1, 2, 3, 4, 5, 6]
+  const diasTexto = [1, 2, 3, 4, 5, 6, 0]
+    .filter((d) => dias.includes(d))
+    .map((d) => DIA_LABELS[d])
+    .join(', ')
+  return `${diasTexto} de ${cliente.horarioApertura.slice(0, 5)} a ${cliente.horarioCierre.slice(0, 5)}`
 }
 
 export default function MenuPublico() {
@@ -161,6 +203,12 @@ export default function MenuPublico() {
     }
   }, [slug])
 
+  // Fase 16: si el negocio configuró horario de atención y estamos
+  // fuera de él, se bloquea el agregado al carrito (ver sePuedePedir
+  // más abajo) -- el servidor (crear_orden_venta_publica) hace la
+  // misma validación como defensa en profundidad.
+  const estaAbierto = useMemo(() => estaAbiertoAhora(data?.cliente ?? null), [data])
+
   const productosPorId = useMemo(() => {
     const map = new Map<string, ProductoPublico>()
     for (const cat of data?.categorias ?? []) {
@@ -195,6 +243,11 @@ export default function MenuPublico() {
     if (!slug || itemsCarrito.length === 0) return
     if (!nombre.trim() || !telefono.trim()) return
     if (modalidad === 'delivery' && !direccion.trim()) return
+    if (!estaAbierto) {
+      setErrorMsg('El local está cerrado en este momento. Volvé a intentar dentro del horario de atención.')
+      setVista('error')
+      return
+    }
 
     setVista('enviando')
     setErrorMsg('')
@@ -525,6 +578,13 @@ export default function MenuPublico() {
       </div>
 
       <div className="mx-auto flex max-w-2xl flex-col gap-8 px-4 pt-8">
+        {!estaAbierto && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-800">
+            <p className="font-semibold">Cerrado ahora</p>
+            {textoHorario(cliente) && <p className="text-xs">Horario de atención: {textoHorario(cliente)}</p>}
+          </div>
+        )}
+
         {categorias.length === 0 && (
           <p className="text-muted-foreground text-center text-sm">
             Todavía no hay productos publicados en este menú.
@@ -539,7 +599,7 @@ export default function MenuPublico() {
             <div className="flex flex-col gap-3">
               {cat.productos.map((p) => {
                 const cantidadEnCarrito = carrito.get(p.id) ?? 0
-                const sePuedePedir = p.tipo !== 'con_variantes'
+                const sePuedePedir = p.tipo !== 'con_variantes' && estaAbierto
                 return (
                   <div key={p.id} className="flex items-center gap-3 rounded-lg border bg-white p-3">
                     {p.imagen ? (
@@ -555,7 +615,9 @@ export default function MenuPublico() {
                       <span className="whitespace-nowrap font-semibold">{formatARS(p.precio)}</span>
                     </div>
                     {!sePuedePedir ? (
-                      <span className="text-muted-foreground text-[11px]">Consultar en el local</span>
+                      <span className="text-muted-foreground text-[11px]">
+                        {!estaAbierto ? 'Cerrado' : 'Consultar en el local'}
+                      </span>
                     ) : cantidadEnCarrito === 0 ? (
                       <button
                         onClick={() => cambiarCantidad(p.id, 1)}

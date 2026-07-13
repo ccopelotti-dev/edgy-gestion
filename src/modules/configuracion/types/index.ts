@@ -42,6 +42,13 @@ export interface DatosEmpresa {
   provincia: string | null
   localidad: string | null
   codigoPostal: string | null
+  // Fase 16 (Backlog menor): horario de atención del Catálogo público
+  // -- opcional y apagado por defecto. horarioDias usa la misma
+  // convención que JS Date.getDay(): 0 = domingo … 6 = sábado.
+  horarioActivo: boolean
+  horarioApertura: string | null
+  horarioCierre: string | null
+  horarioDias: number[]
 }
 
 /**

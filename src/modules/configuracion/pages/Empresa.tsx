@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save, ShieldCheck, Zap, CreditCard } from 'lucide-react'
+import { Loader2, Save, ShieldCheck, Zap, CreditCard, Clock } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -55,6 +55,10 @@ interface FormEmpresa {
   localidad: string
   codigoPostal: string
   colorMarca: string
+  horarioActivo: boolean
+  horarioApertura: string
+  horarioCierre: string
+  horarioDias: number[]
 }
 
 const FORM_VACIO: FormEmpresa = {
@@ -69,7 +73,22 @@ const FORM_VACIO: FormEmpresa = {
   localidad: '',
   codigoPostal: '',
   colorMarca: COLOR_MARCA_DEFAULT,
+  horarioActivo: false,
+  horarioApertura: '09:00',
+  horarioCierre: '23:00',
+  horarioDias: [0, 1, 2, 3, 4, 5, 6],
 }
+
+// Fase 16: días de la semana, misma convención que JS Date.getDay().
+const DIAS_SEMANA: { value: number; label: string }[] = [
+  { value: 1, label: 'Lun' },
+  { value: 2, label: 'Mar' },
+  { value: 3, label: 'Mié' },
+  { value: 4, label: 'Jue' },
+  { value: 5, label: 'Vie' },
+  { value: 6, label: 'Sáb' },
+  { value: 0, label: 'Dom' },
+]
 
 // Fase 11: configuración de Facturación Electrónica ARCA -- vive en
 // una tabla aparte (clientes_arca_config, protegida por RLS sin
@@ -150,6 +169,10 @@ export default function Empresa() {
       localidad: empresa.localidad ?? '',
       codigoPostal: empresa.codigoPostal ?? '',
       colorMarca: empresa.colorMarca ?? COLOR_MARCA_DEFAULT,
+      horarioActivo: empresa.horarioActivo,
+      horarioApertura: (empresa.horarioApertura ?? '09:00').slice(0, 5),
+      horarioCierre: (empresa.horarioCierre ?? '23:00').slice(0, 5),
+      horarioDias: empresa.horarioDias.length > 0 ? empresa.horarioDias : [0, 1, 2, 3, 4, 5, 6],
     })
   }, [empresa])
 
@@ -275,6 +298,15 @@ export default function Empresa() {
     return <p className="text-sm text-red-500">{error ?? 'No pudimos cargar la empresa.'}</p>
   }
 
+  function toggleDiaHorario(dia: number) {
+    setForm((prev) => ({
+      ...prev,
+      horarioDias: prev.horarioDias.includes(dia)
+        ? prev.horarioDias.filter((d) => d !== dia)
+        : [...prev.horarioDias, dia],
+    }))
+  }
+
   async function handleGuardar() {
     setMensaje(null)
 
@@ -301,6 +333,10 @@ export default function Empresa() {
       localidad: form.localidad || null,
       codigoPostal: form.codigoPostal || null,
       colorMarca: form.colorMarca || COLOR_MARCA_DEFAULT,
+      horarioActivo: form.horarioActivo,
+      horarioApertura: form.horarioApertura || null,
+      horarioCierre: form.horarioCierre || null,
+      horarioDias: form.horarioDias,
       // Solo se manda si se subió un logo nuevo en esta sesión -- si
       // no, `guardar` no incluye logoUrl en el payload y se conserva
       // el que ya estaba.
@@ -402,6 +438,76 @@ export default function Empresa() {
               onChange={(e) => setForm({ ...form, colorMarca: e.target.value })}
               className="w-32"
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="text-muted-foreground h-4 w-4" />
+            Horario de atención
+          </CardTitle>
+          <CardDescription>
+            Fase 16 — si lo activás, el Catálogo público (Menú QR/Delivery) deja de aceptar
+            pedidos fuera de estos días y horarios: se lo avisa al comensal y también se rechaza
+            del lado del servidor. Desactivado, el Catálogo sigue aceptando pedidos las 24 hs,
+            como hasta ahora.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <input
+              id="horarioActivo"
+              type="checkbox"
+              checked={form.horarioActivo}
+              onChange={(e) => setForm({ ...form, horarioActivo: e.target.checked })}
+            />
+            <Label htmlFor="horarioActivo">Restringir pedidos a este horario</Label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="horarioApertura">Abre</Label>
+              <Input
+                id="horarioApertura"
+                type="time"
+                value={form.horarioApertura}
+                onChange={(e) => setForm({ ...form, horarioApertura: e.target.value })}
+                disabled={!form.horarioActivo}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="horarioCierre">Cierra</Label>
+              <Input
+                id="horarioCierre"
+                type="time"
+                value={form.horarioCierre}
+                onChange={(e) => setForm({ ...form, horarioCierre: e.target.value })}
+                disabled={!form.horarioActivo}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Días de atención</Label>
+            <div className="flex flex-wrap gap-2">
+              {DIAS_SEMANA.map((d) => (
+                <button
+                  key={d.value}
+                  type="button"
+                  disabled={!form.horarioActivo}
+                  onClick={() => toggleDiaHorario(d.value)}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                    form.horarioDias.includes(d.value)
+                      ? 'border-current bg-muted'
+                      : 'border-gray-200 text-gray-500'
+                  }`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
           </div>
         </CardContent>
       </Card>

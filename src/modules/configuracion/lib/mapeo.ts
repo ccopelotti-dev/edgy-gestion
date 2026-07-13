@@ -22,6 +22,10 @@ export function filaAEmpresa(fila: Record<string, any>): DatosEmpresa {
     provincia: fila.provincia,
     localidad: fila.localidad,
     codigoPostal: fila.codigo_postal,
+    horarioActivo: fila.horario_activo ?? false,
+    horarioApertura: fila.horario_apertura,
+    horarioCierre: fila.horario_cierre,
+    horarioDias: fila.horario_dias ?? [0, 1, 2, 3, 4, 5, 6],
   }
 }
 
@@ -48,6 +52,11 @@ export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unk
   // identidad visual del cliente (ver Empresa.tsx).
   if ('logoUrl' in cambios) fila.logo_url = cambios.logoUrl
   if ('colorMarca' in cambios) fila.color_marca = cambios.colorMarca
+  // Fase 16: horario de atención del Catálogo público.
+  if ('horarioActivo' in cambios) fila.horario_activo = cambios.horarioActivo
+  if ('horarioApertura' in cambios) fila.horario_apertura = cambios.horarioApertura
+  if ('horarioCierre' in cambios) fila.horario_cierre = cambios.horarioCierre
+  if ('horarioDias' in cambios) fila.horario_dias = cambios.horarioDias
   return fila
 }
 
