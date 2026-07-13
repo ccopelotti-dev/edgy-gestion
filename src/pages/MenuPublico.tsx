@@ -59,6 +59,20 @@ interface CategoriaPublica {
   productos: ProductoPublico[]
 }
 
+// Fase 19.3 (Combos en Menú público): un Combo no tiene stock propio ni
+// rubro -- se muestra en una sección aparte, siempre primero, con
+// título personalizable (combosTituloSeccion, ver Configuración >
+// Empresa). No tiene variantes, así que siempre es pedible mientras el
+// local esté abierto.
+interface ComboPublico {
+  id: string
+  nombre: string
+  descripcion: string | null
+  precio: number
+  imagen: string | null
+  etiqueta?: string | null
+}
+
 interface MenuPublicoData {
   cliente: {
     nombre: string
@@ -78,8 +92,11 @@ interface MenuPublicoData {
     horarioApertura?: string | null
     horarioCierre?: string | null
     horarioDias?: number[]
+    // Fase 19.3: título personalizable de la sección de Combos.
+    combosTituloSeccion?: string
   } | null
   categorias: CategoriaPublica[]
+  combos: ComboPublico[]
 }
 
 type Vista = 'menu' | 'checkout' | 'enviando' | 'exito' | 'error' | 'pago-exito' | 'pago-pendiente' | 'pago-error'
@@ -217,24 +234,60 @@ export default function MenuPublico() {
     return map
   }, [data])
 
-  const itemsCarrito = useMemo(
-    () =>
-      Array.from(carrito.entries())
-        .map(([productoId, cantidad]) => ({ producto: productosPorId.get(productoId), cantidad }))
-        .filter((i): i is { producto: ProductoPublico; cantidad: number } => !!i.producto && i.cantidad > 0),
-    [carrito, productosPorId],
-  )
+  const combosPorId = useMemo(() => {
+    const map = new Map<string, ComboPublico>()
+    for (const c of data?.combos ?? []) map.set(c.id, c)
+    return map
+  }, [data])
 
-  const totalCarrito = itemsCarrito.reduce((sum, i) => sum + i.producto.precio * i.cantidad, 0)
+  // Fase 19.3: el carrito sigue siendo un Map<string, number>, pero la
+  // clave ahora puede ser un id de producto (tal cual) o un id de combo
+  // prefijado como `combo:<id>` -- mismo criterio que Mesa.tsx en
+  // Comandas (Fase 19.2), para no duplicar el estado del carrito en dos
+  // estructuras separadas.
+  interface ItemCarrito {
+    key: string
+    nombre: string
+    precio: number
+    cantidad: number
+    productoId?: string
+    comboId?: string
+  }
+
+  const itemsCarrito = useMemo(() => {
+    const result: ItemCarrito[] = []
+    for (const [key, cantidad] of carrito.entries()) {
+      if (cantidad <= 0) continue
+      if (key.startsWith('combo:')) {
+        const comboId = key.slice('combo:'.length)
+        const combo = combosPorId.get(comboId)
+        if (!combo) continue
+        result.push({
+          key,
+          nombre: combo.etiqueta ? `${combo.nombre} (${combo.etiqueta})` : combo.nombre,
+          precio: combo.precio,
+          cantidad,
+          comboId,
+        })
+      } else {
+        const producto = productosPorId.get(key)
+        if (!producto) continue
+        result.push({ key, nombre: producto.nombre, precio: producto.precio, cantidad, productoId: key })
+      }
+    }
+    return result
+  }, [carrito, productosPorId, combosPorId])
+
+  const totalCarrito = itemsCarrito.reduce((sum, i) => sum + i.precio * i.cantidad, 0)
   const cantidadCarrito = itemsCarrito.reduce((sum, i) => sum + i.cantidad, 0)
 
-  function cambiarCantidad(productoId: string, delta: number) {
+  function cambiarCantidad(key: string, delta: number) {
     setCarrito((prev) => {
       const next = new Map(prev)
-      const actual = next.get(productoId) ?? 0
+      const actual = next.get(key) ?? 0
       const nueva = actual + delta
-      if (nueva <= 0) next.delete(productoId)
-      else next.set(productoId, nueva)
+      if (nueva <= 0) next.delete(key)
+      else next.set(key, nueva)
       return next
     })
   }
@@ -259,7 +312,9 @@ export default function MenuPublico() {
       p_canal_cumplimiento: modalidad,
       p_direccion: modalidad === 'retiro' ? 'Retiro en el local' : direccion.trim(),
       p_notas: notas.trim() || null,
-      p_items: itemsCarrito.map((i) => ({ productoId: i.producto.id, cantidad: i.cantidad })),
+      p_items: itemsCarrito.map((i) =>
+        i.comboId ? { comboId: i.comboId, cantidad: i.cantidad } : { productoId: i.productoId, cantidad: i.cantidad },
+      ),
     })
 
     if (error) {
@@ -333,7 +388,7 @@ export default function MenuPublico() {
     )
   }
 
-  const { cliente, categorias } = data
+  const { cliente, categorias, combos } = data
   const color = cliente.colorMarca ?? '#111827'
 
   if (vista === 'exito') {
@@ -449,11 +504,11 @@ export default function MenuPublico() {
         <div className="mx-auto flex max-w-lg flex-col gap-4 px-4 pt-4">
           <div className="flex flex-col gap-2 rounded-lg border bg-white p-3">
             {itemsCarrito.map((i) => (
-              <div key={i.producto.id} className="flex items-center justify-between text-sm">
+              <div key={i.key} className="flex items-center justify-between text-sm">
                 <span>
-                  {i.cantidad} × {i.producto.nombre}
+                  {i.cantidad} × {i.nombre}
                 </span>
-                <span>{formatARS(i.producto.precio * i.cantidad)}</span>
+                <span>{formatARS(i.precio * i.cantidad)}</span>
               </div>
             ))}
             <div className="flex items-center justify-between border-t pt-2 font-semibold">
@@ -585,10 +640,77 @@ export default function MenuPublico() {
           </div>
         )}
 
-        {categorias.length === 0 && (
+        {categorias.length === 0 && combos.length === 0 && (
           <p className="text-muted-foreground text-center text-sm">
             Todavía no hay productos publicados en este menú.
           </p>
+        )}
+
+        {combos.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <h2 className="text-lg font-semibold" style={{ color }}>
+              {cliente.combosTituloSeccion || 'Combos'}
+            </h2>
+            <div className="flex flex-col gap-3">
+              {combos.map((c) => {
+                const key = `combo:${c.id}`
+                const cantidadEnCarrito = carrito.get(key) ?? 0
+                return (
+                  <div key={c.id} className="flex items-center gap-3 rounded-lg border bg-white p-3">
+                    {c.imagen ? (
+                      <img src={c.imagen} alt={c.nombre} className="h-16 w-16 flex-shrink-0 rounded-md object-cover" />
+                    ) : (
+                      <div className="h-16 w-16 flex-shrink-0 rounded-md bg-gray-100" />
+                    )}
+                    <div className="flex flex-1 flex-col gap-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium">{c.nombre}</span>
+                        {c.etiqueta && (
+                          <span
+                            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                            style={{ backgroundColor: color }}
+                          >
+                            {c.etiqueta}
+                          </span>
+                        )}
+                      </div>
+                      {c.descripcion && <span className="text-muted-foreground text-xs">{c.descripcion}</span>}
+                      <span className="whitespace-nowrap font-semibold">{formatARS(c.precio)}</span>
+                    </div>
+                    {!estaAbierto ? (
+                      <span className="text-muted-foreground text-[11px]">Cerrado</span>
+                    ) : cantidadEnCarrito === 0 ? (
+                      <button
+                        onClick={() => cambiarCantidad(key, 1)}
+                        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-white"
+                        style={{ backgroundColor: color }}
+                        aria-label={`Agregar ${c.nombre}`}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <button
+                          onClick={() => cambiarCantidad(key, -1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-full border"
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="w-4 text-center text-sm font-medium">{cantidadEnCarrito}</span>
+                        <button
+                          onClick={() => cambiarCantidad(key, 1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-white"
+                          style={{ backgroundColor: color }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         )}
 
         {categorias.map((cat) => (
