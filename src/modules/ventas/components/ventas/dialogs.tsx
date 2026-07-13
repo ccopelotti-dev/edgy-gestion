@@ -3,9 +3,9 @@
 // Edgy Gestión · React 19 + Radix UI + Tailwind CSS 4
 // ============================================================
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2 } from 'lucide-react';
+import { X, Plus, Trash2, Search, ShieldCheck } from 'lucide-react';
 
 import type {
   Cliente,
@@ -33,6 +33,8 @@ import {
 } from '../../types';
 
 import { formatARS, todayISO } from '../../lib/format';
+import { supabase } from '@/lib/supabase';
+import { useClienteActual } from '@/hooks/useClienteActual';
 
 // ─── Shared styles ───────────────────────────────────────────
 
@@ -351,6 +353,10 @@ interface ItemRow {
   precioUnitario: number;
   descuento: number;
   alicuotaIva: number;
+  /** Vínculo opcional al catálogo real (productos-stock) -- Fase 18 del
+   * refactor. Si se deja sin vincular, la línea sigue siendo texto libre
+   * como siempre (fallback manual, comportamiento default sin cambios). */
+  productoId?: string;
 }
 
 function newItemRow(): ItemRow {
@@ -367,6 +373,21 @@ function newItemRow(): ItemRow {
 /** Una fila de ítem se considera incompleta si falta la descripción o el precio. */
 function filaItemIncompleta(item: ItemRow): boolean {
   return !item.descripcion.trim() || item.precioUnitario <= 0;
+}
+
+// Fase 18: selector de catálogo en "Nuevo comprobante" -- versión simplificada
+// (sin variantes ni garantía) del mismo patrón ya usado en Punto de Venta
+// (Fase 6c del refactor de Productos). El precio de cada producto se
+// resuelve igual que en PuntoDeVenta.tsx: si el cliente configuró una lista
+// de precio para Ventas/Facturación, se usa el override manual en
+// producto_precios (si existe) o costo * (1 + %recargo); si no hay lista
+// configurada, se usa precio_venta del producto (comportamiento default).
+interface ProductoCatalogoItem {
+  id: string;
+  nombre: string;
+  precioVenta: number;
+  stock: number;
+  controlaStock: boolean;
 }
 
 export function ComprobanteDialog({
@@ -390,6 +411,12 @@ export function ComprobanteDialog({
   const [intentoGuardar, setIntentoGuardar] = useState(false);
   const itemsSectionRef = useRef<HTMLDivElement>(null);
 
+  // Fase 18: catálogo de productos para el buscador (ver ProductoCatalogoItem
+  // arriba). Se carga solo mientras el diálogo está abierto.
+  const { cliente: clienteTenant } = useClienteActual();
+  const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoItem[]>([]);
+  const [busquedaProducto, setBusquedaProducto] = useState('');
+
   useEffect(() => {
     if (open) {
       setTipo('factura');
@@ -401,8 +428,83 @@ export function ComprobanteDialog({
       setDescuentoGeneral(0);
       setErrors({});
       setIntentoGuardar(false);
+      setBusquedaProducto('');
     }
   }, [open, modoEmisionDefault]);
+
+  useEffect(() => {
+    if (!open || !clienteTenant?.id) return;
+    let activo = true;
+    const listaId = clienteTenant.lista_precio_ventas_id;
+
+    async function cargarCatalogo() {
+      const [productosRes, listaRes, overridesRes] = await Promise.all([
+        supabase
+          .from('productos')
+          .select('id, nombre, precio_venta, costo, stock, controla_stock')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('disponible', true)
+          .eq('estado', 'activo')
+          .order('nombre'),
+        listaId
+          ? supabase.from('listas_precio').select('porcentaje_recargo').eq('id', listaId).maybeSingle()
+          : Promise.resolve({ data: null } as { data: { porcentaje_recargo: number } | null }),
+        listaId
+          ? supabase.from('producto_precios').select('producto_id, precio').eq('lista_id', listaId)
+          : Promise.resolve({ data: [] as { producto_id: string; precio: number }[] }),
+      ]);
+
+      if (!activo) return;
+
+      const porcentaje = listaRes.data ? Number(listaRes.data.porcentaje_recargo) : 0;
+      const overridesPorProducto = new Map<string, number>();
+      for (const o of overridesRes.data ?? []) {
+        overridesPorProducto.set(o.producto_id, Number(o.precio));
+      }
+
+      setProductosCatalogo(
+        ((productosRes.data ?? []) as any[]).map((p) => {
+          const override = overridesPorProducto.get(p.id);
+          const calculado = Number(p.costo) * (1 + porcentaje / 100);
+          const precioVenta = listaId ? override ?? calculado : Number(p.precio_venta);
+          return {
+            id: p.id,
+            nombre: p.nombre,
+            precioVenta,
+            stock: Number(p.stock),
+            controlaStock: !!p.controla_stock,
+          } as ProductoCatalogoItem;
+        }),
+      );
+    }
+
+    cargarCatalogo();
+    return () => {
+      activo = false;
+    };
+  }, [open, clienteTenant?.id, clienteTenant?.lista_precio_ventas_id]);
+
+  const sugerenciasProducto = useMemo(() => {
+    const q = busquedaProducto.trim().toLowerCase();
+    if (!q) return [];
+    return productosCatalogo.filter((p) => p.nombre.toLowerCase().includes(q)).slice(0, 8);
+  }, [busquedaProducto, productosCatalogo]);
+
+  const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogoItem) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        key: generarId(),
+        descripcion: producto.nombre,
+        cantidad: 1,
+        precioUnitario: producto.precioVenta,
+        descuento: 0,
+        alicuotaIva: 21,
+        productoId: producto.id,
+      },
+    ]);
+    setBusquedaProducto('');
+  }, []);
 
   const updateItem = (index: number, field: keyof ItemRow, value: string | number) => {
     setItems((prev) =>
@@ -473,6 +575,7 @@ export function ComprobanteDialog({
           alicuotaIva: item.alicuotaIva,
           subtotal,
           montoIva,
+          productoId: item.productoId,
         };
       }),
     });
@@ -597,6 +700,39 @@ export function ComprobanteDialog({
                   <p className="text-xs text-red-700">{errors.items}</p>
                 </div>
               )}
+
+              {/* Fase 18: buscador de catálogo -- clic en una sugerencia agrega
+                  una fila ya vinculada al producto (precio resuelto por lista
+                  de precio). La carga manual sigue disponible como fallback
+                  vía el botón "Agregar" y edición directa de la fila. */}
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={busquedaProducto}
+                  onChange={(e) => setBusquedaProducto(e.target.value)}
+                  placeholder="Buscar producto en el catálogo..."
+                  className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+                />
+                {sugerenciasProducto.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                    {sugerenciasProducto.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleAgregarLineaCatalogo(p)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      >
+                        <span className="text-gray-900">{p.nombre}</span>
+                        <span className="text-gray-500">
+                          {formatARS(p.precioVenta)}
+                          {p.controlaStock ? ` · Stock ${p.stock}` : ''}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
