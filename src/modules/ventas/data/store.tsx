@@ -481,6 +481,7 @@ function comprobanteItemToRow(item: ComprobanteItem, comprobanteId: string) {
     id: item.id,
     comprobante_id: comprobanteId,
     producto_id: item.productoId ?? null,
+    combo_id: item.comboId ?? null,
     descripcion: item.descripcion,
     cantidad: item.cantidad,
     precio_unitario: item.precioUnitario,
@@ -816,6 +817,7 @@ function comprobanteItemFromRow(r: any): ComprobanteItem {
   return {
     id: r.id,
     productoId: r.producto_id ?? undefined,
+    comboId: r.combo_id ?? undefined,
     descripcion: r.descripcion,
     cantidad: Number(r.cantidad),
     precioUnitario: Number(r.precio_unitario),

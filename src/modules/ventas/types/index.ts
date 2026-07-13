@@ -203,6 +203,10 @@ export type MedioPago =
 export interface ComprobanteItem {
   id: string;
   productoId?: string;
+  /** Vínculo opcional a un Combo del catálogo (Fase 19) -- mutuamente
+   * excluyente con productoId: una línea vinculada a un combo descuenta
+   * stock de los componentes fijos de ESE combo, no de un producto único. */
+  comboId?: string;
   descripcion: string;
   cantidad: number;
   precioUnitario: number;

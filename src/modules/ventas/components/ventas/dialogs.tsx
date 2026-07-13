@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2, Search, ShieldCheck } from 'lucide-react';
+import { X, Plus, Trash2, Search, ShieldCheck, Tag } from 'lucide-react';
 
 import type {
   Cliente,
@@ -357,6 +357,11 @@ interface ItemRow {
    * refactor. Si se deja sin vincular, la línea sigue siendo texto libre
    * como siempre (fallback manual, comportamiento default sin cambios). */
   productoId?: string;
+  /** Vínculo opcional a un Combo del catálogo -- Fase 19.1. Mutuamente
+   * excluyente con productoId: al facturar, esta línea descuenta stock
+   * de los componentes fijos del combo (ver descontarStockVenta.ts),
+   * no de un producto único. */
+  comboId?: string;
 }
 
 function newItemRow(): ItemRow {
@@ -390,6 +395,22 @@ interface ProductoCatalogoItem {
   controlaStock: boolean;
 }
 
+// Fase 19.1: los combos también son vendibles desde acá -- no tienen stock
+// propio (se descuenta el de sus componentes fijos al facturar) ni lista de
+// precio (precioVenta es el precio final cargado en Productos y Stock >
+// Combos). `etiqueta` es el badge opcional (Fase 19 prep) que se muestra
+// junto al nombre en la sugerencia, si el combo tiene uno cargado.
+interface ComboCatalogoItem {
+  id: string;
+  nombre: string;
+  precioVenta: number;
+  etiqueta?: string;
+}
+
+type SugerenciaCatalogo =
+  | { tipo: 'producto'; item: ProductoCatalogoItem }
+  | { tipo: 'combo'; item: ComboCatalogoItem };
+
 export function ComprobanteDialog({
   open,
   onOpenChange,
@@ -415,6 +436,9 @@ export function ComprobanteDialog({
   // arriba). Se carga solo mientras el diálogo está abierto.
   const { cliente: clienteTenant } = useClienteActual();
   const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoItem[]>([]);
+  // Fase 19.1: combos disponibles del catálogo, cargados junto con los
+  // productos (misma condición `open` + cliente tenant).
+  const [combosCatalogo, setCombosCatalogo] = useState<ComboCatalogoItem[]>([]);
   const [busquedaProducto, setBusquedaProducto] = useState('');
 
   useEffect(() => {
@@ -438,7 +462,7 @@ export function ComprobanteDialog({
     const listaId = clienteTenant.lista_precio_ventas_id;
 
     async function cargarCatalogo() {
-      const [productosRes, listaRes, overridesRes] = await Promise.all([
+      const [productosRes, listaRes, overridesRes, combosRes] = await Promise.all([
         supabase
           .from('productos')
           .select('id, nombre, precio_venta, costo, stock, controla_stock')
@@ -452,6 +476,14 @@ export function ComprobanteDialog({
         listaId
           ? supabase.from('producto_precios').select('producto_id, precio').eq('lista_id', listaId)
           : Promise.resolve({ data: [] as { producto_id: string; precio: number }[] }),
+        // Fase 19.1: los combos no usan lista de precio (precio_venta es el
+        // precio final cargado a mano en Productos y Stock > Combos).
+        supabase
+          .from('combos')
+          .select('id, nombre, precio_venta, etiqueta')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('disponible', true)
+          .order('nombre'),
       ]);
 
       if (!activo) return;
@@ -476,6 +508,15 @@ export function ComprobanteDialog({
           } as ProductoCatalogoItem;
         }),
       );
+
+      setCombosCatalogo(
+        ((combosRes.data ?? []) as any[]).map((c) => ({
+          id: c.id,
+          nombre: c.nombre,
+          precioVenta: Number(c.precio_venta),
+          etiqueta: c.etiqueta ?? undefined,
+        })),
+      );
     }
 
     cargarCatalogo();
@@ -484,11 +525,20 @@ export function ComprobanteDialog({
     };
   }, [open, clienteTenant?.id, clienteTenant?.lista_precio_ventas_id]);
 
-  const sugerenciasProducto = useMemo(() => {
+  // Fase 19.1: la búsqueda ahora combina productos y combos disponibles --
+  // los combos se listan primero (suelen ser la promoción que el cliente
+  // quiere ofrecer activamente), hasta 8 sugerencias en total.
+  const sugerenciasCatalogo = useMemo<SugerenciaCatalogo[]>(() => {
     const q = busquedaProducto.trim().toLowerCase();
     if (!q) return [];
-    return productosCatalogo.filter((p) => p.nombre.toLowerCase().includes(q)).slice(0, 8);
-  }, [busquedaProducto, productosCatalogo]);
+    const combos: SugerenciaCatalogo[] = combosCatalogo
+      .filter((c) => c.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'combo' as const, item }));
+    const productos: SugerenciaCatalogo[] = productosCatalogo
+      .filter((p) => p.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'producto' as const, item }));
+    return [...combos, ...productos].slice(0, 8);
+  }, [busquedaProducto, productosCatalogo, combosCatalogo]);
 
   const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogoItem) => {
     setItems((prev) => [
@@ -501,6 +551,22 @@ export function ComprobanteDialog({
         descuento: 0,
         alicuotaIva: 21,
         productoId: producto.id,
+      },
+    ]);
+    setBusquedaProducto('');
+  }, []);
+
+  const handleAgregarLineaCombo = useCallback((combo: ComboCatalogoItem) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        key: generarId(),
+        descripcion: combo.etiqueta ? `${combo.nombre} (${combo.etiqueta})` : combo.nombre,
+        cantidad: 1,
+        precioUnitario: combo.precioVenta,
+        descuento: 0,
+        alicuotaIva: 21,
+        comboId: combo.id,
       },
     ]);
     setBusquedaProducto('');
@@ -576,6 +642,7 @@ export function ComprobanteDialog({
           subtotal,
           montoIva,
           productoId: item.productoId,
+          comboId: item.comboId,
         };
       }),
     });
@@ -714,22 +781,42 @@ export function ComprobanteDialog({
                   placeholder="Buscar producto en el catálogo..."
                   className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/20"
                 />
-                {sugerenciasProducto.length > 0 && (
+                {sugerenciasCatalogo.length > 0 && (
                   <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-                    {sugerenciasProducto.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => handleAgregarLineaCatalogo(p)}
-                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
-                      >
-                        <span className="text-gray-900">{p.nombre}</span>
-                        <span className="text-gray-500">
-                          {formatARS(p.precioVenta)}
-                          {p.controlaStock ? ` · Stock ${p.stock}` : ''}
-                        </span>
-                      </button>
-                    ))}
+                    {sugerenciasCatalogo.map((s) =>
+                      s.tipo === 'combo' ? (
+                        <button
+                          key={`combo-${s.item.id}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaCombo(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1.5 text-gray-900">
+                            <Tag className="h-3.5 w-3.5 text-pink-600" />
+                            {s.item.nombre}
+                            {s.item.etiqueta && (
+                              <span className="inline-flex items-center rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] font-medium text-pink-700">
+                                {s.item.etiqueta}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-gray-500">{formatARS(s.item.precioVenta)}</span>
+                        </button>
+                      ) : (
+                        <button
+                          key={`producto-${s.item.id}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaCatalogo(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="text-gray-900">{s.item.nombre}</span>
+                          <span className="text-gray-500">
+                            {formatARS(s.item.precioVenta)}
+                            {s.item.controlaStock ? ` · Stock ${s.item.stock}` : ''}
+                          </span>
+                        </button>
+                      ),
+                    )}
                   </div>
                 )}
               </div>

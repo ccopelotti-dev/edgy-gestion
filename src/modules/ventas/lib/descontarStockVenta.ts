@@ -26,6 +26,61 @@ export interface LineaStock {
   cantidad: number
 }
 
+// Fase 19.1: una línea de venta ahora puede estar vinculada a un Combo en
+// vez de a un Producto único. El combo no tiene stock propio -- vender N
+// combos descuenta N * cantidad de cada uno de sus componentes fijos
+// (combo_componentes_fijos). Los componentes "a elección" (rubro + cantidad
+// a elegir) quedan fuera de este descuento por ahora: la elección real del
+// cliente no viaja en la línea de comprobante todavía, así que no hay forma
+// de saber qué producto puntual habría que descontar -- documentado como
+// limitación conocida, no boquea el resto del flujo.
+export interface LineaVentaCatalogo {
+  productoId?: string
+  comboId?: string
+  varianteId?: string
+  cantidad: number
+}
+
+/**
+ * Expande líneas de venta (producto o combo) a líneas de stock puro
+ * (siempre productoId), resolviendo los componentes fijos de cada combo
+ * involucrado. Se llama ANTES de `descontarStockPorVenta` para que ésta
+ * siga operando únicamente sobre productos, sin tener que saber nada de
+ * combos.
+ */
+export async function expandirLineasConCombos(lineas: LineaVentaCatalogo[]): Promise<LineaStock[]> {
+  const resultado: LineaStock[] = []
+  const comboIds = Array.from(new Set(lineas.filter((l) => l.comboId).map((l) => l.comboId!)))
+
+  const componentesPorCombo = new Map<string, { productoId: string; cantidad: number }[]>()
+  if (comboIds.length > 0) {
+    const { data } = await supabase
+      .from('combo_componentes_fijos')
+      .select('combo_id, producto_id, cantidad')
+      .in('combo_id', comboIds)
+
+    for (const row of (data ?? []) as { combo_id: string; producto_id: string; cantidad: number }[]) {
+      const arr = componentesPorCombo.get(row.combo_id) ?? []
+      arr.push({ productoId: row.producto_id, cantidad: Number(row.cantidad) })
+      componentesPorCombo.set(row.combo_id, arr)
+    }
+  }
+
+  for (const l of lineas) {
+    if (l.cantidad <= 0) continue
+    if (l.comboId) {
+      const componentes = componentesPorCombo.get(l.comboId) ?? []
+      for (const comp of componentes) {
+        resultado.push({ productoId: comp.productoId, cantidad: comp.cantidad * l.cantidad })
+      }
+    } else if (l.productoId) {
+      resultado.push({ productoId: l.productoId, varianteId: l.varianteId, cantidad: l.cantidad })
+    }
+  }
+
+  return resultado
+}
+
 export async function descontarStockPorVenta(
   lineas: LineaStock[],
   clienteTenantId: string,

@@ -38,6 +38,7 @@ import {
 } from '../components/ventas/display';
 import { ComprobanteDialog, CobroDialog } from '../components/ventas/dialogs';
 import { autorizarComprobanteArca } from '../lib/arca';
+import { descontarStockPorVenta, expandirLineasConCombos } from '../lib/descontarStockVenta';
 import {
   formatDate,
   formatARS,
@@ -78,7 +79,7 @@ const MODO_EMISION_LABEL: Record<ModoEmision, string> = {
 export default function Comprobantes() {
   const todosComprobantes = useComprobantes();
   const clientes = useClientes();
-  const { ordenes, config, cobros: todosCobros } = useVentas();
+  const { ordenes, config, cobros: todosCobros, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
 
   // ── Filtros ───────────────────────────────────────────────
@@ -201,6 +202,10 @@ export default function Comprobantes() {
     const totalBruto = subtotal + montoIva;
     const total = totalBruto * (1 - data.descuentoGeneral / 100);
     const comprobanteId = generarId();
+    // Capturado ANTES del dispatch: ADD_COMPROBANTE incrementa el contador,
+    // así que este es el número que le va a tocar a este comprobante en
+    // particular (mismo criterio que PuntoDeVenta.tsx).
+    const numeroAsignado = nextNumeroComprobante[data.tipo];
 
     dispatch({
       type: 'ADD_COMPROBANTE',
@@ -225,6 +230,32 @@ export default function Comprobantes() {
     });
 
     setComprobanteDialogOpen(false);
+
+    // Fase 19.1: descuento de stock al facturar -- gap pre-existente, este
+    // diálogo (a diferencia de PuntoDeVenta.tsx) nunca había descontado
+    // stock de las líneas vinculadas al catálogo. Se agrega acá con el
+    // mismo criterio fire-and-forget que el resto de los side-effects de
+    // Ventas: el comprobante ya quedó creado, si falla el descuento no se
+    // revierte la venta pero queda constancia en consola. Solo aplica a
+    // 'factura' (una nota de crédito debería revertir stock, no
+    // descontarlo de nuevo -- eso queda fuera de este alcance).
+    if (data.tipo === 'factura' && empresaActual?.id) {
+      const lineasCatalogo = items
+        .filter((i) => i.productoId || i.comboId)
+        .map((i) => ({ productoId: i.productoId, comboId: i.comboId, cantidad: i.cantidad }));
+
+      if (lineasCatalogo.length > 0) {
+        expandirLineasConCombos(lineasCatalogo)
+          .then((lineasStock) => {
+            if (lineasStock.length === 0) return;
+            return descontarStockPorVenta(lineasStock, empresaActual!.id, numeroAsignado, data.fecha);
+          })
+          .catch(() => {
+            // eslint-disable-next-line no-console
+            console.error('No se pudo descontar el stock de la venta', numeroAsignado);
+          });
+      }
+    }
 
     // Fase 11: si es electrónica, pedirle el CAE a ARCA justo después de
     // guardar. No bloquea el cierre del diálogo -- el comprobante ya
