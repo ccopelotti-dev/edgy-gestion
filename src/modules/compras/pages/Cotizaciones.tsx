@@ -16,8 +16,12 @@ import {
   MessageSquare,
   ClipboardList,
   FileSearch,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { descargarCotizacionPdf } from '../lib/pdfComprobantes';
 import {
   useCotizaciones,
   useProveedores,
@@ -54,6 +58,9 @@ export default function Cotizaciones() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editCotizacion, setEditCotizacion] = useState<any>(null);
+  // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
+  const { cliente: empresaActual } = useClienteActual();
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
 
   // ── Datos filtrados ───────────────────────────────────────
 
@@ -142,6 +149,17 @@ export default function Cotizaciones() {
     dispatch({ type: 'CONVERTIR_COTIZACION_A_OC', payload: { cotizacionId } });
   };
 
+  const handleDescargarPdf = async (cot: (typeof cotizaciones)[number]) => {
+    if (!empresaActual) return;
+    setGenerandoPdfId(cot.id);
+    try {
+      const proveedor = proveedores.find((p) => p.id === cot.proveedorId);
+      await descargarCotizacionPdf(empresaActual, proveedor, cot, nombreProveedor(cot.proveedorId));
+    } finally {
+      setGenerandoPdfId(null);
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────
 
   const estados: EstadoCotizacion[] = ['borrador', 'enviado', 'respondido', 'aprobado', 'vencido', 'cancelado'];
@@ -198,6 +216,7 @@ export default function Cotizaciones() {
                 <th className="px-4 py-3 font-medium">Fecha</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3 w-10" />
                 <th className="px-4 py-3 font-medium">Acciones</th>
               </tr>
             </thead>
@@ -220,6 +239,20 @@ export default function Cotizaciones() {
                       <td className="px-4 py-3 text-gray-600">{formatDate(cot.fecha)}</td>
                       <td className="px-4 py-3 text-right"><Amount value={cot.total} /></td>
                       <td className="px-4 py-3"><EstadoCotizacionBadge estado={cot.estado} /></td>
+                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleDescargarPdf(cot)}
+                          disabled={generandoPdfId === cot.id}
+                          title="Descargar PDF"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                        >
+                          {generandoPdfId === cot.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                        </button>
+                      </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           {cot.estado === 'borrador' && (
@@ -267,7 +300,7 @@ export default function Cotizaciones() {
                     {/* Expanded detail */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={7} className="bg-gray-50/50 px-8 py-4">
+                        <td colSpan={8} className="bg-gray-50/50 px-8 py-4">
                           {/* Items */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
                           <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">

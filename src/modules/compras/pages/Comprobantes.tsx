@@ -12,8 +12,12 @@ import {
   DollarSign,
   XCircle,
   Receipt,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { descargarComprobanteCompraPdf } from '../lib/pdfComprobantes';
 import {
   useComprobantesCompra,
   useProveedores,
@@ -64,6 +68,9 @@ export default function Comprobantes() {
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
   const [pagoDialogOpen, setPagoDialogOpen] = useState(false);
   const [pagoComprobanteId, setPagoComprobanteId] = useState<string | null>(null);
+  // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
+  const { cliente: empresaActual } = useClienteActual();
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
 
   // ── KPIs ─────────────────────────────────────────────────
 
@@ -156,6 +163,17 @@ export default function Comprobantes() {
 
   const handleAnular = (id: string) => {
     dispatch({ type: 'ANULAR_COMPROBANTE_COMPRA', payload: { id } });
+  };
+
+  const handleDescargarPdf = async (comp: (typeof comprobantes)[number]) => {
+    if (!empresaActual) return;
+    setGenerandoPdfId(comp.id);
+    try {
+      const proveedor = proveedores.find((p) => p.id === comp.proveedorId);
+      await descargarComprobanteCompraPdf(empresaActual, proveedor, comp, nombreProveedor(comp.proveedorId));
+    } finally {
+      setGenerandoPdfId(null);
+    }
   };
 
   const handleRegistrarPago = (comprobanteId: string) => {
@@ -278,6 +296,7 @@ export default function Comprobantes() {
                 <th className="px-4 py-3 text-right font-medium">Pendiente</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
                 <th className="px-4 py-3 font-medium">Pago</th>
+                <th className="px-4 py-3 w-10" />
                 <th className="px-4 py-3 font-medium">Acciones</th>
               </tr>
             </thead>
@@ -310,6 +329,20 @@ export default function Comprobantes() {
                       <td className="px-4 py-3 text-right"><Amount value={comp.saldoPendiente} size="sm" /></td>
                       <td className="px-4 py-3"><EstadoComprobanteBadge estado={comp.estado} /></td>
                       <td className="px-4 py-3"><MedioPagoBadge medio={comp.medioPago} /></td>
+                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleDescargarPdf(comp)}
+                          disabled={generandoPdfId === comp.id}
+                          title="Descargar PDF"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                        >
+                          {generandoPdfId === comp.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                        </button>
+                      </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           {(comp.estado === 'pendiente' || comp.estado === 'pagado_parcial') && (
@@ -329,7 +362,7 @@ export default function Comprobantes() {
                     {/* Expanded detail */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={12} className="bg-gray-50/50 px-8 py-4">
+                        <td colSpan={13} className="bg-gray-50/50 px-8 py-4">
                           {/* Items with IVA */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
                           <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">

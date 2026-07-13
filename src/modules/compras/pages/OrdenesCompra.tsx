@@ -14,8 +14,12 @@ import {
   XCircle,
   FileText,
   ClipboardList,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { descargarOrdenCompraPdf } from '../lib/pdfComprobantes';
 import {
   useOrdenesCompra,
   useProveedores,
@@ -64,6 +68,9 @@ export default function OrdenesCompra() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
+  // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
+  const { cliente: empresaActual } = useClienteActual();
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
 
   // ── Inline form state ─────────────────────────────────────
 
@@ -166,6 +173,17 @@ export default function OrdenesCompra() {
 
   const cambiarEstado = (id: string, nuevoEstado: EstadoOrdenCompra) => {
     dispatch({ type: 'CAMBIAR_ESTADO_OC', payload: { id, nuevoEstado } });
+  };
+
+  const handleDescargarPdf = async (oc: (typeof ordenesCompra)[number]) => {
+    if (!empresaActual) return;
+    setGenerandoPdfId(oc.id);
+    try {
+      const proveedor = proveedores.find((p) => p.id === oc.proveedorId);
+      await descargarOrdenCompraPdf(empresaActual, proveedor, oc, nombreProveedor(oc.proveedorId));
+    } finally {
+      setGenerandoPdfId(null);
+    }
   };
 
   const handleSaveComprobante = (data: {
@@ -359,6 +377,7 @@ export default function OrdenesCompra() {
                 <th className="px-4 py-3 font-medium">Entrega</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3 w-10" />
                 <th className="px-4 py-3 font-medium">Acciones</th>
               </tr>
             </thead>
@@ -383,6 +402,20 @@ export default function OrdenesCompra() {
                       <td className="px-4 py-3 text-gray-600">{oc.fechaEntrega ? formatDate(oc.fechaEntrega) : '—'}</td>
                       <td className="px-4 py-3 text-right"><Amount value={oc.total} /></td>
                       <td className="px-4 py-3"><EstadoOCBadge estado={oc.estado} /></td>
+                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleDescargarPdf(oc)}
+                          disabled={generandoPdfId === oc.id}
+                          title="Descargar PDF"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                        >
+                          {generandoPdfId === oc.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                        </button>
+                      </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           {oc.estado === 'pendiente' && (
@@ -423,7 +456,7 @@ export default function OrdenesCompra() {
                     {/* Expanded detail */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={8} className="bg-gray-50/50 px-8 py-4">
+                        <td colSpan={9} className="bg-gray-50/50 px-8 py-4">
                           {/* Items */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
                           <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
