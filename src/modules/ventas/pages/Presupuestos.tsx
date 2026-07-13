@@ -16,8 +16,12 @@ import {
   Link2,
   Calendar,
   FileText,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { descargarPresupuestoPdf } from '../lib/pdfComprobantes';
 import {
   usePresupuestos,
   useClientes,
@@ -74,6 +78,11 @@ export default function Presupuestos() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editPresupuesto, setEditPresupuesto] = useState<Presupuesto | null>(null);
+  // Fase 17: ícono de descarga de PDF -- mismo motor compartido que
+  // Comprobantes.tsx (src/lib/comprobantes-pdf), con tipoLabel
+  // "Presupuesto" en vez de Factura/Recibo.
+  const { cliente: empresaActual } = useClienteActual();
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -154,6 +163,17 @@ export default function Presupuestos() {
 
   const handleToggleExpand = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
+  };
+
+  const handleDescargarPdf = async (pres: Presupuesto) => {
+    if (!empresaActual) return;
+    setGenerandoPdfId(pres.id);
+    try {
+      const cliente = clientes.find((c) => c.id === pres.clienteId);
+      await descargarPresupuestoPdf(empresaActual, cliente, pres, clienteNombre(pres.clienteId));
+    } finally {
+      setGenerandoPdfId(null);
+    }
   };
 
   // ── Render ────────────────────────────────────────────────
@@ -239,6 +259,7 @@ export default function Presupuestos() {
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
                 <th className="px-4 py-3 w-10" />
+                <th className="px-4 py-3 w-10" />
               </tr>
             </thead>
             <tbody>
@@ -254,6 +275,8 @@ export default function Presupuestos() {
                   onEditar={() => handleEditar(pres)}
                   onCancelar={() => handleCancelar(pres.id)}
                   onAprobar={(tipo) => handleAprobar(pres.id, tipo)}
+                  onDescargarPdf={() => handleDescargarPdf(pres)}
+                  generandoPdf={generandoPdfId === pres.id}
                 />
               ))}
             </tbody>
@@ -344,6 +367,8 @@ interface PresupuestoRowProps {
   onEditar: () => void;
   onCancelar: () => void;
   onAprobar: (tipo: TipoOrden) => void;
+  onDescargarPdf: () => void;
+  generandoPdf: boolean;
 }
 
 function PresupuestoRow({
@@ -356,6 +381,8 @@ function PresupuestoRow({
   onEditar,
   onCancelar,
   onAprobar,
+  onDescargarPdf,
+  generandoPdf,
 }: PresupuestoRowProps) {
   const p = presupuesto;
   const esReadOnly = p.estado === 'vencido' || p.estado === 'cancelado' || p.estado === 'aprobado';
@@ -382,6 +409,23 @@ function PresupuestoRow({
           <EstadoPresupuestoBadge estado={p.estado} />
         </td>
         <td className="px-4 py-3 text-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDescargarPdf();
+            }}
+            disabled={generandoPdf}
+            title="Descargar PDF"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+          >
+            {generandoPdf ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+          </button>
+        </td>
+        <td className="px-4 py-3 text-center">
           {isExpanded ? (
             <ChevronUp className="h-4 w-4 text-gray-400" />
           ) : (
@@ -393,7 +437,7 @@ function PresupuestoRow({
       {/* Panel expandido */}
       {isExpanded && (
         <tr>
-          <td colSpan={7} className="bg-gray-50 px-4 py-5">
+          <td colSpan={8} className="bg-gray-50 px-4 py-5">
             <div className="space-y-5">
               {/* Tabla de items */}
               <div>

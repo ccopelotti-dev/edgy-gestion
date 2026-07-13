@@ -13,8 +13,12 @@ import {
   TrendingUp,
   ShoppingBag,
   FileText,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { descargarComprobantePdf } from '../lib/pdfComprobantes';
 import { useDashboardStats, useComprobantes, useClientes } from '../data/store';
 import {
   KpiCard,
@@ -45,6 +49,11 @@ export default function Dashboard() {
   const stats = useDashboardStats();
   const comprobantes = useComprobantes();
   const clientes = useClientes();
+  const { cliente: empresaActual } = useClienteActual();
+  // Fase 17: ícono de descarga de PDF también en este listado -- id
+  // del comprobante que se está generando (deshabilita su botón
+  // mientras descarga el logo).
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
 
   // ── KPI según período seleccionado ────────────────────────
 
@@ -88,6 +97,17 @@ export default function Dashboard() {
 
   const nombreCliente = (clienteId: string) =>
     clientes.find((c) => c.id === clienteId)?.nombre ?? 'Desconocido';
+
+  const handleDescargarPdf = async (comp: Comprobante) => {
+    if (!empresaActual) return;
+    setGenerandoPdfId(comp.id);
+    try {
+      const cliente = clientes.find((c) => c.id === comp.clienteId);
+      await descargarComprobantePdf(empresaActual, cliente, comp, nombreCliente(comp.clienteId));
+    } finally {
+      setGenerandoPdfId(null);
+    }
+  };
 
   const diasVencido = (comp: Comprobante) => {
     const dias = daysUntil(comp.fecha);
@@ -250,6 +270,7 @@ export default function Dashboard() {
                   <th className="pb-2 font-medium">Fecha</th>
                   <th className="pb-2 text-right font-medium">Total</th>
                   <th className="pb-2 font-medium">Estado</th>
+                  <th className="pb-2 w-10" />
                 </tr>
               </thead>
               <tbody>
@@ -273,6 +294,20 @@ export default function Dashboard() {
                     </td>
                     <td className="py-2.5">
                       <EstadoComprobanteBadge estado={c.estado} />
+                    </td>
+                    <td className="py-2.5 text-center">
+                      <button
+                        onClick={() => handleDescargarPdf(c)}
+                        disabled={generandoPdfId === c.id}
+                        title="Descargar PDF"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                      >
+                        {generandoPdfId === c.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                      </button>
                     </td>
                   </tr>
                 ))}

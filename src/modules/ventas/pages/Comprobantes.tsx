@@ -21,10 +21,7 @@ import {
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
-import {
-  generarComprobantePdf,
-  type EmpresaParaPdf,
-} from '@/lib/comprobantes-pdf/generarComprobantePdf';
+import { descargarComprobantePdf } from '../lib/pdfComprobantes';
 import {
   useComprobantes,
   useClientes,
@@ -272,60 +269,7 @@ export default function Comprobantes() {
     setGenerandoPdfId(comp.id);
     try {
       const cliente = clienteById(comp.clienteId);
-      const empresaPdf: EmpresaParaPdf = {
-        nombre: empresaActual.nombre,
-        cuit: empresaActual.cuit,
-        direccion: empresaActual.direccion,
-        telefono: empresaActual.telefono,
-        logoUrl: empresaActual.logo_url,
-        colorMarca: empresaActual.color_marca,
-      };
-      await generarComprobantePdf(
-        empresaPdf,
-        {
-          tipoLabel: labelTipoComprobante(comp.tipo, comp.modoEmision),
-          numero: formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
-          fecha: formatDate(comp.fecha),
-          clienteNombre: cliente?.nombre ?? clienteNombre(comp.clienteId),
-          // "Consumidor Final" usa '0' como documento placeholder (ver
-          // clienteConsumidorFinal en ../types) -- no tiene sentido
-          // mostrarlo en el PDF, así que se omite específicamente para
-          // ese cliente en vez de asumir que cualquier '0' es inválido.
-          clienteDocumento:
-            cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.documento : null,
-          items: comp.items.map((i) => ({
-            descripcion: i.descripcion,
-            cantidad: i.cantidad,
-            precioUnitario: i.precioUnitario,
-            subtotal: i.subtotal,
-          })),
-          subtotal: comp.subtotal,
-          descuentoGeneral: comp.descuentoGeneral,
-          montoIva: comp.montoIva,
-          total: comp.total,
-          // Fase 11: fecha ISO sin formatear (necesaria para el QR
-          // fiscal) y datos de ARCA solo si el comprobante ya tiene
-          // CAE aprobado -- si no, el bloque de CAE/QR simplemente no
-          // se dibuja en el PDF.
-          fechaIso: comp.fecha,
-          afip:
-            comp.afip?.resultado === 'A' &&
-            comp.afip.cae &&
-            comp.afip.vencimientoCae &&
-            comp.afip.tipoComprobanteAfip !== undefined &&
-            comp.afip.numeroComprobante !== undefined
-              ? {
-                  cae: comp.afip.cae,
-                  vencimientoCae: comp.afip.vencimientoCae,
-                  puntoVenta: comp.afip.puntoVenta,
-                  tipoComprobanteAfip: comp.afip.tipoComprobanteAfip,
-                  numeroComprobante: comp.afip.numeroComprobante,
-                  docTipoReceptor: comp.afip.docTipoReceptor,
-                }
-              : undefined,
-        },
-        formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
-      );
+      await descargarComprobantePdf(empresaActual, cliente, comp, clienteNombre(comp.clienteId));
     } finally {
       setGenerandoPdfId(null);
     }
@@ -515,6 +459,7 @@ export default function Comprobantes() {
                 <th className="px-4 py-3 font-medium">Pago</th>
                 <th className="px-4 py-3 font-medium">Emision</th>
                 <th className="px-4 py-3 w-10" />
+                <th className="px-4 py-3 w-10" />
               </tr>
             </thead>
             <tbody>
@@ -669,6 +614,23 @@ function ComprobanteRow({
           )}
         </td>
         <td className="px-4 py-3 text-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDescargarPdf();
+            }}
+            disabled={generandoPdf}
+            title="Descargar PDF"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+          >
+            {generandoPdf ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+          </button>
+        </td>
+        <td className="px-4 py-3 text-center">
           {isExpanded ? (
             <ChevronUp className="h-4 w-4 text-gray-400" />
           ) : (
@@ -680,7 +642,7 @@ function ComprobanteRow({
       {/* Panel expandido */}
       {isExpanded && (
         <tr>
-          <td colSpan={12} className="bg-gray-50 px-4 py-5">
+          <td colSpan={13} className="bg-gray-50 px-4 py-5">
             <div className="space-y-5">
               {/* Tabla de items */}
               <div>
