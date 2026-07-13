@@ -126,7 +126,14 @@ export default function Combos() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <p className="font-medium">{c.nombre}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{c.nombre}</p>
+                      {c.etiqueta && (
+                        <span className="inline-flex items-center rounded-full bg-pink-100 px-2 py-0.5 text-xs font-medium text-pink-700 dark:bg-pink-900/30 dark:text-pink-400">
+                          {c.etiqueta}
+                        </span>
+                      )}
+                    </div>
                     {c.descripcion && (
                       <p className="text-muted-foreground text-xs">{c.descripcion}</p>
                     )}

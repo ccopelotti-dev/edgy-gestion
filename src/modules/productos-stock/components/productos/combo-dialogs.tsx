@@ -66,6 +66,7 @@ const emptyCombo: ComboFormData = {
   precioVenta: 0,
   descuentoPorcentaje: 0,
   imagenes: [],
+  etiqueta: '',
   disponible: true,
   componentesFijos: [],
   componentesEleccion: [],
@@ -121,6 +122,7 @@ export function ComboDialog({
           ...rest,
           imagenes: rest.imagenes ?? [],
           descuentoPorcentaje: rest.descuentoPorcentaje ?? 0,
+          etiqueta: rest.etiqueta ?? '',
           componentesFijos: rest.componentesFijos.map((cf) => ({ ...cf })),
           componentesEleccion: rest.componentesEleccion.map((ce) => ({ ...ce })),
         })
@@ -344,6 +346,7 @@ export function ComboDialog({
       nombre: nombreLimpio,
       descripcion: form.descripcion.trim(),
       descuentoPorcentaje: Math.min(Math.max(form.descuentoPorcentaje || 0, 0), 100),
+      etiqueta: form.etiqueta?.trim() || undefined,
     })
     onOpenChange(false)
   }
@@ -464,6 +467,21 @@ export function ComboDialog({
               placeholder="Texto de promoción, ej: 'Combo ideal para compartir en familia'"
               rows={2}
             />
+          </div>
+
+          {/* Etiqueta / badge -- Fase 19 (prep), a pedido del usuario */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Etiqueta / badge (opcional)</label>
+            <input
+              className={inputClass}
+              value={form.etiqueta ?? ''}
+              onChange={(e) => update('etiqueta', e.target.value)}
+              placeholder='Ej: "PROMO 2x1", "Black Friday", "Oportunidad"'
+            />
+            <p className="text-xs text-muted-foreground">
+              Se muestra como badge junto a este combo puntual en el catálogo. Dejalo vacío si no
+              querés resaltar nada especial.
+            </p>
           </div>
 
           {/* Descuento */}

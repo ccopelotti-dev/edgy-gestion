@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save, ShieldCheck, Zap, CreditCard, Clock } from 'lucide-react'
+import { Loader2, Save, ShieldCheck, Zap, CreditCard, Clock, Tag } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -59,6 +59,7 @@ interface FormEmpresa {
   horarioApertura: string
   horarioCierre: string
   horarioDias: number[]
+  combosTituloSeccion: string
 }
 
 const FORM_VACIO: FormEmpresa = {
@@ -77,6 +78,7 @@ const FORM_VACIO: FormEmpresa = {
   horarioApertura: '09:00',
   horarioCierre: '23:00',
   horarioDias: [0, 1, 2, 3, 4, 5, 6],
+  combosTituloSeccion: 'Combos',
 }
 
 // Fase 16: días de la semana, misma convención que JS Date.getDay().
@@ -173,6 +175,7 @@ export default function Empresa() {
       horarioApertura: (empresa.horarioApertura ?? '09:00').slice(0, 5),
       horarioCierre: (empresa.horarioCierre ?? '23:00').slice(0, 5),
       horarioDias: empresa.horarioDias.length > 0 ? empresa.horarioDias : [0, 1, 2, 3, 4, 5, 6],
+      combosTituloSeccion: empresa.combosTituloSeccion || 'Combos',
     })
   }, [empresa])
 
@@ -337,6 +340,7 @@ export default function Empresa() {
       horarioApertura: form.horarioApertura || null,
       horarioCierre: form.horarioCierre || null,
       horarioDias: form.horarioDias,
+      combosTituloSeccion: form.combosTituloSeccion.trim() || 'Combos',
       // Solo se manda si se subió un logo nuevo en esta sesión -- si
       // no, `guardar` no incluye logoUrl en el payload y se conserva
       // el que ya estaba.
@@ -508,6 +512,32 @@ export default function Empresa() {
                 </button>
               ))}
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Tag className="text-muted-foreground h-4 w-4" />
+            Combos y promociones
+          </CardTitle>
+          <CardDescription>
+            Fase 19 (prep) — nombre de la sección que agrupa tus combos en el catálogo público y
+            demás listados. Si no te gusta la palabra "Combos", poné lo que uses vos: "PROMO 2x1",
+            "Ofertas Black Friday", "Oportunidades", etc. Además, cada combo puede tener su propia
+            etiqueta puntual (se edita en Productos y Stock &gt; Combos).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-1.5 max-w-sm">
+            <Label htmlFor="combosTituloSeccion">Nombre de la sección</Label>
+            <Input
+              id="combosTituloSeccion"
+              value={form.combosTituloSeccion}
+              onChange={(e) => setForm({ ...form, combosTituloSeccion: e.target.value })}
+              placeholder="Combos"
+            />
           </div>
         </CardContent>
       </Card>

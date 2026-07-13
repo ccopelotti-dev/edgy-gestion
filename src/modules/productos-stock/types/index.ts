@@ -211,6 +211,14 @@ export interface Combo {
   descuentoPorcentaje: number
   /** Galería de fotos del combo (mismo patrón que Producto.imagenes, hasta MAX_IMAGENES_PRODUCTO). La primera es la principal. */
   imagenes: string[]
+  /**
+   * Etiqueta/badge opcional para resaltar una promoción puntual en el
+   * catálogo (ej: "PROMO 2x1", "Black Friday", "Oportunidad") -- Fase 19
+   * (prep), a pedido del usuario. undefined/'' = sin badge, se muestra
+   * solo con el título de sección configurado en Configuración > Empresa
+   * (combosTituloSeccion, default "Combos").
+   */
+  etiqueta?: string
   disponible: boolean
   componentesFijos: ComboComponenteFijo[]
   componentesEleccion: ComboComponenteEleccion[]

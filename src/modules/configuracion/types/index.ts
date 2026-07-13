@@ -49,6 +49,9 @@ export interface DatosEmpresa {
   horarioApertura: string | null
   horarioCierre: string | null
   horarioDias: number[]
+  // Fase 19 (prep): título personalizable de la sección de Combos en el
+  // catálogo público y demás listados. Default 'Combos'.
+  combosTituloSeccion: string
 }
 
 /**

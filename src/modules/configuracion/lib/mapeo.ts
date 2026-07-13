@@ -26,6 +26,7 @@ export function filaAEmpresa(fila: Record<string, any>): DatosEmpresa {
     horarioApertura: fila.horario_apertura,
     horarioCierre: fila.horario_cierre,
     horarioDias: fila.horario_dias ?? [0, 1, 2, 3, 4, 5, 6],
+    combosTituloSeccion: fila.combos_titulo_seccion ?? 'Combos',
   }
 }
 
@@ -57,6 +58,8 @@ export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unk
   if ('horarioApertura' in cambios) fila.horario_apertura = cambios.horarioApertura
   if ('horarioCierre' in cambios) fila.horario_cierre = cambios.horarioCierre
   if ('horarioDias' in cambios) fila.horario_dias = cambios.horarioDias
+  // Fase 19 (prep): título personalizable de la sección de Combos.
+  if ('combosTituloSeccion' in cambios) fila.combos_titulo_seccion = cambios.combosTituloSeccion
   return fila
 }
 

@@ -775,6 +775,7 @@ function comboToRow(c: Combo, clienteId: string) {
     disponible: c.disponible,
     imagenes: c.imagenes ?? [],
     descuento_porcentaje: c.descuentoPorcentaje ?? 0,
+    etiqueta: c.etiqueta?.trim() || null,
   }
 }
 
@@ -1534,6 +1535,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     disponible: r.disponible,
     imagenes: r.imagenes ?? [],
     descuentoPorcentaje: Number(r.descuento_porcentaje ?? 0),
+    etiqueta: r.etiqueta ?? undefined,
     componentesFijos: componentesFijosByCombo.get(r.id) ?? [],
     componentesEleccion: componentesEleccionByCombo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),
