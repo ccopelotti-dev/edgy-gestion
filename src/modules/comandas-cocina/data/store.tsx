@@ -51,6 +51,8 @@ type Action =
       payload: {
         comandaId: string
         productoId?: string
+        /** Fase 19.2: alternativa a productoId -- ver ComandaItem.comboId. */
+        comboId?: string
         descripcion: string
         cantidad: number
         precioUnitario: number
@@ -96,11 +98,12 @@ function reducer(state: ComandasCocinaState, action: Action): ComandasCocinaStat
     }
 
     case 'AGREGAR_ITEM': {
-      const { comandaId, productoId, descripcion, cantidad, precioUnitario, nota } = action.payload
+      const { comandaId, productoId, comboId, descripcion, cantidad, precioUnitario, nota } = action.payload
       const nuevoItem: ComandaItem = {
         id: uid(),
         comandaId,
         productoId,
+        comboId,
         descripcion,
         cantidad,
         precioUnitario,
@@ -230,6 +233,7 @@ function itemToRow(i: ComandaItem) {
     id: i.id,
     comanda_id: i.comandaId,
     producto_id: i.productoId ?? null,
+    combo_id: i.comboId ?? null,
     descripcion: i.descripcion,
     cantidad: i.cantidad,
     precio_unitario: i.precioUnitario,
@@ -359,6 +363,7 @@ async function fetchComandasCocinaState(): Promise<ComandasCocinaState> {
       id: r.id,
       comandaId: r.comanda_id,
       productoId: r.producto_id ?? undefined,
+      comboId: r.combo_id ?? undefined,
       descripcion: r.descripcion,
       cantidad: Number(r.cantidad),
       precioUnitario: Number(r.precio_unitario),

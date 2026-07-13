@@ -8,7 +8,9 @@ import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -75,11 +77,19 @@ export default function Mesa() {
   const { turno } = useTurnoActivo()
   const { dispatch } = useComandasCocina()
   const comanda = useComandaDeMesa(mesaId ?? '')
-  const { productos, porId: catalogoPorId } = useCatalogoComandas(cliente?.id, cliente?.lista_precio_comandas_id)
+  const {
+    productos,
+    porId: catalogoPorId,
+    combos,
+    combosPorId,
+  } = useCatalogoComandas(cliente?.id, cliente?.lista_precio_comandas_id)
 
   const [mesa, setMesa] = useState<MesaLite | null>(null)
   const [cargandoMesa, setCargandoMesa] = useState(true)
   const [clientesVenta, setClientesVenta] = useState<ClienteVentaLite[]>([])
+  // Fase 19.2: el valor puede ser el id de un producto (tal cual) o, si
+  // el usuario eligió un combo, `combo:<id>` -- ver comboSeleccionado
+  // más abajo, que interpreta el prefijo.
   const [productoId, setProductoId] = useState('')
   const [cantidadNueva, setCantidadNueva] = useState(1)
   const [nota, setNota] = useState('')
@@ -127,7 +137,10 @@ export default function Mesa() {
       .then(({ data }) => setClientesVenta((data ?? []).map((c: any) => ({ id: c.id, nombre: c.nombre, telefono: c.telefono ?? undefined }))))
   }, [cliente?.id])
 
-  const productoSeleccionado = productos.find((p) => p.id === productoId)
+  const comboSeleccionado = productoId.startsWith('combo:')
+    ? combosPorId.get(productoId.slice('combo:'.length))
+    : undefined
+  const productoSeleccionado = comboSeleccionado ? undefined : productos.find((p) => p.id === productoId)
 
   // Fase 7a: la comanda queda "lista para cobrar" apenas todos sus
   // ítems llegan a listo/entregado en cocina -- derivado, no se guarda
@@ -156,18 +169,36 @@ export default function Mesa() {
   }
 
   function agregarItem() {
-    if (!comanda || !productoSeleccionado || cantidadNueva <= 0) return
-    dispatch({
-      type: 'AGREGAR_ITEM',
-      payload: {
-        comandaId: comanda.id,
-        productoId: productoSeleccionado.id,
-        descripcion: productoSeleccionado.nombre,
-        cantidad: cantidadNueva,
-        precioUnitario: productoSeleccionado.precioVenta,
-        nota: nota || undefined,
-      },
-    })
+    if (!comanda || cantidadNueva <= 0) return
+    if (comboSeleccionado) {
+      dispatch({
+        type: 'AGREGAR_ITEM',
+        payload: {
+          comandaId: comanda.id,
+          comboId: comboSeleccionado.id,
+          descripcion: comboSeleccionado.etiqueta
+            ? `${comboSeleccionado.nombre} (${comboSeleccionado.etiqueta})`
+            : comboSeleccionado.nombre,
+          cantidad: cantidadNueva,
+          precioUnitario: comboSeleccionado.precioVenta,
+          nota: nota || undefined,
+        },
+      })
+    } else if (productoSeleccionado) {
+      dispatch({
+        type: 'AGREGAR_ITEM',
+        payload: {
+          comandaId: comanda.id,
+          productoId: productoSeleccionado.id,
+          descripcion: productoSeleccionado.nombre,
+          cantidad: cantidadNueva,
+          precioUnitario: productoSeleccionado.precioVenta,
+          nota: nota || undefined,
+        },
+      })
+    } else {
+      return
+    }
     setProductoId('')
     setCantidadNueva(1)
     setNota('')
@@ -453,14 +484,33 @@ export default function Mesa() {
                         <SelectValue placeholder="Elegir producto" />
                       </SelectTrigger>
                       <SelectContent>
-                        {productos.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            <span className="flex items-center gap-1.5">
-                              {p.nombre} · {formatARS(p.precioVenta)}
-                              {p.plantillaGarantia && ' · con garantía'}
-                            </span>
-                          </SelectItem>
-                        ))}
+                        {/* Fase 19.2: combos primero (suelen ser la promoción
+                            que se quiere ofrecer activamente), después el
+                            listado de productos de siempre. */}
+                        {combos.length > 0 && (
+                          <SelectGroup>
+                            <SelectLabel>Combos</SelectLabel>
+                            {combos.map((c) => (
+                              <SelectItem key={`combo-${c.id}`} value={`combo:${c.id}`}>
+                                <span className="flex items-center gap-1.5">
+                                  {c.nombre} · {formatARS(c.precioVenta)}
+                                  {c.etiqueta && ` · ${c.etiqueta}`}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        )}
+                        <SelectGroup>
+                          {combos.length > 0 && <SelectLabel>Productos</SelectLabel>}
+                          {productos.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              <span className="flex items-center gap-1.5">
+                                {p.nombre} · {formatARS(p.precioVenta)}
+                                {p.plantillaGarantia && ' · con garantía'}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </div>
@@ -484,7 +534,7 @@ export default function Mesa() {
                       placeholder="sin sal, para llevar..."
                     />
                   </div>
-                  <Button onClick={agregarItem} disabled={!productoSeleccionado}>
+                  <Button onClick={agregarItem} disabled={!productoSeleccionado && !comboSeleccionado}>
                     <Plus className="mr-1.5 h-4 w-4" />
                     Agregar
                   </Button>

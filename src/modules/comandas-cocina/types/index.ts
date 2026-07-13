@@ -17,6 +17,11 @@ export interface ComandaItem {
   id: string
   comandaId: string
   productoId?: string
+  /** Vínculo opcional a un Combo del catálogo -- Fase 19.2. Mutuamente
+   * excluyente con productoId: al cerrar la comanda como venta, esta
+   * línea descuenta stock de los componentes fijos del combo (ver
+   * ventas/lib/descontarStockVenta.ts), no de un producto único. */
+  comboId?: string
   descripcion: string
   cantidad: number
   precioUnitario: number

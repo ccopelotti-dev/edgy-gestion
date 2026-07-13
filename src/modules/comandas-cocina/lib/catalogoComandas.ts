@@ -38,11 +38,24 @@ export interface ProductoCatalogoComanda {
   plantillaGarantia?: PlantillaGarantiaLiteComanda
 }
 
+// Fase 19.2: combos vendibles desde Comandas -- mismo criterio que en
+// Ventas (ver ventas/components/ventas/dialogs.tsx, ComboCatalogoItem):
+// no tienen stock propio (se descuenta el de sus componentes fijos al
+// cerrar la comanda) ni lista de precio (precioVenta es el precio final
+// cargado en Productos y Stock > Combos).
+export interface ComboCatalogoComanda {
+  id: string
+  nombre: string
+  precioVenta: number
+  etiqueta?: string
+}
+
 export function useCatalogoComandas(
   clienteTenantId: string | undefined,
   listaPrecioComandasId: string | null | undefined,
 ) {
   const [productos, setProductos] = useState<ProductoCatalogoComanda[]>([])
+  const [combos, setCombos] = useState<ComboCatalogoComanda[]>([])
 
   useEffect(() => {
     if (!clienteTenantId) return
@@ -50,7 +63,7 @@ export function useCatalogoComandas(
     const listaId = listaPrecioComandasId ?? null
 
     async function cargarCatalogo() {
-      const [productosRes, listaRes, overridesRes, rubrosRes, plantillasRes] = await Promise.all([
+      const [productosRes, listaRes, overridesRes, rubrosRes, plantillasRes, combosRes] = await Promise.all([
         supabase
           .from('productos')
           .select('id, nombre, precio_venta, costo, stock, controla_stock, tipo, rubro_id, plantilla_garantia_id')
@@ -67,6 +80,14 @@ export function useCatalogoComandas(
           : Promise.resolve({ data: [] as { producto_id: string; precio: number }[] }),
         supabase.from('rubros').select('id, plantilla_garantia_id'),
         supabase.from('plantillas_garantia').select('id, nombre, duracion_meses, cobertura'),
+        // Fase 19.2: los combos no usan lista de precio (precio_venta es
+        // el precio final cargado a mano en Productos y Stock > Combos).
+        supabase
+          .from('combos')
+          .select('id, nombre, precio_venta, etiqueta')
+          .eq('cliente_id', clienteTenantId)
+          .eq('disponible', true)
+          .order('nombre'),
       ])
 
       if (!activo) return
@@ -108,6 +129,15 @@ export function useCatalogoComandas(
           } as ProductoCatalogoComanda
         }),
       )
+
+      setCombos(
+        ((combosRes.data ?? []) as any[]).map((c) => ({
+          id: c.id,
+          nombre: c.nombre,
+          precioVenta: Number(c.precio_venta),
+          etiqueta: c.etiqueta ?? undefined,
+        })),
+      )
     }
 
     cargarCatalogo()
@@ -122,5 +152,11 @@ export function useCatalogoComandas(
     return map
   }, [productos])
 
-  return { productos, porId }
+  const combosPorId = useMemo(() => {
+    const map = new Map<string, ComboCatalogoComanda>()
+    for (const c of combos) map.set(c.id, c)
+    return map
+  }, [combos])
+
+  return { productos, porId, combos, combosPorId }
 }

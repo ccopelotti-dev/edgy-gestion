@@ -40,7 +40,12 @@
 import { supabase } from '@/lib/supabase'
 import { registrarMovimientoTesoreria } from '@/lib/tesoreriaSync'
 import { CONSUMIDOR_FINAL_ID, type MedioPago } from '@/modules/ventas/types'
-import { descontarStockPorVenta, type LineaStock } from '@/modules/ventas/lib/descontarStockVenta'
+import {
+  descontarStockPorVenta,
+  expandirLineasConCombos,
+  type LineaStock,
+  type LineaVentaCatalogo,
+} from '@/modules/ventas/lib/descontarStockVenta'
 import { activarGarantiasPorVenta, type LineaGarantia } from '@/modules/ventas/lib/activarGarantiasVenta'
 import type { Comanda } from '../types'
 import { todayISO } from './format'
@@ -57,27 +62,40 @@ export interface ErrorStockComanda {
 // Se llama ANTES de cerrar -- bloquea el cierre si falta stock de algún
 // ítem vinculado al catálogo. Mismo criterio y mismo mensaje que
 // validarStockDisponible() en Ventas/PuntoDeVenta.tsx (Fase 6c).
+//
+// Fase 19.2: los ítems vinculados a un Combo se expanden primero a sus
+// componentes fijos (expandirLineasConCombos, reusada de Ventas) -- el
+// combo en sí no tiene stock propio, lo que hay que validar es el stock
+// de cada componente. Si dos ítems distintos de la comanda terminan
+// pidiendo el mismo producto (ya sea directo o vía combos distintos),
+// se suman antes de comparar contra el stock disponible.
 export async function validarStockComanda(comanda: Comanda): Promise<ErrorStockComanda[]> {
-  const pedido = new Map<string, { productoId: string; cantidad: number; nombre: string }>()
-  for (const i of comanda.items) {
-    if (!i.productoId) continue
-    const prev = pedido.get(i.productoId)
-    if (prev) prev.cantidad += i.cantidad
-    else pedido.set(i.productoId, { productoId: i.productoId, cantidad: i.cantidad, nombre: i.descripcion })
+  const lineasCatalogo: LineaVentaCatalogo[] = comanda.items
+    .filter((i) => i.productoId || i.comboId)
+    .map((i) => ({ productoId: i.productoId, comboId: i.comboId, cantidad: i.cantidad }))
+
+  const lineasExpandidas = await expandirLineasConCombos(lineasCatalogo)
+
+  const pedido = new Map<string, { productoId: string; cantidad: number }>()
+  for (const l of lineasExpandidas) {
+    if (!l.productoId) continue
+    const prev = pedido.get(l.productoId)
+    if (prev) prev.cantidad += l.cantidad
+    else pedido.set(l.productoId, { productoId: l.productoId, cantidad: l.cantidad })
   }
 
   const errores: ErrorStockComanda[] = []
-  for (const { productoId, cantidad, nombre } of pedido.values()) {
+  for (const { productoId, cantidad } of pedido.values()) {
     const { data: producto } = await supabase
       .from('productos')
-      .select('stock, controla_stock')
+      .select('nombre, stock, controla_stock')
       .eq('id', productoId)
       .maybeSingle()
     if (!producto || !producto.controla_stock) continue
 
     const disponible = Number(producto.stock)
     if (disponible < cantidad) {
-      errores.push({ nombre, solicitado: cantidad, disponible })
+      errores.push({ nombre: producto.nombre, solicitado: cantidad, disponible })
     }
   }
   return errores
@@ -111,6 +129,7 @@ export async function cerrarComandaComoVenta(
     return {
       id: crypto.randomUUID(),
       producto_id: i.productoId ?? null,
+      combo_id: i.comboId ?? null,
       descripcion: i.descripcion,
       cantidad: i.cantidad,
       precio_unitario: i.precioUnitario,
@@ -230,17 +249,25 @@ export async function cerrarComandaComoVenta(
 
   // Descuento de stock (Fase 7a, mismo criterio que 6c en Ventas) --
   // fire-and-forget, ya se validó que había stock suficiente unos
-  // instantes antes vía validarStockComanda.
-  const itemsCatalogo = comanda.items.filter((i) => i.productoId)
+  // instantes antes vía validarStockComanda. Fase 19.2: los ítems de
+  // combo se expanden a sus componentes fijos antes de descontar (el
+  // combo en sí no tiene stock propio).
+  const itemsCatalogo = comanda.items.filter((i) => i.productoId || i.comboId)
   if (itemsCatalogo.length > 0) {
-    const lineasStock: LineaStock[] = itemsCatalogo.map((i) => ({
+    const lineasCatalogo: LineaVentaCatalogo[] = itemsCatalogo.map((i) => ({
       productoId: i.productoId,
+      comboId: i.comboId,
       cantidad: i.cantidad,
     }))
-    descontarStockPorVenta(lineasStock, clienteId, numero, fecha).catch(() => {
-      // eslint-disable-next-line no-console
-      console.error('No se pudo descontar el stock de la comanda', numero)
-    })
+    expandirLineasConCombos(lineasCatalogo)
+      .then((lineasStock) => {
+        if (lineasStock.length === 0) return
+        return descontarStockPorVenta(lineasStock, clienteId, numero, fecha)
+      })
+      .catch(() => {
+        // eslint-disable-next-line no-console
+        console.error('No se pudo descontar el stock de la comanda', numero)
+      })
   }
 
   // Activación de garantía (Fase 7a, mismo criterio que 6b en Ventas).
