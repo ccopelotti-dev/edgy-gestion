@@ -502,16 +502,57 @@ export default function MenuPublico() {
         </div>
 
         <div className="mx-auto flex max-w-lg flex-col gap-4 px-4 pt-4">
-          <div className="flex flex-col gap-2 rounded-lg border bg-white p-3">
+          {itemsCarrito.length === 0 && (
+            <div className="flex flex-col items-center gap-3 rounded-lg border bg-white p-6 text-center">
+              <p className="text-muted-foreground text-sm">Tu pedido quedó vacío.</p>
+              <button
+                onClick={() => setVista('menu')}
+                className="rounded-md px-4 py-2 text-sm font-medium text-white"
+                style={{ backgroundColor: color }}
+              >
+                Volver al menú
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-col divide-y rounded-lg border bg-white">
             {itemsCarrito.map((i) => (
-              <div key={i.key} className="flex items-center justify-between text-sm">
-                <span>
-                  {i.cantidad} × {i.nombre}
+              <div key={i.key} className="flex items-center gap-2 p-3 text-sm">
+                <span className="flex-1 truncate">{i.nombre}</span>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => cambiarCantidad(i.key, -1)}
+                    disabled={vista === 'enviando'}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border disabled:opacity-50"
+                    aria-label={`Restar ${i.nombre}`}
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="w-4 text-center font-medium">{i.cantidad}</span>
+                  <button
+                    onClick={() => cambiarCantidad(i.key, 1)}
+                    disabled={vista === 'enviando'}
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-white disabled:opacity-50"
+                    style={{ backgroundColor: color }}
+                    aria-label={`Sumar ${i.nombre}`}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <span className="w-20 flex-shrink-0 text-right font-medium">
+                  {formatARS(i.precio * i.cantidad)}
                 </span>
-                <span>{formatARS(i.precio * i.cantidad)}</span>
+                <button
+                  onClick={() => cambiarCantidad(i.key, -i.cantidad)}
+                  disabled={vista === 'enviando'}
+                  className="text-muted-foreground flex-shrink-0 disabled:opacity-50"
+                  aria-label={`Quitar ${i.nombre} del pedido`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             ))}
-            <div className="flex items-center justify-between border-t pt-2 font-semibold">
+            <div className="flex items-center justify-between p-3 font-semibold">
               <span>Total</span>
               <span>{formatARS(totalCarrito)}</span>
             </div>
@@ -595,6 +636,7 @@ export default function MenuPublico() {
             onClick={confirmarPedido}
             disabled={
               vista === 'enviando' ||
+              itemsCarrito.length === 0 ||
               !nombre.trim() ||
               !telefono.trim() ||
               (modalidad === 'delivery' && !direccion.trim())
