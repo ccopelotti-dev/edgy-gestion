@@ -22,8 +22,12 @@ export interface DatosImagenPromocionalCombo {
   nombre: string
   precio: number
   descripcion?: string
-  /** Primera foto de la galería del combo (la "principal"), si tiene. */
-  fotoUrl?: string
+  /** Foto(s) elegidas de la galería del combo -- 1 (ocupa todo el ancho) o 2
+   * (se reparten según `layout`, estilo "pantalla dividida"). Si viene vacío
+   * o undefined, se degrada al placeholder de color sólido. */
+  fotos?: string[]
+  /** Cómo repartir el espacio cuando hay 2 fotos. Se ignora con 1 sola. */
+  layout?: 'lado_a_lado' | 'arriba_abajo'
   /** Logo del comercio (clientes.logo_url), si tiene. */
   logoUrl?: string
   /** Color de marca del comercio (clientes.color_marca), hex, si tiene. */
@@ -113,13 +117,37 @@ export async function generarImagenPromocionalCombo(
   ctx.fillStyle = colorMarca
   ctx.fillRect(0, 0, TAMANIO, TAMANIO)
 
-  // ── Foto del combo (zona superior, ~62% de la altura) ────────────────────
+  // ── Foto(s) del combo (zona superior, ~62% de la altura) ─────────────────
+  // Con 1 foto ocupa todo el ancho (comportamiento original). Con 2, se
+  // reparte "pantalla dividida" -- lado a lado o arriba/abajo, a elección
+  // del usuario -- con una franja fina del color de marca de separador
+  // (aprovecha el fillRect de fondo de mas arriba, no hace falta dibujarla).
   const altoFoto = Math.round(TAMANIO * 0.62)
+  const fotos = (datos.fotos ?? []).filter(Boolean).slice(0, 2)
+  const layout = datos.layout ?? 'lado_a_lado'
+  const gap = 6
   let fotoOk = false
-  if (datos.fotoUrl) {
+
+  if (fotos.length === 1) {
     try {
-      const img = await cargarImagen(datos.fotoUrl)
+      const img = await cargarImagen(fotos[0])
       dibujarCover(ctx, img, 0, 0, TAMANIO, altoFoto)
+      fotoOk = true
+    } catch {
+      // Se degrada a placeholder de color sólido -- sin romper la generación.
+    }
+  } else if (fotos.length === 2) {
+    try {
+      const [img1, img2] = await Promise.all(fotos.map(cargarImagen))
+      if (layout === 'arriba_abajo') {
+        const mitad = (altoFoto - gap) / 2
+        dibujarCover(ctx, img1, 0, 0, TAMANIO, mitad)
+        dibujarCover(ctx, img2, 0, mitad + gap, TAMANIO, mitad)
+      } else {
+        const mitad = (TAMANIO - gap) / 2
+        dibujarCover(ctx, img1, 0, 0, mitad, altoFoto)
+        dibujarCover(ctx, img2, mitad + gap, 0, mitad, altoFoto)
+      }
       fotoOk = true
     } catch {
       // Se degrada a placeholder de color sólido -- sin romper la generación.
