@@ -26,6 +26,8 @@ import {
   useVentas,
   useVentasDispatch,
 } from '../data/store';
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { terminologiaOrdenVenta } from '@/lib/terminologia';
 import {
   KpiCard,
   EstadoOrdenBadge,
@@ -68,6 +70,15 @@ export default function Ordenes() {
   const clientes = useClientes();
   const { comprobantes, config } = useVentas();
   const dispatch = useVentasDispatch();
+
+  // Fase 8e (cierre de 8d): el motor de ordenes_venta es el mismo para
+  // cualquier rubro -- lo único que cambia es cómo se llama en
+  // pantalla. Con Kit Gastronómico activo (comandas-cocina) esta
+  // pantalla pasa a hablar de "Comanda(s)" en vez de "Orden(es)".
+  const { modulosActivos } = useClienteActual();
+  const term = terminologiaOrdenVenta(modulosActivos);
+  const singularMin = term.singular.charAt(0).toLowerCase() + term.singular.slice(1);
+  const pluralMin = term.plural.charAt(0).toLowerCase() + term.plural.slice(1);
 
   // ── Filtros ───────────────────────────────────────────────
 
@@ -295,20 +306,20 @@ export default function Ordenes() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Ordenes</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{term.plural}</h1>
         <button
           onClick={() => setShowNuevaOrden((prev) => !prev)}
           className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors"
         >
           {showNuevaOrden ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          {showNuevaOrden ? 'Cancelar' : 'Nueva orden'}
+          {showNuevaOrden ? 'Cancelar' : `Nueva ${singularMin}`}
         </button>
       </div>
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard
-          title="Ordenes pendientes"
+          title={`${term.plural} pendientes`}
           value={kpis.pendientes}
           icon={<ClipboardList className="h-4 w-4" />}
         />
@@ -327,7 +338,7 @@ export default function Ordenes() {
       {/* Nueva orden inline */}
       {showNuevaOrden && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900">Nueva orden</h2>
+          <h2 className="text-lg font-semibold text-gray-900">{`Nueva ${singularMin}`}</h2>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {/* Tipo */}
@@ -506,7 +517,7 @@ export default function Ordenes() {
               className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <CheckCircle2 className="h-4 w-4" />
-              Crear orden
+              {`Crear ${singularMin}`}
             </button>
           </div>
         </div>
@@ -576,8 +587,8 @@ export default function Ordenes() {
       {ordenesFiltradas.length === 0 ? (
         <EmptyState
           icon={<ClipboardList className="h-10 w-10" />}
-          title="No se encontraron ordenes"
-          description="No hay ordenes con los filtros seleccionados"
+          title={`No se encontraron ${pluralMin}`}
+          description={`No hay ${pluralMin} con los filtros seleccionados`}
         />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
@@ -606,6 +617,7 @@ export default function Ordenes() {
                   <OrdenRow
                     key={orden.id}
                     orden={orden}
+                    terminoSingularMin={singularMin}
                     isExpanded={isExpanded}
                     clienteNombre={clienteNombre(orden.clienteId)}
                     comprobantesOrden={comprobantesOrden}
@@ -649,6 +661,7 @@ export default function Ordenes() {
 
 interface OrdenRowProps {
   orden: Orden;
+  terminoSingularMin: string;
   isExpanded: boolean;
   clienteNombre: string;
   comprobantesOrden: { id: string; tipo: TipoComprobante; numero: number; total: number }[];
@@ -665,6 +678,7 @@ interface OrdenRowProps {
 
 function OrdenRow({
   orden,
+  terminoSingularMin,
   isExpanded,
   clienteNombre,
   comprobantesOrden,
@@ -963,7 +977,7 @@ function OrdenRow({
               {/* Estado cancelado: read-only */}
               {o.estado === 'cancelado' && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-                  Esta orden fue cancelada
+                  {`Esta ${terminoSingularMin} fue cancelada`}
                 </div>
               )}
             </div>

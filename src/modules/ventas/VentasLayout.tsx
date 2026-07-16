@@ -9,6 +9,8 @@ import {
   LayoutDashboard, Users, ShoppingCart, FileText,
   ClipboardList, Receipt, Banknote,
 } from 'lucide-react';
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { terminologiaOrdenVenta } from '@/lib/terminologia';
 
 interface TabDef {
   to: string;
@@ -19,21 +21,28 @@ interface TabDef {
 
 const BASE = '/m/ventas';
 
-// Nota: "Integraciones" se mudó al módulo Configuración -- no es un
-// concepto propio de Ventas (fiscal + canales de venta + subsistemas
-// entre módulos, a nivel de cliente completo). Ver Configuración >
-// Integraciones.
-const tabs: TabDef[] = [
-  { to: BASE,                       label: 'Dashboard',      icon: LayoutDashboard, end: true },
-  { to: `${BASE}/clientes`,         label: 'Clientes',       icon: Users },
-  { to: `${BASE}/punto-de-venta`,   label: 'Punto de Venta', icon: ShoppingCart },
-  { to: `${BASE}/presupuestos`,     label: 'Presupuestos',   icon: FileText },
-  { to: `${BASE}/ordenes`,          label: 'Órdenes',        icon: ClipboardList },
-  { to: `${BASE}/comprobantes`,     label: 'Comprobantes',   icon: Receipt },
-  { to: `${BASE}/cobranzas`,        label: 'Cobranzas',      icon: Banknote },
-];
-
 export default function VentasLayout() {
+  // Fase 8e (cierre de 8d): la pestaña "Órdenes" es la primera pantalla
+  // que usa terminologiaOrdenVenta() -- en un cliente con Kit
+  // Gastronómico activo (comandas-cocina) pasa a decir "Comandas", en
+  // el resto sigue diciendo "Órdenes" como siempre.
+  const { modulosActivos } = useClienteActual();
+  const term = terminologiaOrdenVenta(modulosActivos);
+
+  // Nota: "Integraciones" se mudó al módulo Configuración -- no es un
+  // concepto propio de Ventas (fiscal + canales de venta + subsistemas
+  // entre módulos, a nivel de cliente completo). Ver Configuración >
+  // Integraciones.
+  const tabs: TabDef[] = [
+    { to: BASE,                       label: 'Dashboard',      icon: LayoutDashboard, end: true },
+    { to: `${BASE}/clientes`,         label: 'Clientes',       icon: Users },
+    { to: `${BASE}/punto-de-venta`,   label: 'Punto de Venta', icon: ShoppingCart },
+    { to: `${BASE}/presupuestos`,     label: 'Presupuestos',   icon: FileText },
+    { to: `${BASE}/ordenes`,          label: term.plural,      icon: ClipboardList },
+    { to: `${BASE}/comprobantes`,     label: 'Comprobantes',   icon: Receipt },
+    { to: `${BASE}/cobranzas`,        label: 'Cobranzas',      icon: Banknote },
+  ];
+
   return (
     <div className="min-h-screen bg-gray-50/30">
       {/* Header */}
