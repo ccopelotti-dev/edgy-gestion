@@ -13,7 +13,12 @@ const dateFmt = new Intl.DateTimeFormat('es-AR', {
 // correspondía (no solo de noche: siempre). Se agrega "T00:00:00" (sin
 // "Z") para que se interprete como medianoche LOCAL en vez de UTC.
 export function formatDate(iso: string): string {
-  return dateFmt.format(new Date(iso + 'T00:00:00'))
+  if (!iso) return '—'
+  // Soporta tanto fechas "solo dia" (yyyy-mm-dd, ej. las de Recepcion) como
+  // timestamps completos de Supabase (created_at de importaciones_masivas,
+  // que ya viene con "T..." y zona horaria) -- agregar T00:00:00 a este
+  // ultimo caso rompia el parseo (RangeError: Invalid time value).
+  return dateFmt.format(new Date(iso + (iso.includes('T') ? '' : 'T00:00:00')))
 }
 
 // ANTES: `new Date().toISOString().slice(0, 10)` -- da la fecha en UTC.
