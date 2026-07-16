@@ -3,7 +3,7 @@
 // Edgy Gestion · Gestion de comprobantes de compra
 // ============================================================
 
-import { useState, useMemo } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import {
   Search,
   Plus,
@@ -380,10 +380,10 @@ export default function Comprobantes() {
                 <th className="px-4 py-3 font-medium">Tipo</th>
                 <th className="px-4 py-3 font-medium">Proveedor</th>
                 <th className="px-4 py-3 font-medium">Fecha</th>
-                <th className="px-4 py-3 text-right font-medium">Subtotal</th>
-                <th className="px-4 py-3 text-right font-medium">IVA</th>
-                <th className="px-4 py-3 text-right font-medium">Total</th>
-                <th className="px-4 py-3 text-right font-medium">Pendiente</th>
+                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Subtotal</th>
+                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">IVA</th>
+                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Total</th>
+                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Pendiente</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
                 <th className="px-4 py-3 font-medium">Pago</th>
                 <th className="px-4 py-3 w-10" />
@@ -397,7 +397,7 @@ export default function Comprobantes() {
                 const compPagos = pagosDeComprobante(comp.id);
 
                 return (
-                  <tbody key={comp.id}>
+                  <Fragment key={comp.id}>
                     <tr
                       className="border-t border-gray-100 hover:bg-gray-50/50 cursor-pointer"
                       onClick={() => setExpandedId(isExpanded ? null : comp.id)}
@@ -564,7 +564,7 @@ export default function Comprobantes() {
                         </td>
                       </tr>
                     )}
-                  </tbody>
+                  </Fragment>
                 );
               })}
             </tbody>

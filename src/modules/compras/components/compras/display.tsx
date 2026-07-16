@@ -166,7 +166,7 @@ const amountSize = {
 export function Amount({ value, size = 'md' }: { value: number; size?: 'xs' | 'sm' | 'md' | 'lg' }) {
   const color = value >= 0 ? 'text-green-700' : 'text-red-700';
   return (
-    <span className={`tabular-nums ${amountSize[size]} ${color}`}>
+    <span className={`tabular-nums whitespace-nowrap ${amountSize[size]} ${color}`}>
       {formatARS(value)}
     </span>
   );
