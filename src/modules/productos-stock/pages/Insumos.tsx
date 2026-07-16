@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Search,
   Plus,
@@ -12,6 +13,7 @@ import {
   DollarSign,
   PackagePlus,
   SlidersHorizontal,
+  History,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -37,6 +39,10 @@ const inputClass =
 
 export default function Insumos() {
   const { state, dispatch } = useProductosStock()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  // Fase 16.2: acceso rápido a Movimientos filtrado por este insumo.
+  const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
 
   const [search, setSearch] = useState('')
   const [rubroFilter, setRubroFilter] = useState('')
@@ -131,6 +137,10 @@ export default function Insumos() {
       tipo: 'insumo',
     })
     setAjusteDialogOpen(true)
+  }
+
+  function handleVerMovimientos(insumo: Insumo) {
+    navigate(`${base}/movimientos?itemId=${insumo.id}&itemTipo=insumo`)
   }
 
   function handleAjustar(insumo: Insumo) {
@@ -301,6 +311,15 @@ export default function Insumos() {
                         title="Ajustar stock"
                       >
                         <SlidersHorizontal className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => handleVerMovimientos(i)}
+                        title="Ver movimientos"
+                      >
+                        <History className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"

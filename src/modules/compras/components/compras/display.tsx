@@ -157,12 +157,13 @@ export function MedioPagoBadge({ medio }: { medio: MedioPagoCompra }) {
 // ─── Amount ─────────────────────────────────────────────────
 
 const amountSize = {
+  xs: 'text-xs',
   sm: 'text-sm',
   md: 'text-base',
   lg: 'text-lg font-semibold',
 } as const;
 
-export function Amount({ value, size = 'md' }: { value: number; size?: 'sm' | 'md' | 'lg' }) {
+export function Amount({ value, size = 'md' }: { value: number; size?: 'xs' | 'sm' | 'md' | 'lg' }) {
   const color = value >= 0 ? 'text-green-700' : 'text-red-700';
   return (
     <span className={`tabular-nums ${amountSize[size]} ${color}`}>

@@ -58,8 +58,6 @@ const btnPrimary =
   'px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 const btnSecondary =
   'px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors';
-const btnStock =
-  'px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5';
 const btnIcon =
   'p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors';
 
@@ -583,7 +581,14 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
       ? `${comprobantePtoVta.padStart(4, '0')}-${comprobanteNumero.padStart(8, '0')}`
       : '';
 
-  // Conexión con Recepción (stock).
+  // Conexión con Recepción (stock). Antes había un botón "Actualizar stock"
+  // separado de "Guardar" que guardaba el comprobante Y empujaba el stock
+  // en un solo click (y cerraba el modal de golpe). Como técnicamente el
+  // stock necesita que el comprobante ya exista para poder vincular la
+  // recepción, no tiene sentido "separarlos" de verdad -- en cambio, esto
+  // es un tilde: si está marcado, "Guardar" hace las dos cosas en el orden
+  // correcto (primero guarda, después actualiza stock); si no, guarda nomás.
+  const [actualizarStockChecked, setActualizarStockChecked] = useState(false);
   const [controlRemision, setControlRemision] = useState<ControlRemision>('no');
   // Nro. de remito partido en dos campos (Pto. Vta 4 díg. + Número 8 díg.)
   // para carga rápida: el operador tipea "1" + Enter (pasa de campo y
@@ -614,6 +619,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
       setIntentoGuardar(false);
       setComprobantePtoVta('');
       setComprobanteNumero('');
+      setActualizarStockChecked(false);
       setControlRemision('no');
       setRemitoPtoVta('');
       setRemitoNumero('');
@@ -679,37 +685,50 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
     return [...insumos, ...productos].slice(0, 8);
   }, [busquedaCatalogo, insumosCatalogo, productosCatalogo]);
 
+  /** Una fila "vacía" es la fila manual en blanco que arranca el modal (o
+   * cualquier fila agregada con "+Agregar" que el operador todavía no tocó):
+   * sin descripción y sin vínculo a catálogo. Al vincular un insumo/producto
+   * desde el buscador, esa fila se reutiliza en lugar de sumar una fila
+   * nueva y dejarla en blanco (eso rompía el guardado con "línea incompleta"). */
+  function filaVacia(item: ComprobanteItemRow): boolean {
+    return !item.descripcion.trim() && !item.insumoId && !item.productoId;
+  }
+
   const handleAgregarLineaInsumo = useCallback((insumo: InsumoCatalogoCompra) => {
-    setItems((prev) => [
-      ...prev,
-      {
-        key: generarId(),
-        descripcion: insumo.nombre,
-        cantidad: 1,
-        precioUnitario: insumo.costo,
-        descuento: 0,
-        alicuotaIva: 21,
-        insumoId: insumo.id,
-        unidad: insumo.unidad,
-      },
-    ]);
+    const nuevaLinea: ComprobanteItemRow = {
+      key: generarId(),
+      descripcion: insumo.nombre,
+      cantidad: 1,
+      precioUnitario: insumo.costo,
+      descuento: 0,
+      alicuotaIva: 21,
+      insumoId: insumo.id,
+      unidad: insumo.unidad,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
     setBusquedaCatalogo('');
   }, []);
 
   const handleAgregarLineaProducto = useCallback((producto: ProductoCatalogoCompra) => {
-    setItems((prev) => [
-      ...prev,
-      {
-        key: generarId(),
-        descripcion: producto.nombre,
-        cantidad: 1,
-        precioUnitario: producto.costo,
-        descuento: 0,
-        alicuotaIva: 21,
-        productoId: producto.id,
-        unidad: producto.unidad,
-      },
-    ]);
+    const nuevaLinea: ComprobanteItemRow = {
+      key: generarId(),
+      descripcion: producto.nombre,
+      cantidad: 1,
+      precioUnitario: producto.costo,
+      descuento: 0,
+      alicuotaIva: 21,
+      productoId: producto.id,
+      unidad: producto.unidad,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
     setBusquedaCatalogo('');
   }, []);
 
@@ -732,6 +751,13 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
   // libre no tiene a qué sumarle stock.
   const hayLineasVinculadas = items.some((it) => it.insumoId || it.productoId);
   const actualizarStockDisabled = controlRemision === 'si' || !hayLineasVinculadas;
+
+  // Si se deshabilita (se activa Control de Remisión, o se borran todas las
+  // líneas vinculadas) desmarcamos el tilde para no dejarlo "marcado pero
+  // deshabilitado" -- confundiría qué va a pasar al guardar.
+  useEffect(() => {
+    if (actualizarStockDisabled) setActualizarStockChecked(false);
+  }, [actualizarStockDisabled]);
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
@@ -977,7 +1003,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                           </td>
                           <td className="px-2 py-1.5">
                             <input
-                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               type="number"
                               min={0}
                               step={0.01}
@@ -998,7 +1024,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                           </td>
                           <td className="px-2 py-1.5">
                             <input
-                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none ${precioInvalido ? 'ring-1 ring-red-400 rounded' : ''}`}
+                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${precioInvalido ? 'ring-1 ring-red-400 rounded' : ''}`}
                               type="number"
                               min={0}
                               step={0.01}
@@ -1136,25 +1162,31 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
-            <button
-              type="button"
-              className={btnStock}
-              disabled={actualizarStockDisabled}
+          <div className="flex items-center justify-between gap-3 mt-6 pt-4 border-t border-gray-100">
+            <label
+              className={`flex items-center gap-2 text-sm ${actualizarStockDisabled ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700 cursor-pointer'}`}
               title={
                 controlRemision === 'si'
                   ? 'Deshabilitado: hay control de remisión pendiente'
                   : !hayLineasVinculadas
                     ? 'Vinculá al menos una línea a un insumo o producto del catálogo'
-                    : 'Guarda el comprobante y suma el stock de las líneas vinculadas'
+                    : 'Al guardar, además suma el stock de las líneas vinculadas'
               }
-              onClick={() => handleSave(true)}
             >
+              <input
+                type="checkbox"
+                checked={actualizarStockChecked}
+                disabled={actualizarStockDisabled}
+                onChange={(e) => setActualizarStockChecked(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 disabled:opacity-50"
+              />
               <Factory className="w-4 h-4" />
               Actualizar stock
-            </button>
-            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
-            <button className={btnPrimary} onClick={() => handleSave(false)}>Guardar</button>
+            </label>
+            <div className="flex items-center gap-3">
+              <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+              <button className={btnPrimary} onClick={() => handleSave(actualizarStockChecked)}>Guardar</button>
+            </div>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

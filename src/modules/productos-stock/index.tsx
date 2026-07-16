@@ -20,6 +20,7 @@ import Stock from './pages/Stock'
 import Recepcion from './pages/Recepcion'
 import Transferencias from './pages/Transferencias'
 import ControlStock from './pages/ControlStock'
+import Movimientos from './pages/Movimientos'
 
 export default function ProductosStockModule() {
   return (
@@ -38,6 +39,7 @@ export default function ProductosStockModule() {
           <Route path="formular" element={<FormularProducto />} />
           <Route path="produccion" element={<Produccion />} />
           <Route path="stock" element={<Stock />} />
+          <Route path="movimientos" element={<Movimientos />} />
           <Route path="recepcion" element={<Recepcion />} />
           <Route path="transferencias" element={<Transferencias />} />
           <Route path="control" element={<ControlStock />} />

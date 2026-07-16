@@ -16,6 +16,7 @@ import {
   ArrowLeftRight,
   ClipboardCheck,
   RotateCcw,
+  ArrowUpDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -39,6 +40,7 @@ export function ProductosStockLayout() {
     { to: `${base}/formular`, label: 'Formular Producto', icon: FlaskConical, end: false },
     { to: `${base}/produccion`, label: 'Producción', icon: Factory, end: false },
     { to: `${base}/stock`, label: 'Stock', icon: BarChart3, end: false },
+    { to: `${base}/movimientos`, label: 'Movimientos', icon: ArrowUpDown, end: false },
     { to: `${base}/recepcion`, label: 'Recepción', icon: PackageCheck, end: false },
     { to: `${base}/transferencias`, label: 'Transferencias', icon: ArrowLeftRight, end: false },
     { to: `${base}/control`, label: 'Control', icon: ClipboardCheck, end: false },

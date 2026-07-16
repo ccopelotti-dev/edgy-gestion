@@ -418,12 +418,12 @@ export default function Comprobantes() {
                           {TIPO_COMPROBANTE_COMPRA_LABEL[comp.tipo]}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-900">{nombreProveedor(comp.proveedorId)}</td>
-                      <td className="px-4 py-3 text-gray-600">{formatDate(comp.fecha)}</td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.subtotal} size="sm" /></td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.montoIva} size="sm" /></td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.total} /></td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.saldoPendiente} size="sm" /></td>
+                      <td className="px-4 py-3 text-xs text-gray-900">{nombreProveedor(comp.proveedorId)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600">{formatDate(comp.fecha)}</td>
+                      <td className="px-4 py-3 text-right"><Amount value={comp.subtotal} size="xs" /></td>
+                      <td className="px-4 py-3 text-right"><Amount value={comp.montoIva} size="xs" /></td>
+                      <td className="px-4 py-3 text-right"><Amount value={comp.total} size="xs" /></td>
+                      <td className="px-4 py-3 text-right"><Amount value={comp.saldoPendiente} size="xs" /></td>
                       <td className="px-4 py-3"><EstadoComprobanteBadge estado={comp.estado} /></td>
                       <td className="px-4 py-3"><MedioPagoBadge medio={comp.medioPago} /></td>
                       <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>

@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Search, Plus, Pencil, Trash2, ImageOff, QrCode } from 'lucide-react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { Search, Plus, Pencil, Trash2, ImageOff, QrCode, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useProductosStock } from '../data/store'
@@ -26,6 +27,10 @@ const inputClass =
 
 export default function Productos() {
   const { state, dispatch } = useProductosStock()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  // Fase 16.2: acceso rápido a Movimientos filtrado por este producto.
+  const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
 
   const [search, setSearch] = useState('')
   const [rubroFilter, setRubroFilter] = useState('')
@@ -117,6 +122,10 @@ export default function Productos() {
     const nuevoCodigo = generarCodigoInterno()
     dispatch({ type: 'UPDATE_PRODUCTO', payload: { ...producto, codigoBarras: nuevoCodigo } })
     return nuevoCodigo
+  }
+
+  function handleVerMovimientos(producto: Producto) {
+    navigate(`${base}/movimientos?itemId=${producto.id}&itemTipo=producto`)
   }
 
   return (
@@ -241,6 +250,15 @@ export default function Productos() {
                           title="Generar/imprimir etiqueta"
                         >
                           <QrCode className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleVerMovimientos(p)}
+                          title="Ver movimientos"
+                        >
+                          <History className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
