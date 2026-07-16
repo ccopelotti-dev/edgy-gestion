@@ -10,7 +10,16 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Download, Loader2, Check, Columns2, Rows2 } from 'lucide-react'
+import {
+  Download,
+  Loader2,
+  Check,
+  Columns2,
+  Rows2,
+  LayoutPanelLeft,
+  ArrowUpToLine,
+  ArrowDownToLine,
+} from 'lucide-react'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { generarImagenPromocionalCombo } from '../../lib/imagenPromocional'
 import type { Combo } from '../../types'
@@ -19,15 +28,24 @@ import type { Combo } from '../../types'
 //
 // Fase 5b (mejoras a Combos, a pedido del usuario -- "feature premium"):
 // genera una imagen JPG lista para compartir (redes sociales, WhatsApp) con
-// el logo del comercio, la foto principal del combo, nombre, precio bien
-// resaltado y descripción. Se genera 100% en el navegador con Canvas
-// (ver lib/imagenPromocional.ts), sin subir nada a ningún servidor.
+// el logo del comercio, la etiqueta/badge, la(s) foto(s) del combo, nombre,
+// precio bien resaltado y descripción. Se genera 100% en el navegador con
+// Canvas (ver lib/imagenPromocional.ts), sin subir nada a ningún servidor.
+//
+// Todas las elecciones de esta pantalla (fotos, diseño, posición de logo y
+// etiqueta, colores) son efímeras -- no se guardan en el combo, arrancan de
+// cero cada vez que se abre el diálogo, igual que ya funcionaba el selector
+// de fotos.
 
 interface ImagenPromocionalDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   combo?: Combo
 }
+
+type LayoutFoto = 'lado_a_lado' | 'arriba_abajo' | 'protagonista'
+type LogoPos = 'arriba' | 'abajo'
+type BadgePos = 'arriba_logo' | 'abajo_logo'
 
 export function ImagenPromocionalDialog({
   open,
@@ -38,20 +56,36 @@ export function ImagenPromocionalDialog({
   const [generando, setGenerando] = useState(false)
   const [error, setError] = useState('')
   const [dataUrl, setDataUrl] = useState('')
+
   // Indices (en combo.imagenes) de las fotos elegidas para la imagen
   // promocional -- se puede tildar hasta 2 para armar una "pantalla
-  // dividida" (lado a lado o arriba/abajo); con 1 sola foto ocupa todo el
-  // ancho como antes.
+  // dividida"; con 1 sola foto ocupa todo el ancho.
   const [fotosIdx, setFotosIdx] = useState<number[]>([0])
-  const [layout, setLayout] = useState<'lado_a_lado' | 'arriba_abajo'>('lado_a_lado')
+  const [layout, setLayout] = useState<LayoutFoto>('lado_a_lado')
 
-  // Al abrir el dialog (o cambiar de combo) siempre arranca solo con la
-  // foto principal tildada.
+  // Posición del logo en el flyer completo (arriba o abajo de todo), y
+  // posición de la etiqueta/badge respecto del logo dentro de esa misma
+  // banda -- a pedido del usuario.
+  const [logoPos, setLogoPos] = useState<LogoPos>('arriba')
+  const [badgePos, setBadgePos] = useState<BadgePos>('arriba_logo')
+  const [badgeColorFondo, setBadgeColorFondo] = useState('#ffffff')
+  const [badgeColorTexto, setBadgeColorTexto] = useState('#0f172a')
+
+  const tieneLogo = !!cliente?.logo_url
+  const tieneBadge = !!combo?.etiqueta?.trim()
+
+  // Al abrir el dialog (o cambiar de combo) siempre arranca en los valores
+  // por defecto.
   useEffect(() => {
     if (open) {
       setFotosIdx([0])
       setLayout('lado_a_lado')
+      setLogoPos('arriba')
+      setBadgePos('arriba_logo')
+      setBadgeColorFondo('#ffffff')
+      setBadgeColorTexto(cliente?.color_marca || '#0f172a')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, combo])
 
   function toggleFoto(idx: number) {
@@ -78,10 +112,15 @@ export function ImagenPromocionalDialog({
       nombre: combo.nombre,
       precio: combo.precioVenta,
       descripcion: combo.descripcion,
+      etiqueta: combo.etiqueta,
       fotos,
       layout,
       logoUrl: cliente?.logo_url ?? undefined,
       colorMarca: cliente?.color_marca ?? undefined,
+      logoPos,
+      badgePos,
+      badgeColorFondo,
+      badgeColorTexto,
     })
       .then((url) => {
         if (activo) setDataUrl(url)
@@ -97,7 +136,7 @@ export function ImagenPromocionalDialog({
     return () => {
       activo = false
     }
-  }, [open, combo, cliente, fotosIdx, layout])
+  }, [open, combo, cliente, fotosIdx, layout, logoPos, badgePos, badgeColorFondo, badgeColorTexto])
 
   const nombreArchivo = combo
     ? `combo-${combo.nombre.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}.jpg`
@@ -105,7 +144,7 @@ export function ImagenPromocionalDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Imagen promocional</DialogTitle>
           <DialogDescription>
@@ -114,7 +153,7 @@ export function ImagenPromocionalDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col items-center gap-3 py-2">
+        <div className="flex flex-col items-center gap-4 py-2">
           {generando && (
             <div className="flex flex-col items-center gap-2 text-muted-foreground py-12">
               <Loader2 className="h-6 w-6 animate-spin" />
@@ -128,7 +167,7 @@ export function ImagenPromocionalDialog({
             <img
               src={dataUrl}
               alt="Imagen promocional del combo"
-              className="w-full max-w-xs rounded-lg border shadow-sm"
+              className="w-full max-w-[240px] rounded-lg border shadow-sm"
             />
           )}
 
@@ -164,11 +203,11 @@ export function ImagenPromocionalDialog({
             </div>
           )}
 
-          {/* Selector de diseño -- solo tiene sentido con 2 fotos tildadas */}
+          {/* Selector de diseño de fotos -- solo tiene sentido con 2 fotos tildadas */}
           {fotosIdx.length === 2 && (
             <div className="flex flex-col items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">Diseño</span>
-              <div className="flex gap-2">
+              <span className="text-xs text-muted-foreground">Diseño de fotos</span>
+              <div className="flex flex-wrap justify-center gap-2">
                 <button
                   type="button"
                   onClick={() => setLayout('lado_a_lado')}
@@ -193,6 +232,111 @@ export function ImagenPromocionalDialog({
                   <Rows2 className="h-4 w-4" />
                   Arriba y abajo
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setLayout('protagonista')}
+                  className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                    layout === 'protagonista'
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-transparent bg-muted text-muted-foreground hover:border-muted-foreground/30'
+                  }`}
+                  title="La primera foto elegida queda más grande que la segunda"
+                >
+                  <LayoutPanelLeft className="h-4 w-4" />
+                  Protagonista
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Posición del logo -- solo si hay logo cargado en Configuración > Empresa */}
+          {tieneLogo && (
+            <div className="flex flex-col items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Posición del logo</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLogoPos('arriba')}
+                  className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                    logoPos === 'arriba'
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-transparent bg-muted text-muted-foreground hover:border-muted-foreground/30'
+                  }`}
+                >
+                  <ArrowUpToLine className="h-4 w-4" />
+                  Arriba
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogoPos('abajo')}
+                  className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                    logoPos === 'abajo'
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-transparent bg-muted text-muted-foreground hover:border-muted-foreground/30'
+                  }`}
+                >
+                  <ArrowDownToLine className="h-4 w-4" />
+                  Abajo
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Posición y colores de la etiqueta -- solo si el combo tiene etiqueta */}
+          {tieneBadge && (
+            <div className="flex flex-col items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2.5 w-full">
+              <span className="text-xs text-muted-foreground">
+                Etiqueta ("{combo!.etiqueta}")
+              </span>
+
+              {tieneLogo && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBadgePos('arriba_logo')}
+                    className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                      badgePos === 'arriba_logo'
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-transparent bg-background text-muted-foreground hover:border-muted-foreground/30'
+                    }`}
+                  >
+                    <ArrowUpToLine className="h-4 w-4" />
+                    Encima del logo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBadgePos('abajo_logo')}
+                    className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                      badgePos === 'abajo_logo'
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-transparent bg-background text-muted-foreground hover:border-muted-foreground/30'
+                    }`}
+                  >
+                    <ArrowDownToLine className="h-4 w-4" />
+                    Debajo del logo
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  Fondo
+                  <input
+                    type="color"
+                    value={badgeColorFondo}
+                    onChange={(e) => setBadgeColorFondo(e.target.value)}
+                    className="h-7 w-9 cursor-pointer rounded border border-input p-0.5"
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  Letra
+                  <input
+                    type="color"
+                    value={badgeColorTexto}
+                    onChange={(e) => setBadgeColorTexto(e.target.value)}
+                    className="h-7 w-9 cursor-pointer rounded border border-input p-0.5"
+                  />
+                </label>
               </div>
             </div>
           )}
