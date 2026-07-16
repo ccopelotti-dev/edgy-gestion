@@ -47,6 +47,8 @@ interface StockItem {
   /** Producto padre + variante puntual, solo cuando aplica. */
   productoId?: string
   varianteId?: string
+  /** Para el filtro por Rubro (ambos, Producto e Insumo, tienen rubroId). */
+  rubroId?: string
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -55,6 +57,7 @@ export default function Stock() {
   const { state, dispatch } = useProductosStock()
 
   const [soloAlertas, setSoloAlertas] = useState(false)
+  const [rubroFilter, setRubroFilter] = useState('')
 
   // Modal states
   const [recibirItem, setRecibirItem] = useState<StockItem | null>(null)
@@ -85,6 +88,7 @@ export default function Stock() {
             unidadAbrev: unidadAbrev(p.unidadVenta),
             productoId: p.id,
             varianteId: v.id,
+            rubroId: p.rubroId,
           }))
         }
         return [
@@ -96,6 +100,7 @@ export default function Stock() {
             minimo: p.stockMinimo,
             costo: p.costo,
             unidadAbrev: unidadAbrev(p.unidadVenta),
+            rubroId: p.rubroId,
           },
         ]
       })
@@ -108,6 +113,7 @@ export default function Stock() {
       minimo: i.stockMinimo,
       costo: i.costo,
       unidadAbrev: unidadAbrev(i.unidad),
+      rubroId: i.rubroId,
     }))
 
     return [...fromProductos, ...fromInsumos]
@@ -122,11 +128,24 @@ export default function Stock() {
     return { total, agotados, stockBajo, valorInventario }
   }, [items])
 
+  // Rubros que efectivamente tienen algun item en Stock, para no listar en el
+  // filtro rubros vacios (ej. rubros usados solo en Servicios).
+  const rubrosMap = useMemo(() => new Map(state.rubros.map((r) => [r.id, r.nombre])), [state.rubros])
+  const rubrosDisponibles = useMemo(() => {
+    const idsUsados = new Set(items.map((i) => i.rubroId).filter(Boolean))
+    return state.rubros
+      .filter((r) => idsUsados.has(r.id))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [items, state.rubros])
+
   // Filtered list
   const filteredItems = useMemo(() => {
-    if (!soloAlertas) return items
-    return items.filter((i) => i.stock <= 0 || i.stock < i.minimo)
-  }, [items, soloAlertas])
+    return items.filter((i) => {
+      if (soloAlertas && !(i.stock <= 0 || i.stock < i.minimo)) return false
+      if (rubroFilter && i.rubroId !== rubroFilter) return false
+      return true
+    })
+  }, [items, soloAlertas, rubroFilter])
 
   // Handlers
   function handleRecibir() {
@@ -204,7 +223,7 @@ export default function Stock() {
       </div>
 
       {/* Filter toggle */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
           <input
             type="checkbox"
@@ -214,6 +233,18 @@ export default function Stock() {
           />
           Solo alertas
         </label>
+        <select
+          className={cn(inputClass, 'w-auto')}
+          value={rubroFilter}
+          onChange={(e) => setRubroFilter(e.target.value)}
+        >
+          <option value="">Todos los rubros</option>
+          {rubrosDisponibles.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.nombre}
+            </option>
+          ))}
+        </select>
         <span className="text-xs text-muted-foreground">
           {filteredItems.length} items
         </span>
@@ -237,6 +268,7 @@ export default function Stock() {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Item</th>
                 <th className="px-4 py-3 font-medium">Tipo</th>
+                <th className="px-4 py-3 font-medium">Rubro</th>
                 <th className="px-4 py-3 font-medium text-right">Stock</th>
                 <th className="px-4 py-3 font-medium text-right">Minimo</th>
                 <th className="px-4 py-3 font-medium text-right">Costo</th>
@@ -259,6 +291,9 @@ export default function Stock() {
                     >
                       {item.tipo === 'producto' ? 'Producto' : 'Insumo'}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {item.rubroId ? (rubrosMap.get(item.rubroId) ?? '—') : '—'}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <span className="tabular-nums mr-1">
