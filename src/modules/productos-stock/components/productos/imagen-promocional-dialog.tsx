@@ -38,6 +38,17 @@ export function ImagenPromocionalDialog({
   const [generando, setGenerando] = useState(false)
   const [error, setError] = useState('')
   const [dataUrl, setDataUrl] = useState('')
+  // Indice de la foto de la galeria del combo a usar como principal en la
+  // imagen promocional -- por defecto la primera (misma foto que se ve como
+  // portada en el listado), pero si el combo tiene mas de una el usuario
+  // puede elegir cualquiera de las otras antes de descargar.
+  const [fotoIdx, setFotoIdx] = useState(0)
+
+  // Al abrir el dialog (o cambiar de combo) siempre arranca en la foto
+  // principal.
+  useEffect(() => {
+    if (open) setFotoIdx(0)
+  }, [open, combo])
 
   useEffect(() => {
     if (!open || !combo) return
@@ -49,7 +60,7 @@ export function ImagenPromocionalDialog({
       nombre: combo.nombre,
       precio: combo.precioVenta,
       descripcion: combo.descripcion,
-      fotoUrl: combo.imagenes?.[0],
+      fotoUrl: combo.imagenes?.[fotoIdx] ?? combo.imagenes?.[0],
       logoUrl: cliente?.logo_url ?? undefined,
       colorMarca: cliente?.color_marca ?? undefined,
     })
@@ -67,7 +78,7 @@ export function ImagenPromocionalDialog({
     return () => {
       activo = false
     }
-  }, [open, combo, cliente])
+  }, [open, combo, cliente, fotoIdx])
 
   const nombreArchivo = combo
     ? `combo-${combo.nombre.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}.jpg`
@@ -84,7 +95,7 @@ export function ImagenPromocionalDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center justify-center py-2">
+        <div className="flex flex-col items-center gap-3 py-2">
           {generando && (
             <div className="flex flex-col items-center gap-2 text-muted-foreground py-12">
               <Loader2 className="h-6 w-6 animate-spin" />
@@ -100,6 +111,30 @@ export function ImagenPromocionalDialog({
               alt="Imagen promocional del combo"
               className="w-full max-w-xs rounded-lg border shadow-sm"
             />
+          )}
+
+          {/* Selector de foto -- solo si el combo tiene mas de una en su galeria */}
+          {combo && combo.imagenes.length > 1 && (
+            <div className="flex flex-col items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">
+                Elegir foto ({combo.imagenes.length} disponibles)
+              </span>
+              <div className="flex flex-wrap justify-center gap-2">
+                {combo.imagenes.map((url, idx) => (
+                  <button
+                    key={url + idx}
+                    type="button"
+                    onClick={() => setFotoIdx(idx)}
+                    className={`h-14 w-14 overflow-hidden rounded-md border-2 transition-colors ${
+                      idx === fotoIdx ? 'border-primary' : 'border-transparent hover:border-muted-foreground/30'
+                    }`}
+                    title={idx === 0 ? 'Foto principal' : `Foto ${idx + 1}`}
+                  >
+                    <img src={url} alt={`Foto ${idx + 1} del combo`} className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
