@@ -51,6 +51,29 @@ interface ProductoPublico {
   precio: number
   imagen: string | null
   tipo: 'unico' | 'con_variantes'
+  // Fase 8 (cierre): unidad de venta del producto (ver Productos y
+  // Stock > Formular Producto). Solo importa acá para decidir si la
+  // cantidad se puede tipear en fracciones (ej. 0.10 kg de fiambre) o
+  // si sigue siendo por unidades enteras.
+  unidadVenta?: string
+}
+
+// Fase 8 (cierre): productos vendidos por peso/volumen aceptan
+// cantidad fraccionaria (ej. 0.10 kg) -- el resto (unidad, caja, pack,
+// docena, etc.) sigue siendo de a números enteros, igual que antes.
+// Mismo criterio de unidades que Productos y Stock (ver
+// productos-stock/types/index.ts, UnidadMedida).
+const UNIDADES_FRACCIONABLES = new Set(['kg', 'gramo', 'litro', 'ml'])
+
+function esFraccionable(unidadVenta?: string): boolean {
+  return !!unidadVenta && UNIDADES_FRACCIONABLES.has(unidadVenta)
+}
+
+// Redondeo a 2 decimales para evitar arrastre de coma flotante
+// (0.1 + 0.1 + 0.1 = 0.30000000000000004 en JS) tanto al sumar con los
+// botones +/- como al mostrar la cantidad ya confirmada.
+function formatCantidad(n: number): string {
+  return (Math.round(n * 100) / 100).toString()
 }
 
 interface CategoriaPublica {
@@ -252,6 +275,7 @@ export default function MenuPublico() {
     cantidad: number
     productoId?: string
     comboId?: string
+    unidadVenta?: string
   }
 
   const itemsCarrito = useMemo(() => {
@@ -272,7 +296,14 @@ export default function MenuPublico() {
       } else {
         const producto = productosPorId.get(key)
         if (!producto) continue
-        result.push({ key, nombre: producto.nombre, precio: producto.precio, cantidad, productoId: key })
+        result.push({
+          key,
+          nombre: producto.nombre,
+          precio: producto.precio,
+          cantidad,
+          productoId: key,
+          unidadVenta: producto.unidadVenta,
+        })
       }
     }
     return result
@@ -285,11 +316,52 @@ export default function MenuPublico() {
     setCarrito((prev) => {
       const next = new Map(prev)
       const actual = next.get(key) ?? 0
-      const nueva = actual + delta
+      const nueva = Math.round((actual + delta) * 100) / 100
       if (nueva <= 0) next.delete(key)
       else next.set(key, nueva)
       return next
     })
+  }
+
+  // Fase 8 (cierre): permite tipear la cantidad directamente (incluso
+  // fraccionaria para productos por peso/volumen, ej. "0.10"), en vez
+  // de solo poder sumar de a 1 con los botones +/-. Mismo patrón de
+  // "borrador de texto" que ya se usa en combo-dialogs.tsx (Productos y
+  // Stock) para evitar el bug de value=0 vaciando el campo mientras se
+  // tipea un decimal -- acá el borrador vive en un Record por key de
+  // carrito en vez de por id de componente.
+  const [textoCantidad, setTextoCantidad] = useState<Record<string, string>>({})
+
+  function handleCantidadTexto(key: string, raw: string, fraccionable: boolean) {
+    const limpio = fraccionable ? raw.replace(/[^0-9.,]/g, '') : raw.replace(/[^0-9]/g, '')
+    setTextoCantidad((prev) => ({ ...prev, [key]: limpio }))
+    const parsed = fraccionable ? parseFloat(limpio.replace(',', '.')) : parseInt(limpio, 10)
+    if (!isNaN(parsed) && parsed > 0) {
+      setCarrito((prev) => {
+        const next = new Map(prev)
+        next.set(key, parsed)
+        return next
+      })
+    }
+  }
+
+  // Al perder el foco: si quedó un valor inválido o en 0, se saca del
+  // carrito (igual que restar hasta 0 con el botón -); si no, se limpia
+  // el borrador y el input vuelve a mostrar el número ya confirmado y
+  // formateado (evita arrastres tipo "0.30000000000000004").
+  function commitCantidadTexto(key: string) {
+    setTextoCantidad((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+    if ((carrito.get(key) ?? 0) <= 0) {
+      setCarrito((prev) => {
+        const next = new Map(prev)
+        next.delete(key)
+        return next
+      })
+    }
   }
 
   async function confirmarPedido() {
@@ -520,24 +592,40 @@ export default function MenuPublico() {
               <div key={i.key} className="flex items-center gap-2 p-3 text-sm">
                 <span className="flex-1 truncate">{i.nombre}</span>
                 <div className="flex flex-shrink-0 items-center gap-2">
-                  <button
-                    onClick={() => cambiarCantidad(i.key, -1)}
-                    disabled={vista === 'enviando'}
-                    className="flex h-7 w-7 items-center justify-center rounded-full border disabled:opacity-50"
-                    aria-label={`Restar ${i.nombre}`}
-                  >
-                    <Minus className="h-3.5 w-3.5" />
-                  </button>
-                  <span className="w-4 text-center font-medium">{i.cantidad}</span>
-                  <button
-                    onClick={() => cambiarCantidad(i.key, 1)}
-                    disabled={vista === 'enviando'}
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-white disabled:opacity-50"
-                    style={{ backgroundColor: color }}
-                    aria-label={`Sumar ${i.nombre}`}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
+                  {(() => {
+                    const fraccionable = esFraccionable(i.unidadVenta)
+                    const paso = fraccionable ? 0.1 : 1
+                    return (
+                      <>
+                        <button
+                          onClick={() => cambiarCantidad(i.key, -paso)}
+                          disabled={vista === 'enviando'}
+                          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border disabled:opacity-50"
+                          aria-label={`Restar ${i.nombre}`}
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </button>
+                        <input
+                          type="text"
+                          inputMode={fraccionable ? 'decimal' : 'numeric'}
+                          value={textoCantidad[i.key] ?? formatCantidad(i.cantidad)}
+                          onChange={(e) => handleCantidadTexto(i.key, e.target.value, fraccionable)}
+                          onBlur={() => commitCantidadTexto(i.key)}
+                          disabled={vista === 'enviando'}
+                          className="w-12 rounded border px-1 py-1 text-center text-sm font-medium disabled:opacity-50"
+                        />
+                        <button
+                          onClick={() => cambiarCantidad(i.key, paso)}
+                          disabled={vista === 'enviando'}
+                          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50"
+                          style={{ backgroundColor: color }}
+                          aria-label={`Sumar ${i.nombre}`}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </>
+                    )
+                  })()}
                 </div>
                 <span className="w-20 flex-shrink-0 text-right font-medium">
                   {formatARS(i.precio * i.cantidad)}
@@ -738,7 +826,14 @@ export default function MenuPublico() {
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="w-4 text-center text-sm font-medium">{cantidadEnCarrito}</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={textoCantidad[key] ?? formatCantidad(cantidadEnCarrito)}
+                          onChange={(e) => handleCantidadTexto(key, e.target.value, false)}
+                          onBlur={() => commitCantidadTexto(key)}
+                          className="w-10 rounded border px-1 py-1 text-center text-sm font-medium"
+                        />
                         <button
                           onClick={() => cambiarCantidad(key, 1)}
                           className="flex h-7 w-7 items-center justify-center rounded-full text-white"
@@ -764,6 +859,8 @@ export default function MenuPublico() {
               {cat.productos.map((p) => {
                 const cantidadEnCarrito = carrito.get(p.id) ?? 0
                 const sePuedePedir = p.tipo !== 'con_variantes' && estaAbierto
+                const fraccionable = esFraccionable(p.unidadVenta)
+                const paso = fraccionable ? 0.1 : 1
                 return (
                   <div key={p.id} className="flex items-center gap-3 rounded-lg border bg-white p-3">
                     {p.imagen ? (
@@ -784,7 +881,7 @@ export default function MenuPublico() {
                       </span>
                     ) : cantidadEnCarrito === 0 ? (
                       <button
-                        onClick={() => cambiarCantidad(p.id, 1)}
+                        onClick={() => cambiarCantidad(p.id, paso)}
                         className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-white"
                         style={{ backgroundColor: color }}
                         aria-label={`Agregar ${p.nombre}`}
@@ -794,14 +891,21 @@ export default function MenuPublico() {
                     ) : (
                       <div className="flex flex-shrink-0 items-center gap-2">
                         <button
-                          onClick={() => cambiarCantidad(p.id, -1)}
+                          onClick={() => cambiarCantidad(p.id, -paso)}
                           className="flex h-7 w-7 items-center justify-center rounded-full border"
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="w-4 text-center text-sm font-medium">{cantidadEnCarrito}</span>
+                        <input
+                          type="text"
+                          inputMode={fraccionable ? 'decimal' : 'numeric'}
+                          value={textoCantidad[p.id] ?? formatCantidad(cantidadEnCarrito)}
+                          onChange={(e) => handleCantidadTexto(p.id, e.target.value, fraccionable)}
+                          onBlur={() => commitCantidadTexto(p.id)}
+                          className="w-12 rounded border px-1 py-1 text-center text-sm font-medium"
+                        />
                         <button
-                          onClick={() => cambiarCantidad(p.id, 1)}
+                          onClick={() => cambiarCantidad(p.id, paso)}
                           className="flex h-7 w-7 items-center justify-center rounded-full text-white"
                           style={{ backgroundColor: color }}
                         >
