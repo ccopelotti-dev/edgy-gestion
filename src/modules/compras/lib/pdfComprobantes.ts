@@ -53,6 +53,17 @@ function nombreProveedorFallback(proveedor: Proveedor | undefined, fallback: str
   return proveedor?.nombre ?? fallback;
 }
 
+/** El número que identifica a un comprobante DE COMPRA frente al proveedor
+ * es el suyo -- el que viene impreso en la factura física (`numeroComprobanteProveedor`,
+ * ej. "0003-00002857"), no nuestro correlativo interno (FC-00009), que solo
+ * es un ID de nuestra tabla de Supabase sin ninguna utilidad para quien lo
+ * lee. Se usa este número legítimo en el Resumen de cuenta y en el
+ * Comprobante de Pago; si por algún motivo el comprobante no lo tiene
+ * cargado, se cae al correlativo interno para no dejar la celda vacía. */
+function numeroLegitimoComprobante(c: ComprobanteCompra): string {
+  return c.numeroComprobanteProveedor?.trim() || formatNumero(PREFIJO_COMPROBANTE_COMPRA[c.tipo], c.numero);
+}
+
 /** Descarga el PDF de un ComprobanteCompra (Factura/Nota de crédito/
  * Nota de débito recibida de un proveedor). */
 export async function descargarComprobanteCompraPdf(
@@ -166,7 +177,7 @@ function construirMovimientosProveedor(
     .filter((c) => c.proveedorId === proveedorId && c.estado !== 'anulado')
     .map((c) => ({
       fecha: formatDate(c.fecha),
-      comprobante: formatNumero(PREFIJO_COMPROBANTE_COMPRA[c.tipo], c.numero),
+      comprobante: numeroLegitimoComprobante(c),
       detalle: TIPO_COMPROBANTE_COMPRA_LABEL[c.tipo],
       debe: c.tipo === 'nota_credito' ? undefined : c.total,
       haber: c.tipo === 'nota_credito' ? c.total : undefined,
@@ -236,9 +247,7 @@ export async function descargarComprobantePagoPdf(
       imputaciones: pago.imputaciones.map((imp) => {
         const comp = comprobantes.find((c) => c.id === imp.comprobanteId);
         return {
-          comprobante: comp
-            ? formatNumero(PREFIJO_COMPROBANTE_COMPRA[comp.tipo], comp.numero)
-            : 'Comprobante eliminado',
+          comprobante: comp ? numeroLegitimoComprobante(comp) : 'Comprobante eliminado',
           montoImputado: imp.montoImputado,
         };
       }),
