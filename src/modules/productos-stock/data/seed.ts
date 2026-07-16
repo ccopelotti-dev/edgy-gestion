@@ -11,6 +11,7 @@ export const seedState: ProductosStockState = {
   productos: [],
   insumos: [],
   formulas: [],
+  producciones: [],
   movimientos: [],
   recepciones: [],
   transferencias: [],

@@ -82,6 +82,7 @@ import type {
   ComboComponenteEleccion,
   Formula,
   LineaFormula,
+  Produccion,
   MovimientoStock,
   Recepcion,
   LineaRecepcion,
@@ -420,10 +421,22 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const formula = state.formulas.find((f) => f.id === formulaId)
       if (!formula) return state
 
-      // Un id de lote propio (no el id de la fórmula) para poder agrupar
-      // todos los movimientos de ESTA ejecución puntual -- dos lotes de la
-      // misma fórmula en fechas distintas quedan distinguibles.
+      // Fase 9 (cierre): el id del lote ahora es el id de un registro real
+      // en `producciones` (antes era un uuid descartable que no apuntaba a
+      // nada) -- así los movimientos de esta ejecución puntual quedan
+      // agrupados bajo una fila que sí se puede listar como historial.
       const loteId = uid()
+      const nuevaProduccion: Produccion = {
+        id: loteId,
+        formulaId,
+        productoId: formula.productoId,
+        factor,
+        cantidadTeorica: formula.cantidadProducida * factor,
+        cantidadRealProducida,
+        fecha,
+        notas,
+        createdAt: todayISO(),
+      }
       const nuevosMovimientos: MovimientoStock[] = []
       let insumos = state.insumos
       let productos = state.productos
@@ -466,6 +479,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         ...state,
         productos,
         insumos,
+        producciones: [...state.producciones, nuevaProduccion],
         movimientos: [...state.movimientos, ...nuevosMovimientos],
       }
     }
@@ -908,6 +922,20 @@ function formulaLineaToRow(l: LineaFormula, formulaId: string) {
   }
 }
 
+function produccionToRow(p: Produccion, clienteId: string) {
+  return {
+    id: p.id,
+    cliente_id: clienteId,
+    formula_id: p.formulaId,
+    producto_id: p.productoId,
+    factor: p.factor,
+    cantidad_teorica: p.cantidadTeorica,
+    cantidad_real_producida: p.cantidadRealProducida,
+    fecha: p.fecha,
+    notas: p.notas || null,
+  }
+}
+
 function movimientoToRow(m: MovimientoStock, clienteId: string) {
   return {
     id: m.id,
@@ -1212,6 +1240,14 @@ function syncToSupabase(
       return
 
     case 'REGISTRAR_PRODUCCION': {
+      // Fase 9 (cierre): la fila de `producciones` es el registro real del
+      // lote -- se inserta primero (igual que ADD_FORMULA/ADD_RECEPCION con
+      // sus líneas) para que exista antes de que corra cualquier otra
+      // política RLS que la referencie más adelante.
+      const p = nextState.producciones[nextState.producciones.length - 1]
+      if (p) {
+        supabase.from('producciones').insert(produccionToRow(p, clienteId)).then(logErr('alta de producción'))
+      }
       // Mismo patrón que CONFIRMAR_RECEPCION: los movimientos nuevos son
       // los que el reducer agregó al final del array.
       const nuevosMovimientos = nextState.movimientos.slice(prevState.movimientos.length)
@@ -1380,6 +1416,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     comboComponentesEleccionRes,
     formulasRes,
     formulaLineasRes,
+    produccionesRes,
     movimientosRes,
     recepcionesRes,
     recepcionLineasRes,
@@ -1402,6 +1439,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('combo_componentes_eleccion').select('*'),
     supabase.from('formulas').select('*').order('created_at'),
     supabase.from('formula_lineas').select('*'),
+    supabase.from('producciones').select('*').order('fecha'),
     supabase.from('movimientos_stock').select('*').order('fecha'),
     supabase.from('recepciones').select('*').order('created_at'),
     supabase.from('recepcion_lineas').select('*'),
@@ -1569,6 +1607,18 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     mermaPorcentaje: Number(r.merma_porcentaje ?? 0),
   }))
 
+  const producciones: Produccion[] = (produccionesRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    formulaId: r.formula_id,
+    productoId: r.producto_id,
+    factor: Number(r.factor),
+    cantidadTeorica: Number(r.cantidad_teorica),
+    cantidadRealProducida: Number(r.cantidad_real_producida),
+    fecha: r.fecha,
+    notas: r.notas ?? undefined,
+    createdAt: (r.created_at ?? '').slice(0, 10),
+  }))
+
   const movimientos: MovimientoStock[] = (movimientosRes.data ?? []).map((r: any) => ({
     id: r.id,
     tipo: r.tipo,
@@ -1663,6 +1713,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     plantillasGarantia,
     combos,
     formulas,
+    producciones,
     movimientos,
     recepciones,
     transferencias,

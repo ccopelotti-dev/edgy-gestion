@@ -11,12 +11,13 @@ import {
   Cog,
   Factory,
 } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useProductosStock } from '../data/store'
 import { Amount, EmptyState } from '../components/productos/display'
 import { ProductoDialog } from '../components/productos/dialogs'
-import { formatARS, todayISO } from '../lib/format'
+import { formatARS } from '../lib/format'
 import {
   UNIDADES,
   unidadAbrev,
@@ -271,6 +272,8 @@ function FormulaSection({
 
 export default function FormularProducto() {
   const { state, dispatch } = useProductosStock()
+  const { pathname } = useLocation()
+  const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
 
   const [selectedProductoId, setSelectedProductoId] = useState('')
   const [formula, setFormula] = useState<FormulaLocal | null>(null)
@@ -283,15 +286,6 @@ export default function FormularProducto() {
   // recién creado para que el usuario caiga directo en "Crear formula".
   const [nuevoProductoOpen, setNuevoProductoOpen] = useState(false)
   const productosLengthAntesDeCrear = useRef<number | null>(null)
-
-  // Fase 9: "Registrar producción" -- ejecutar la fórmula guardada como un
-  // lote real (descuenta insumos, suma stock del producto terminado). Solo
-  // tiene sentido para una fórmula ya guardada (existingFormula), no para
-  // un borrador que todavía no tiene id persistido.
-  const [produccionFactor, setProduccionFactor] = useState(1)
-  const [produccionCantidadReal, setProduccionCantidadReal] = useState<number | ''>('')
-  const [produccionFecha, setProduccionFecha] = useState(todayISO())
-  const [produccionNotas, setProduccionNotas] = useState('')
 
   // Find existing formula for selected product
   const existingFormula = useMemo(
@@ -482,36 +476,6 @@ export default function FormularProducto() {
       })
     }
     setDirty(false)
-  }
-
-  // Fase 9: sugerencia de rendimiento teórico para este lote (factor ×
-  // cantidadProducida) -- el operador la puede pisar con el rendimiento
-  // REAL de este lote puntual, que varía de lote a lote.
-  const cantidadTeoricaLote = existingFormula
-    ? existingFormula.cantidadProducida * produccionFactor
-    : 0
-
-  function handleRegistrarProduccion() {
-    if (!existingFormula) return
-    const cantidadReal =
-      produccionCantidadReal === '' ? cantidadTeoricaLote : produccionCantidadReal
-    if (cantidadReal <= 0 || produccionFactor <= 0) return
-
-    dispatch({
-      type: 'REGISTRAR_PRODUCCION',
-      payload: {
-        formulaId: existingFormula.id,
-        factor: produccionFactor,
-        cantidadRealProducida: cantidadReal,
-        fecha: produccionFecha,
-        notas: produccionNotas || undefined,
-      },
-    })
-
-    setProduccionFactor(1)
-    setProduccionCantidadReal('')
-    setProduccionFecha(todayISO())
-    setProduccionNotas('')
   }
 
   // Separate lines by type
@@ -766,80 +730,25 @@ export default function FormularProducto() {
             </Button>
           </div>
 
-          {/* Fase 9: Registrar producción -- solo para una fórmula ya guardada */}
+          {/* Fase 9 (cierre): "Registrar producción" se mudó a su propia
+              pestaña -- más fácil de encontrar cuando ya se terminó de
+              producir un lote, en vez de tener que volver a abrir esta
+              fórmula puntual. Acá queda solo un puntero directo. */}
           {existingFormula && (
             <div className="rounded-lg border bg-card p-4 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <Factory className="h-4 w-4 text-muted-foreground" />
-                <h4 className="text-sm font-semibold">Registrar producción</h4>
-              </div>
-              <p className="text-xs text-muted-foreground mb-4">
-                Ejecuta esta formula como un lote real: descuenta el stock de los insumos
-                consumidos y suma el stock de {selectedProducto.nombre}. El rendimiento real de
-                este lote puede diferir del teorico (variacion normal de merma).
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Factor de lote
-                  </label>
-                  <input
-                    className={cn(inputClass, 'text-right')}
-                    type="number"
-                    min={0.01}
-                    step={0.5}
-                    value={produccionFactor || ''}
-                    onChange={(e) => setProduccionFactor(parseFloat(e.target.value) || 0)}
-                  />
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Factory className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    ¿Ya produjiste un lote de {selectedProducto.nombre}? Registralo en la
+                    pestaña Producción.
+                  </p>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Rendimiento real ({unidadAbrev(existingFormula.unidadProducida)})
-                  </label>
-                  <input
-                    className={cn(inputClass, 'text-right')}
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    placeholder={cantidadTeoricaLote.toFixed(2)}
-                    value={produccionCantidadReal}
-                    onChange={(e) =>
-                      setProduccionCantidadReal(
-                        e.target.value === '' ? '' : parseFloat(e.target.value) || 0,
-                      )
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Fecha</label>
-                  <input
-                    className={inputClass}
-                    type="date"
-                    value={produccionFecha}
-                    onChange={(e) => setProduccionFecha(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Notas (opcional)
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={produccionNotas}
-                    onChange={(e) => setProduccionNotas(e.target.value)}
-                    placeholder="Ej: lote de prueba"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mb-3">
-                Teorico para este factor: {cantidadTeoricaLote.toFixed(2)}{' '}
-                {unidadAbrev(existingFormula.unidadProducida)}. Si dejas el campo de rendimiento
-                vacio, se usa el teorico.
-              </p>
-              <div className="flex justify-end">
-                <Button onClick={handleRegistrarProduccion} variant="outline">
-                  <Factory className="h-4 w-4 mr-2" />
-                  Registrar produccion
+                <Button asChild variant="outline">
+                  <Link to={`${base}/produccion`}>
+                    <Factory className="h-4 w-4 mr-2" />
+                    Ir a Producción
+                  </Link>
                 </Button>
               </div>
             </div>

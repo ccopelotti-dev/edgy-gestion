@@ -15,6 +15,7 @@ import GarantiasEmitidas from './pages/GarantiasEmitidas'
 import Combos from './pages/Combos'
 import Insumos from './pages/Insumos'
 import FormularProducto from './pages/FormularProducto'
+import Produccion from './pages/Produccion'
 import Stock from './pages/Stock'
 import Recepcion from './pages/Recepcion'
 import Transferencias from './pages/Transferencias'
@@ -35,6 +36,7 @@ export default function ProductosStockModule() {
           <Route path="combos" element={<Combos />} />
           <Route path="insumos" element={<Insumos />} />
           <Route path="formular" element={<FormularProducto />} />
+          <Route path="produccion" element={<Produccion />} />
           <Route path="stock" element={<Stock />} />
           <Route path="recepcion" element={<Recepcion />} />
           <Route path="transferencias" element={<Transferencias />} />

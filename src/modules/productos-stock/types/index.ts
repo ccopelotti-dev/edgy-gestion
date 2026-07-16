@@ -374,6 +374,30 @@ export interface Formula {
   createdAt: string
 }
 
+// ─── Producción (Fase 9, cierre) ─────────────────────────────────────────────
+// Antes, "Registrar producción" (ver Formular Producto) solo generaba
+// movimientos_stock anónimos con origen: 'formula' -- no había ningún
+// registro propio del LOTE ejecutado, así que no se podía armar un
+// historial de producción real (fechas, factor usado, rendimiento real
+// vs. teórico). Esta fase agrega ese registro de primera clase: cada vez
+// que se ejecuta REGISTRAR_PRODUCCION se crea una fila acá, y los
+// movimientos de stock de ese lote comparten `origenId` con `Produccion.id`
+// (antes `origenId` era un uuid descartable que no apuntaba a nada real).
+export interface Produccion {
+  id: string
+  formulaId: string
+  productoId: string
+  /** Multiplicador de lote (1 = la receta tal cual, 2 = el doble, etc). */
+  factor: number
+  /** cantidadProducida de la fórmula × factor, calculado al momento de registrar. */
+  cantidadTeorica: number
+  /** Rendimiento REAL de este lote puntual (puede diferir del teórico). */
+  cantidadRealProducida: number
+  fecha: string
+  notas?: string
+  createdAt: string
+}
+
 // ─── Stock ──────────────────────────────────────────────────────────────────────
 
 export type MotivoAjuste =
@@ -495,6 +519,7 @@ export interface ProductosStockState {
   plantillasGarantia: PlantillaGarantia[]
   combos: Combo[]
   formulas: Formula[]
+  producciones: Produccion[]
   movimientos: MovimientoStock[]
   recepciones: Recepcion[]
   transferencias: Transferencia[]
