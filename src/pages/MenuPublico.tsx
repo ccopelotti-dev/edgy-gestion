@@ -646,6 +646,23 @@ export default function MenuPublico() {
             </div>
           </div>
 
+          {/* Fase 8 (cierre): antes la única forma de agregar más
+              productos era la flecha de "volver" arriba a la izquierda
+              -- funcionaba (el carrito y los datos ya tipeados no se
+              pierden al volver a vista === 'menu'), pero no era obvio.
+              Este botón hace lo mismo de forma explícita. */}
+          {itemsCarrito.length > 0 && (
+            <button
+              onClick={() => setVista('menu')}
+              disabled={vista === 'enviando'}
+              className="flex items-center justify-center gap-1.5 rounded-md border px-4 py-2 text-sm font-medium disabled:opacity-50"
+              style={{ borderColor: color, color }}
+            >
+              <Plus className="h-4 w-4" />
+              Agregar más productos
+            </button>
+          )}
+
           {errorMsg && (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {errorMsg}

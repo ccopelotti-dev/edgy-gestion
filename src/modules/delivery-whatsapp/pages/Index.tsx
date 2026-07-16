@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Trash2, ShieldCheck, QrCode } from 'lucide-react'
+import { Plus, Trash2, ShieldCheck, QrCode, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -17,8 +17,9 @@ import { useClienteActual } from '@/hooks/useClienteActual'
 import { usePedidosDelivery, useDeliveryWhatsapp } from '../data/store'
 import { formatARS, formatFecha } from '../lib/format'
 import { ESTADO_PEDIDO_DELIVERY_LABEL } from '../types'
-import type { ItemPedidoDelivery } from '../types'
+import type { ItemPedidoDelivery, PedidoDelivery } from '../types'
 import { useCatalogoDelivery, etiquetaVarianteDelivery, type ProductoCatalogoDelivery } from '../lib/catalogoDelivery'
+import { descargarPedidoPdf } from '../lib/pdfPedido'
 
 interface ClienteVentaLite {
   id: string
@@ -66,6 +67,24 @@ export default function Index() {
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<ItemPedidoDelivery[]>([{ ...ITEM_VACIO }])
   const [busquedaProducto, setBusquedaProducto] = useState('')
+
+  // Fase 8 (cierre): ícono de descarga de PDF por fila, mismo criterio
+  // que Ventas/Compras (Fase 17) -- un pedido de Delivery todavía no
+  // es un comprobante fiscal, así que se arma un PDF simple (sin CAE)
+  // reusando el mismo motor compartido.
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null)
+
+  async function handleDescargarPdf(pedido: PedidoDelivery) {
+    if (!cliente) return
+    setGenerandoPdfId(pedido.id)
+    try {
+      await descargarPedidoPdf(cliente, pedido)
+    } catch (err) {
+      console.error('Delivery WhatsApp · error generando el PDF del pedido:', err)
+    } finally {
+      setGenerandoPdfId(null)
+    }
+  }
 
   useEffect(() => {
     if (!cliente?.id) return
@@ -375,12 +394,13 @@ export default function Index() {
                 <th className="px-3 py-2">Dirección</th>
                 <th className="px-3 py-2 text-right">Total</th>
                 <th className="px-3 py-2">Estado</th>
+                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>
               {activos.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="text-muted-foreground px-3 py-6 text-center">
+                  <td colSpan={5} className="text-muted-foreground px-3 py-6 text-center">
                     No hay pedidos en curso.
                   </td>
                 </tr>
@@ -411,6 +431,24 @@ export default function Index() {
                         {ESTADO_PEDIDO_DELIVERY_LABEL[p.estado]}
                       </span>
                     </td>
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          e.preventDefault()
+                          handleDescargarPdf(p)
+                        }}
+                        disabled={generandoPdfId === p.id}
+                        title="Descargar PDF"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                      >
+                        {generandoPdfId === p.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -430,6 +468,7 @@ export default function Index() {
                   <th className="px-3 py-2">Fecha</th>
                   <th className="px-3 py-2 text-right">Total</th>
                   <th className="px-3 py-2">Estado</th>
+                  <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
@@ -458,6 +497,24 @@ export default function Index() {
                       >
                         {ESTADO_PEDIDO_DELIVERY_LABEL[p.estado]}
                       </span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          e.preventDefault()
+                          handleDescargarPdf(p)
+                        }}
+                        disabled={generandoPdfId === p.id}
+                        title="Descargar PDF"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                      >
+                        {generandoPdfId === p.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                      </button>
                     </td>
                   </tr>
                 ))}

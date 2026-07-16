@@ -44,6 +44,12 @@ export interface PedidoDelivery {
    * comprobante). `id` en cambio identifica la fila de extensión
    * logística en `pedidos_delivery` -- son dos tablas distintas. */
   ordenVentaId: string
+  /** Fase 8 (cierre): número correlativo de `ordenes_venta.numero` --
+   * solo para armar un identificador legible en el PDF de descarga
+   * ("PED-00007"). Opcional porque un pedido recién creado a mano
+   * (CREAR_PEDIDO) todavía no lo conoce en el estado optimista local
+   * -- se completa en la próxima carga desde Supabase. */
+  numero?: number
   clienteVentaId?: string
   clienteVentaNombre?: string
   clienteNombre: string

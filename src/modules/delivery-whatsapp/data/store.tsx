@@ -317,6 +317,7 @@ async function fetchDeliveryState(): Promise<DeliveryWhatsappState> {
     return {
       id: r.id,
       ordenVentaId: ov.id,
+      numero: ov.numero ?? undefined,
       clienteVentaId: ov.cliente_venta_id ?? undefined,
       clienteVentaNombre: ov.clientes_venta?.nombre ?? undefined,
       clienteNombre: ov.contacto_nombre ?? ov.clientes_venta?.nombre ?? 'Sin nombre',
