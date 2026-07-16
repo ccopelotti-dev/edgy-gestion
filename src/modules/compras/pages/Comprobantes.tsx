@@ -118,7 +118,11 @@ export default function Comprobantes() {
         const prov = proveedores.find((p) => p.id === c.proveedorId);
         const matchProv = prov?.nombre.toLowerCase().includes(q);
         const matchNum = String(c.numero).includes(q);
-        if (!matchProv && !matchNum) return false;
+        // También se puede buscar por el Nro. de Comprobante fiscal del
+        // proveedor (ej. "0001-00000542") -- es lo que el operador suele
+        // tener a mano al buscar una compra puntual.
+        const matchNumProveedor = c.numeroComprobanteProveedor?.toLowerCase().includes(q);
+        if (!matchProv && !matchNum && !matchNumProveedor) return false;
       }
       return true;
     });
@@ -143,6 +147,8 @@ export default function Comprobantes() {
   const handleSaveComprobante = async (data: {
     tipo: TipoComprobanteCompra;
     proveedorId: string;
+    /** Nro. de comprobante fiscal del proveedor (ej. "0001-00000542"). */
+    numeroComprobanteProveedor: string;
     fecha: string;
     fechaVencimiento: string;
     medioPago: any;
@@ -180,6 +186,7 @@ export default function Comprobantes() {
         saldoPendiente: total,
         controlRemision: data.controlRemision,
         numeroRemito: data.numeroRemito || undefined,
+        numeroComprobanteProveedor: data.numeroComprobanteProveedor || undefined,
         stockActualizado: false,
         createdAt: now,
         updatedAt: now,
@@ -398,7 +405,14 @@ export default function Comprobantes() {
                       <td className="px-4 py-3 text-gray-400">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">{formatNumero(PREFIJO_COMPROBANTE_COMPRA[comp.tipo], comp.numero)}</td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        <div>{formatNumero(PREFIJO_COMPROBANTE_COMPRA[comp.tipo], comp.numero)}</div>
+                        {comp.numeroComprobanteProveedor && (
+                          <div className="text-gray-400 font-normal mt-0.5" title="Nro. de Comprobante del proveedor">
+                            {comp.numeroComprobanteProveedor}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
                           {TIPO_COMPROBANTE_COMPRA_LABEL[comp.tipo]}

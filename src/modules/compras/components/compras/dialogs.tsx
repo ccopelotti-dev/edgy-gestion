@@ -43,6 +43,12 @@ const contentClass =
 const contentWideClass =
   'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-lg p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto z-50';
 
+// Un poco más ancho que contentWideClass -- el modal de comprobante de
+// compra sumó columnas (UM, buscador de catálogo, Control de Remisión)
+// y quedó apretado con el ancho estándar.
+const contentComprobanteClass =
+  'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-lg p-6 w-full max-w-4xl max-h-[85vh] overflow-y-auto z-50';
+
 const labelClass = 'block text-sm font-medium text-gray-700 mb-1';
 const inputClass =
   'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900';
@@ -478,6 +484,9 @@ interface ComprobanteCompraDialogProps {
   onSave: (data: {
     tipo: TipoComprobanteCompra;
     proveedorId: string;
+    /** Nro. de comprobante fiscal del proveedor (ej. "0001-00000542") --
+     * ver comentario en ComprobanteCompra.numeroComprobanteProveedor. */
+    numeroComprobanteProveedor: string;
     fecha: string;
     fechaVencimiento: string;
     medioPago: MedioPagoCompra;
@@ -541,13 +550,10 @@ type SugerenciaCatalogoCompra =
   | { tipo: 'insumo'; item: InsumoCatalogoCompra }
   | { tipo: 'producto'; item: ProductoCatalogoCompra };
 
-/** Formatea un número de remito con el patrón habitual AR: 4 dígitos de
- * punto de venta + guion + 8 dígitos de numeración (ej. 0001-00000542).
- * Acepta que el usuario tipee solo números -- el guion se inserta solo. */
-function formatearRemito(raw: string): string {
-  const digits = raw.replace(/\D/g, '').slice(0, 12);
-  if (digits.length <= 4) return digits;
-  return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+/** Deja solo dígitos y corta a `max` caracteres -- para los campos de Pto.
+ * Vta / Número de remito (el usuario tipea libre, sin ceros). */
+function soloDigitos(raw: string, max: number): string {
+  return raw.replace(/\D/g, '').slice(0, max);
 }
 
 export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSave }: ComprobanteCompraDialogProps) {
@@ -563,9 +569,33 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
   const [intentoGuardar, setIntentoGuardar] = useState(false);
   const itemsSectionRef = useRef<HTMLDivElement>(null);
 
+  // Nro. de comprobante fiscal del PROVEEDOR (el impreso en la factura
+  // física, ej. "0001-00000542") -- distinto del correlativo interno de
+  // Edgy Gestión. Fundamental para identificar la compra y para el libro
+  // IVA Compras del período fiscal. Mismo criterio de UI que Nro. de
+  // Remito más abajo: dos campos (Pto. Vta 4 díg. + Número 8 díg.) con
+  // autocompletado de ceros y avance de foco al presionar Enter.
+  const [comprobantePtoVta, setComprobantePtoVta] = useState('');
+  const [comprobanteNumero, setComprobanteNumero] = useState('');
+  const comprobanteNumeroInputRef = useRef<HTMLInputElement>(null);
+  const numeroComprobanteProveedor =
+    comprobantePtoVta || comprobanteNumero
+      ? `${comprobantePtoVta.padStart(4, '0')}-${comprobanteNumero.padStart(8, '0')}`
+      : '';
+
   // Conexión con Recepción (stock).
   const [controlRemision, setControlRemision] = useState<ControlRemision>('no');
-  const [numeroRemito, setNumeroRemito] = useState('');
+  // Nro. de remito partido en dos campos (Pto. Vta 4 díg. + Número 8 díg.)
+  // para carga rápida: el operador tipea "1" + Enter (pasa de campo y
+  // completa a "0001") y "521" + Enter (completa a "00000521") sin tener
+  // que tipear los ceros a mano.
+  const [remitoPtoVta, setRemitoPtoVta] = useState('');
+  const [remitoNumero, setRemitoNumero] = useState('');
+  const remitoNumeroInputRef = useRef<HTMLInputElement>(null);
+  const numeroRemito =
+    remitoPtoVta || remitoNumero
+      ? `${remitoPtoVta.padStart(4, '0')}-${remitoNumero.padStart(8, '0')}`
+      : '';
 
   const { cliente: clienteTenant } = useClienteActual();
   const [insumosCatalogo, setInsumosCatalogo] = useState<InsumoCatalogoCompra[]>([]);
@@ -582,8 +612,11 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
       setItems([newComprobanteItemRow()]);
       setErrors({});
       setIntentoGuardar(false);
+      setComprobantePtoVta('');
+      setComprobanteNumero('');
       setControlRemision('no');
-      setNumeroRemito('');
+      setRemitoPtoVta('');
+      setRemitoNumero('');
       setBusquedaCatalogo('');
     }
   }, [open]);
@@ -737,6 +770,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
     }
     onSave({
       tipo, proveedorId, fecha, fechaVencimiento, medioPago,
+      numeroComprobanteProveedor,
       items: construirItems(),
       controlRemision,
       numeroRemito,
@@ -749,14 +783,14 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
-        <Dialog.Content className={contentWideClass}>
+        <Dialog.Content className={contentComprobanteClass}>
           <div className="flex items-center justify-between mb-5">
             <Dialog.Title className="text-lg font-semibold text-gray-900">Nuevo comprobante de compra</Dialog.Title>
             <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
           </div>
 
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className={labelClass}>Tipo</label>
                 <select className={selectClass} value={tipo} onChange={(e) => setTipo(e.target.value as TipoComprobanteCompra)}>
@@ -772,6 +806,40 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                   {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                 </select>
                 {errors.proveedorId && <p className="text-xs text-red-600 mt-1">{errors.proveedorId}</p>}
+              </div>
+              <div>
+                <label className={labelClass}>Nro. de Comprobante</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    className={`${inputClass} w-16 text-center font-mono`}
+                    value={comprobantePtoVta}
+                    onChange={(e) => setComprobantePtoVta(soloDigitos(e.target.value, 4))}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.preventDefault();
+                      setComprobantePtoVta((v) => (v ? v.padStart(4, '0') : v));
+                      comprobanteNumeroInputRef.current?.focus();
+                    }}
+                    onBlur={() => setComprobantePtoVta((v) => (v ? v.padStart(4, '0') : v))}
+                    placeholder="0001"
+                    maxLength={4}
+                  />
+                  <span className="text-gray-400">-</span>
+                  <input
+                    ref={comprobanteNumeroInputRef}
+                    className={`${inputClass} w-28 text-center font-mono`}
+                    value={comprobanteNumero}
+                    onChange={(e) => setComprobanteNumero(soloDigitos(e.target.value, 8))}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.preventDefault();
+                      setComprobanteNumero((v) => (v ? v.padStart(8, '0') : v));
+                    }}
+                    onBlur={() => setComprobanteNumero((v) => (v ? v.padStart(8, '0') : v))}
+                    placeholder="00000542"
+                    maxLength={8}
+                  />
+                </div>
               </div>
             </div>
 
@@ -909,11 +977,11 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                           </td>
                           <td className="px-2 py-1.5">
                             <input
-                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none ${precioInvalido ? '' : ''}`}
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
                               type="number"
                               min={0}
                               step={0.01}
-                              value={item.cantidad}
+                              value={item.cantidad || ''}
                               onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
                             />
                           </td>
@@ -934,7 +1002,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                               type="number"
                               min={0}
                               step={0.01}
-                              value={item.precioUnitario}
+                              value={item.precioUnitario || ''}
                               onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))}
                             />
                           </td>
@@ -944,7 +1012,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                               type="number"
                               min={0}
                               max={100}
-                              value={item.descuento}
+                              value={item.descuento || ''}
                               onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))}
                             />
                           </td>
@@ -1028,13 +1096,41 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                 </div>
                 <div>
                   <label className={labelClass}>Nro. de remito</label>
-                  <input
-                    className={inputClass}
-                    value={numeroRemito}
-                    onChange={(e) => setNumeroRemito(formatearRemito(e.target.value))}
-                    placeholder="0001-00000542"
-                    maxLength={13}
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      className={`${inputClass} w-16 text-center font-mono`}
+                      value={remitoPtoVta}
+                      onChange={(e) => setRemitoPtoVta(soloDigitos(e.target.value, 4))}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        setRemitoPtoVta((v) => (v ? v.padStart(4, '0') : v));
+                        remitoNumeroInputRef.current?.focus();
+                      }}
+                      onBlur={() => setRemitoPtoVta((v) => (v ? v.padStart(4, '0') : v))}
+                      placeholder="0001"
+                      maxLength={4}
+                    />
+                    <span className="text-gray-400">-</span>
+                    <input
+                      ref={remitoNumeroInputRef}
+                      className={`${inputClass} w-28 text-center font-mono`}
+                      value={remitoNumero}
+                      onChange={(e) => setRemitoNumero(soloDigitos(e.target.value, 8))}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        setRemitoNumero((v) => (v ? v.padStart(8, '0') : v));
+                      }}
+                      onBlur={() => setRemitoNumero((v) => (v ? v.padStart(8, '0') : v))}
+                      placeholder="00000542"
+                      maxLength={8}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Tipeá solo los números (ej. "1" Enter, "521" Enter) -- los ceros se
+                    completan solos.
+                  </p>
                 </div>
               </div>
             </div>

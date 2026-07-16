@@ -191,6 +191,8 @@ export default function OrdenesCompra() {
   const handleSaveComprobante = async (data: {
     tipo: TipoComprobanteCompra;
     proveedorId: string;
+    /** Nro. de comprobante fiscal del proveedor (ej. "0001-00000542"). */
+    numeroComprobanteProveedor: string;
     fecha: string;
     fechaVencimiento: string;
     medioPago: any;
@@ -225,6 +227,7 @@ export default function OrdenesCompra() {
         saldoPendiente: total,
         controlRemision: data.controlRemision,
         numeroRemito: data.numeroRemito || undefined,
+        numeroComprobanteProveedor: data.numeroComprobanteProveedor || undefined,
         stockActualizado: false,
         createdAt: now,
         updatedAt: now,

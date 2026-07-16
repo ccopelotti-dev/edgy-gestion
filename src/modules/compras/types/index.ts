@@ -161,6 +161,14 @@ export interface ComprobanteCompra {
   saldoPendiente: number;
   controlRemision: ControlRemision;
   numeroRemito?: string;
+  /**
+   * Nro. de comprobante fiscal del PROVEEDOR (el que viene impreso en la
+   * factura física, ej. "0001-00000542") -- distinto de `numero`, que es el
+   * correlativo interno de Edgy Gestión (FC-00001, FC-00002...). Es el dato
+   * clave para identificar la compra frente al proveedor y para el libro
+   * IVA Compras del período fiscal.
+   */
+  numeroComprobanteProveedor?: string;
   /** true una vez que se generó la Recepción correspondiente en Productos y
    * Stock -- evita sumar el mismo stock dos veces. */
   stockActualizado: boolean;
