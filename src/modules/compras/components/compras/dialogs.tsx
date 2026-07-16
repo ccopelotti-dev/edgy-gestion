@@ -3,9 +3,9 @@
 // Edgy Gestion · React 19 + Radix UI + Tailwind CSS 4
 // ============================================================
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2 } from 'lucide-react';
+import { X, Plus, Trash2, Search, Factory } from 'lucide-react';
 
 import type {
   Proveedor,
@@ -16,6 +16,7 @@ import type {
   ComprobanteCompra,
   ImputacionPago,
   ItemComprobanteCompra,
+  ControlRemision,
 } from '../../types';
 
 import {
@@ -27,6 +28,9 @@ import {
 } from '../../types';
 
 import { formatARS, todayISO } from '../../lib/format';
+import { supabase } from '@/lib/supabase';
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { UNIDADES, unidadAbrev, type UnidadMedida } from '@/modules/productos-stock/types';
 
 // ─── Shared styles ───────────────────────────────────────────
 
@@ -48,6 +52,8 @@ const btnPrimary =
   'px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 const btnSecondary =
   'px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors';
+const btnStock =
+  'px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5';
 const btnIcon =
   'p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors';
 
@@ -476,6 +482,11 @@ interface ComprobanteCompraDialogProps {
     fechaVencimiento: string;
     medioPago: MedioPagoCompra;
     items: Omit<ItemComprobanteCompra, 'id'>[];
+    controlRemision: ControlRemision;
+    numeroRemito: string;
+    /** true si se apretó "Actualizar stock" (guardar + empujar stock de una),
+     * false si se apretó "Guardar" (solo el registro fiscal, sin tocar stock). */
+    actualizarStock: boolean;
   }) => void;
 }
 
@@ -486,15 +497,57 @@ interface ComprobanteItemRow {
   precioUnitario: number;
   descuento: number;
   alicuotaIva: number;
+  /** Vínculo opcional al catálogo real de Productos y Stock -- ver
+   * buscador de insumo/producto más abajo. Mutuamente excluyentes. */
+  insumoId?: string;
+  productoId?: string;
+  /** Unidad en la que se cargó `cantidad`. Por default 'unidad'; si la
+   * línea se vinculó a un insumo/producto, se precarga con SU unidad de
+   * stock (el operador la puede cambiar, ej. a 'kg' si así viene la
+   * factura, y se convierte al confirmar "Actualizar stock"). */
+  unidad: UnidadMedida;
 }
 
 function newComprobanteItemRow(): ComprobanteItemRow {
-  return { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, alicuotaIva: 21 };
+  return { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, alicuotaIva: 21, unidad: 'unidad' };
 }
 
 /** Una fila de item se considera incompleta si falta la descripcion o el precio. */
 function filaItemIncompleta(item: ComprobanteItemRow): boolean {
   return !item.descripcion.trim() || item.precioUnitario <= 0;
+}
+
+// Conexión Compras -> Recepción: buscador de insumo/producto real del
+// catálogo de Productos y Stock. Este módulo no está montado dentro de
+// ProductosStockProvider, así que se consulta Supabase directo (mismo
+// criterio que el buscador de catálogo de Ventas, Fase 18).
+interface InsumoCatalogoCompra {
+  id: string;
+  nombre: string;
+  unidad: UnidadMedida;
+  costo: number;
+  stock: number;
+}
+
+interface ProductoCatalogoCompra {
+  id: string;
+  nombre: string;
+  unidad: UnidadMedida;
+  costo: number;
+  stock: number;
+}
+
+type SugerenciaCatalogoCompra =
+  | { tipo: 'insumo'; item: InsumoCatalogoCompra }
+  | { tipo: 'producto'; item: ProductoCatalogoCompra };
+
+/** Formatea un número de remito con el patrón habitual AR: 4 dígitos de
+ * punto de venta + guion + 8 dígitos de numeración (ej. 0001-00000542).
+ * Acepta que el usuario tipee solo números -- el guion se inserta solo. */
+function formatearRemito(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 12);
+  if (digits.length <= 4) return digits;
+  return `${digits.slice(0, 4)}-${digits.slice(4)}`;
 }
 
 export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSave }: ComprobanteCompraDialogProps) {
@@ -510,6 +563,15 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
   const [intentoGuardar, setIntentoGuardar] = useState(false);
   const itemsSectionRef = useRef<HTMLDivElement>(null);
 
+  // Conexión con Recepción (stock).
+  const [controlRemision, setControlRemision] = useState<ControlRemision>('no');
+  const [numeroRemito, setNumeroRemito] = useState('');
+
+  const { cliente: clienteTenant } = useClienteActual();
+  const [insumosCatalogo, setInsumosCatalogo] = useState<InsumoCatalogoCompra[]>([]);
+  const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoCompra[]>([]);
+  const [busquedaCatalogo, setBusquedaCatalogo] = useState('');
+
   useEffect(() => {
     if (open) {
       setTipo('factura');
@@ -520,8 +582,103 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
       setItems([newComprobanteItemRow()]);
       setErrors({});
       setIntentoGuardar(false);
+      setControlRemision('no');
+      setNumeroRemito('');
+      setBusquedaCatalogo('');
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !clienteTenant?.id) return;
+    let activo = true;
+
+    async function cargarCatalogo() {
+      const [insumosRes, productosRes] = await Promise.all([
+        supabase
+          .from('insumos')
+          .select('id, nombre, unidad, costo, stock')
+          .eq('cliente_id', clienteTenant!.id)
+          .order('nombre'),
+        supabase
+          .from('productos')
+          .select('id, nombre, unidad_venta, costo, stock')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('estado', 'activo')
+          .order('nombre'),
+      ]);
+      if (!activo) return;
+
+      setInsumosCatalogo(
+        ((insumosRes.data ?? []) as any[]).map((i) => ({
+          id: i.id,
+          nombre: i.nombre,
+          unidad: i.unidad as UnidadMedida,
+          costo: Number(i.costo),
+          stock: Number(i.stock),
+        })),
+      );
+      setProductosCatalogo(
+        ((productosRes.data ?? []) as any[]).map((p) => ({
+          id: p.id,
+          nombre: p.nombre,
+          unidad: p.unidad_venta as UnidadMedida,
+          costo: Number(p.costo),
+          stock: Number(p.stock),
+        })),
+      );
+    }
+
+    cargarCatalogo();
+    return () => {
+      activo = false;
+    };
+  }, [open, clienteTenant?.id]);
+
+  const sugerenciasCatalogo = useMemo<SugerenciaCatalogoCompra[]>(() => {
+    const q = busquedaCatalogo.trim().toLowerCase();
+    if (!q) return [];
+    const insumos: SugerenciaCatalogoCompra[] = insumosCatalogo
+      .filter((i) => i.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'insumo' as const, item }));
+    const productos: SugerenciaCatalogoCompra[] = productosCatalogo
+      .filter((p) => p.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'producto' as const, item }));
+    return [...insumos, ...productos].slice(0, 8);
+  }, [busquedaCatalogo, insumosCatalogo, productosCatalogo]);
+
+  const handleAgregarLineaInsumo = useCallback((insumo: InsumoCatalogoCompra) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        key: generarId(),
+        descripcion: insumo.nombre,
+        cantidad: 1,
+        precioUnitario: insumo.costo,
+        descuento: 0,
+        alicuotaIva: 21,
+        insumoId: insumo.id,
+        unidad: insumo.unidad,
+      },
+    ]);
+    setBusquedaCatalogo('');
+  }, []);
+
+  const handleAgregarLineaProducto = useCallback((producto: ProductoCatalogoCompra) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        key: generarId(),
+        descripcion: producto.nombre,
+        cantidad: 1,
+        precioUnitario: producto.costo,
+        descuento: 0,
+        alicuotaIva: 21,
+        productoId: producto.id,
+        unidad: producto.unidad,
+      },
+    ]);
+    setBusquedaCatalogo('');
+  }, []);
 
   const updateItem = (index: number, field: keyof ComprobanteItemRow, value: string | number) => {
     setItems((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
@@ -536,6 +693,12 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
   const totalNeto = items.reduce((sum, item) => sum + getSubtotal(item), 0);
   const totalIva = items.reduce((sum, item) => sum + getIva(item), 0);
   const totalFinal = totalNeto + totalIva;
+
+  // Solo tiene sentido "Actualizar stock" si al menos una línea está
+  // vinculada al catálogo real (insumo o producto) -- una línea de texto
+  // libre no tiene a qué sumarle stock.
+  const hayLineasVinculadas = items.some((it) => it.insumoId || it.productoId);
+  const actualizarStockDisabled = controlRemision === 'si' || !hayLineasVinculadas;
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
@@ -552,7 +715,19 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
     return Object.keys(next).length === 0;
   };
 
-  const handleSave = () => {
+  const construirItems = (): Omit<ItemComprobanteCompra, 'id'>[] =>
+    items.map((item) => {
+      const subtotal = getSubtotal(item);
+      const montoIva = getIva(item);
+      return {
+        descripcion: item.descripcion.trim(), cantidad: item.cantidad,
+        precioUnitario: item.precioUnitario, descuento: item.descuento,
+        subtotal, alicuotaIva: item.alicuotaIva, montoIva,
+        insumoId: item.insumoId, productoId: item.productoId, unidad: item.unidad,
+      };
+    });
+
+  const handleSave = (actualizarStock: boolean) => {
     if (!validate()) {
       // El mensaje puede quedar fuera de la vista si el usuario scrolleo
       // hacia abajo para completar filas nuevas -- llevamos la seccion de
@@ -562,15 +737,10 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
     }
     onSave({
       tipo, proveedorId, fecha, fechaVencimiento, medioPago,
-      items: items.map((item) => {
-        const subtotal = getSubtotal(item);
-        const montoIva = getIva(item);
-        return {
-          descripcion: item.descripcion.trim(), cantidad: item.cantidad,
-          precioUnitario: item.precioUnitario, descuento: item.descuento,
-          subtotal, alicuotaIva: item.alicuotaIva, montoIva,
-        };
-      }),
+      items: construirItems(),
+      controlRemision,
+      numeroRemito,
+      actualizarStock,
     });
     onOpenChange(false);
   };
@@ -638,12 +808,69 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                 </div>
               )}
 
+              {/* Conexión con Recepción: buscador de insumo/producto real del
+                  catálogo -- clic en una sugerencia agrega una fila ya
+                  vinculada (con su unidad de stock precargada). La carga
+                  manual (texto libre) sigue disponible vía "Agregar". */}
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={busquedaCatalogo}
+                  onChange={(e) => setBusquedaCatalogo(e.target.value)}
+                  placeholder="Vincular a un insumo o producto del catálogo..."
+                  className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+                />
+                {sugerenciasCatalogo.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                    {sugerenciasCatalogo.map((s) =>
+                      s.tipo === 'insumo' ? (
+                        <button
+                          key={`insumo-${s.item.id}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaInsumo(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1.5 text-gray-900">
+                            {s.item.nombre}
+                            <span className="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                              Insumo
+                            </span>
+                          </span>
+                          <span className="text-gray-500">
+                            Stock {s.item.stock} {unidadAbrev(s.item.unidad)}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          key={`producto-${s.item.id}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaProducto(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1.5 text-gray-900">
+                            {s.item.nombre}
+                            <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+                              Producto
+                            </span>
+                          </span>
+                          <span className="text-gray-500">
+                            Stock {s.item.stock} {unidadAbrev(s.item.unidad)}
+                          </span>
+                        </button>
+                      ),
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-gray-600">
                       <th className="text-left px-3 py-2 font-medium">Descripcion</th>
                       <th className="text-right px-3 py-2 font-medium w-20">Cant.</th>
+                      <th className="text-left px-3 py-2 font-medium w-24">UM</th>
                       <th className="text-right px-3 py-2 font-medium w-24">Precio</th>
                       <th className="text-right px-3 py-2 font-medium w-16">Dto.%</th>
                       <th className="text-right px-3 py-2 font-medium w-20">IVA</th>
@@ -656,27 +883,50 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                       const filaInvalida = intentoGuardar && filaItemIncompleta(item);
                       const descripcionInvalida = filaInvalida && !item.descripcion.trim();
                       const precioInvalido = filaInvalida && item.precioUnitario <= 0;
+                      const vinculada = Boolean(item.insumoId || item.productoId);
                       return (
                         <tr
                           key={item.key}
                           className={`border-t border-gray-100 ${filaInvalida ? 'bg-red-50' : ''}`}
                         >
                           <td className="px-2 py-1.5">
-                            <input
-                              className={`w-full border-0 bg-transparent text-sm focus:outline-none ${descripcionInvalida ? 'ring-1 ring-red-400 rounded' : ''}`}
-                              placeholder={descripcionInvalida ? 'Falta la descripcion' : 'Descripcion'}
-                              value={item.descripcion}
-                              onChange={(e) => updateItem(idx, 'descripcion', e.target.value)}
-                            />
+                            <div className="flex items-center gap-1">
+                              <input
+                                className={`w-full border-0 bg-transparent text-sm focus:outline-none ${descripcionInvalida ? 'ring-1 ring-red-400 rounded' : ''}`}
+                                placeholder={descripcionInvalida ? 'Falta la descripcion' : 'Descripcion'}
+                                value={item.descripcion}
+                                onChange={(e) => updateItem(idx, 'descripcion', e.target.value)}
+                              />
+                              {vinculada && (
+                                <span
+                                  title={item.insumoId ? 'Vinculada a un insumo' : 'Vinculada a un producto'}
+                                  className={`shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${item.insumoId ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}
+                                >
+                                  {item.insumoId ? 'Insumo' : 'Producto'}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-2 py-1.5">
                             <input
-                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none ${precioInvalido ? '' : ''}`}
                               type="number"
-                              min={1}
+                              min={0}
+                              step={0.01}
                               value={item.cantidad}
                               onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
                             />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <select
+                              className="w-full border-0 bg-transparent text-xs focus:outline-none"
+                              value={item.unidad}
+                              onChange={(e) => updateItem(idx, 'unidad', e.target.value as UnidadMedida)}
+                            >
+                              {UNIDADES.map((u) => (
+                                <option key={u.value} value={u.value}>{u.label}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-2 py-1.5">
                             <input
@@ -739,11 +989,76 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                 </div>
               </div>
             </div>
+
+            {/* Conexión con Recepción: desdobla el proceso de cargar la
+                compra del control de recepción física. Si hay un control de
+                remito separado (Sí), "Actualizar stock" queda deshabilitado
+                -- la Recepción real se carga a mano más adelante en
+                Productos y Stock, con el mismo número de remito para poder
+                cruzarlas. */}
+            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>Control de Remisión</label>
+                  <div className="flex items-center gap-4 py-1">
+                    <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                      <input
+                        type="radio"
+                        name="control-remision"
+                        checked={controlRemision === 'no'}
+                        onChange={() => setControlRemision('no')}
+                      />
+                      No
+                    </label>
+                    <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                      <input
+                        type="radio"
+                        name="control-remision"
+                        checked={controlRemision === 'si'}
+                        onChange={() => setControlRemision('si')}
+                      />
+                      Sí
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    "Sí" si la mercadería se recibe y controla por separado (Recepción en
+                    Productos y Stock) -- ahí queda deshabilitado "Actualizar stock" para
+                    no duplicar el ingreso.
+                  </p>
+                </div>
+                <div>
+                  <label className={labelClass}>Nro. de remito</label>
+                  <input
+                    className={inputClass}
+                    value={numeroRemito}
+                    onChange={(e) => setNumeroRemito(formatearRemito(e.target.value))}
+                    placeholder="0001-00000542"
+                    maxLength={13}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+          <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <button
+              type="button"
+              className={btnStock}
+              disabled={actualizarStockDisabled}
+              title={
+                controlRemision === 'si'
+                  ? 'Deshabilitado: hay control de remisión pendiente'
+                  : !hayLineasVinculadas
+                    ? 'Vinculá al menos una línea a un insumo o producto del catálogo'
+                    : 'Guarda el comprobante y suma el stock de las líneas vinculadas'
+              }
+              onClick={() => handleSave(true)}
+            >
+              <Factory className="w-4 h-4" />
+              Actualizar stock
+            </button>
             <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
-            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+            <button className={btnPrimary} onClick={() => handleSave(false)}>Guardar</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

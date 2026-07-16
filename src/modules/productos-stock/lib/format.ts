@@ -1,5 +1,7 @@
 // Helpers de formato — misma línea que Tesorería.
 
+import type { UnidadMedida } from '../types'
+
 const currencyFmt = new Intl.NumberFormat('es-AR', {
   style: 'currency',
   currency: 'ARS',
@@ -67,4 +69,42 @@ export function todayISO(): string {
 
 export function formatQty(value: number, unit: string): string {
   return `${numberFmt.format(value)} ${unit}`
+}
+
+// ─── Conversión de unidades ─────────────────────────────────────────────────
+// Usado por Compras (conexión con Recepción, ver actualizarStockCompra.ts):
+// una línea de compra puede cargarse en una unidad distinta a la que el
+// insumo/producto vinculado usa para su stock (ej. comprás "kg" de un
+// insumo que lleva el stock en "gramo"). Solo hay conversión conocida
+// dentro del mismo grupo (peso, volumen, o docena/unidad) -- unidades como
+// 'caja', 'pack', 'rollo', 'hora', 'm2', 'm3' no tienen un factor universal
+// (una "caja" no siempre trae la misma cantidad), así que fuera de su
+// propio grupo no se puede convertir.
+
+const GRUPOS_CONVERSION: Partial<Record<UnidadMedida, number>>[] = [
+  { kg: 1000, gramo: 1 },
+  { litro: 1000, ml: 1 },
+  { docena: 12, unidad: 1 },
+]
+
+/**
+ * Convierte `cantidad` de la unidad `desde` a la unidad `hacia`. Devuelve
+ * `null` si no hay una conversión conocida entre esas dos unidades (el
+ * llamador debe usar la cantidad tal cual en ese caso, avisando al
+ * usuario que no se convirtió).
+ */
+export function convertirUnidad(
+  cantidad: number,
+  desde: UnidadMedida,
+  hacia: UnidadMedida,
+): number | null {
+  if (desde === hacia) return cantidad
+  for (const grupo of GRUPOS_CONVERSION) {
+    const factorDesde = grupo[desde]
+    const factorHacia = grupo[hacia]
+    if (factorDesde != null && factorHacia != null) {
+      return (cantidad * factorDesde) / factorHacia
+    }
+  }
+  return null
 }

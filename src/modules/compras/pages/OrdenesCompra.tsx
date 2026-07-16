@@ -34,6 +34,7 @@ import {
   EmptyState,
 } from '../components/compras/display';
 import { ComprobanteCompraDialog } from '../components/compras/dialogs';
+import { actualizarStockPorCompra } from '../lib/actualizarStockCompra';
 import {
   formatDate,
   formatARS,
@@ -42,7 +43,7 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { EstadoOrdenCompra } from '../types';
+import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision } from '../types';
 import {
   ESTADO_OC_LABEL,
   generarId,
@@ -56,6 +57,7 @@ export default function OrdenesCompra() {
   const proveedores = useProveedores();
   const cotizaciones = useCotizaciones();
   const comprobantes = useComprobantesCompra();
+  const comprasState = useCompras();
   const dispatch = useComprasDispatch();
 
   // ── Filtros ───────────────────────────────────────────────
@@ -186,28 +188,34 @@ export default function OrdenesCompra() {
     }
   };
 
-  const handleSaveComprobante = (data: {
-    tipo: any;
+  const handleSaveComprobante = async (data: {
+    tipo: TipoComprobanteCompra;
     proveedorId: string;
     fecha: string;
     fechaVencimiento: string;
     medioPago: any;
-    items: any[];
+    items: Omit<ItemComprobanteCompra, 'id'>[];
+    controlRemision: ControlRemision;
+    numeroRemito: string;
+    // Conexión Compras -> Recepción (misma lógica que en Comprobantes.tsx).
+    actualizarStock: boolean;
   }) => {
     const now = nowISO();
-    const subtotal = data.items.reduce((s: number, i: any) => s + i.subtotal, 0);
-    const montoIva = data.items.reduce((s: number, i: any) => s + i.montoIva, 0);
+    const subtotal = data.items.reduce((s, i) => s + i.subtotal, 0);
+    const montoIva = data.items.reduce((s, i) => s + i.montoIva, 0);
     const total = subtotal + montoIva;
+    const comprobanteId = generarId();
+    const itemsConId: ItemComprobanteCompra[] = data.items.map((it) => ({ ...it, id: generarId() }));
 
     dispatch({
       type: 'ADD_COMPROBANTE_COMPRA',
       payload: {
-        id: generarId(),
+        id: comprobanteId,
         tipo: data.tipo,
         proveedorId: data.proveedorId,
         fecha: data.fecha,
         fechaVencimiento: data.fechaVencimiento || undefined,
-        items: data.items.map((it: any) => ({ ...it, id: generarId() })),
+        items: itemsConId,
         subtotal,
         montoIva,
         total,
@@ -215,10 +223,42 @@ export default function OrdenesCompra() {
         medioPago: data.medioPago,
         montoPagado: 0,
         saldoPendiente: total,
+        controlRemision: data.controlRemision,
+        numeroRemito: data.numeroRemito || undefined,
+        stockActualizado: false,
         createdAt: now,
         updatedAt: now,
       },
     });
+
+    if (data.actualizarStock && empresaActual) {
+      const numeroFormateado = formatNumero(
+        PREFIJO_COMPROBANTE_COMPRA[data.tipo],
+        comprasState.nextNumeroComprobante[data.tipo],
+      );
+      const resultado = await actualizarStockPorCompra(itemsConId, {
+        clienteId: empresaActual.id,
+        proveedorNombre: nombreProveedor(data.proveedorId),
+        fecha: data.fecha,
+        numeroRemito: data.numeroRemito || undefined,
+        numeroComprobante: numeroFormateado,
+      });
+      if (resultado) {
+        dispatch({
+          type: 'MARCAR_STOCK_ACTUALIZADO',
+          payload: { comprobanteId, recepcionId: resultado.recepcionId },
+        });
+        if (resultado.advertenciasConversion.length > 0) {
+          alert(
+            `Comprobante guardado y stock actualizado, con advertencias:\n\n${resultado.advertenciasConversion.join('\n')}`,
+          );
+        }
+      } else {
+        alert(
+          'El comprobante se guardó, pero no se pudo actualizar el stock. Podés reintentarlo desde Comprobantes.',
+        );
+      }
+    }
   };
 
   // ── Render ────────────────────────────────────────────────

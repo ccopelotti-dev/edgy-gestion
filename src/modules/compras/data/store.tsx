@@ -67,6 +67,7 @@ type ComprasAction =
   | { type: 'CAMBIAR_ESTADO_OC'; payload: { id: string; nuevoEstado: EstadoOrdenCompra } }
   | { type: 'ADD_COMPROBANTE_COMPRA'; payload: Omit<ComprobanteCompra, 'numero'> }
   | { type: 'ANULAR_COMPROBANTE_COMPRA'; payload: { id: string } }
+  | { type: 'MARCAR_STOCK_ACTUALIZADO'; payload: { comprobanteId: string; recepcionId: string } }
   | { type: 'ACTUALIZAR_PAGO_COMPROBANTE'; payload: { comprobanteId: string; montoPagado: number } }
   | { type: 'ADD_PAGO'; payload: Omit<PagoCompra, 'numero'> }
   | { type: 'UPDATE_CONFIG'; payload: Partial<ComprasConfig> }
@@ -260,6 +261,16 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
       };
     }
 
+    case 'MARCAR_STOCK_ACTUALIZADO': {
+      const { comprobanteId, recepcionId } = action.payload;
+      return {
+        ...state,
+        comprobantes: state.comprobantes.map((c) =>
+          c.id === comprobanteId ? { ...c, stockActualizado: true, recepcionId, updatedAt: now } : c,
+        ),
+      };
+    }
+
     case 'ACTUALIZAR_PAGO_COMPROBANTE': {
       const { comprobanteId, montoPagado } = action.payload;
       return {
@@ -339,6 +350,8 @@ function itemToRow(item: ItemCompra, fkColumn: string, fkValue: string) {
     id: item.id,
     [fkColumn]: fkValue,
     producto_id: item.productoId ?? null,
+    insumo_id: item.insumoId ?? null,
+    unidad: item.unidad ?? null,
     descripcion: item.descripcion,
     cantidad: item.cantidad,
     precio_unitario: item.precioUnitario,
@@ -352,6 +365,8 @@ function itemComprobanteToRow(item: ItemComprobanteCompra, comprobanteId: string
     id: item.id,
     comprobante_id: comprobanteId,
     producto_id: item.productoId ?? null,
+    insumo_id: item.insumoId ?? null,
+    unidad: item.unidad ?? null,
     descripcion: item.descripcion,
     cantidad: item.cantidad,
     precio_unitario: item.precioUnitario,
@@ -412,6 +427,10 @@ function comprobanteToRow(c: ComprobanteCompra, clienteId: string) {
     medio_pago: c.medioPago,
     monto_pagado: c.montoPagado,
     saldo_pendiente: c.saldoPendiente,
+    control_remision: c.controlRemision,
+    numero_remito: c.numeroRemito ?? null,
+    stock_actualizado: c.stockActualizado,
+    recepcion_id: c.recepcionId ?? null,
     notas: c.notas ?? null,
   };
 }
@@ -589,6 +608,17 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
       return;
     }
 
+    case 'MARCAR_STOCK_ACTUALIZADO': {
+      const c = nextState.comprobantes.find((x) => x.id === action.payload.comprobanteId);
+      if (!c) return;
+      supabase
+        .from('comprobantes_compra')
+        .update({ stock_actualizado: c.stockActualizado, recepcion_id: c.recepcionId ?? null })
+        .eq('id', c.id)
+        .then(logErr('actualización de stock de comprobante'));
+      return;
+    }
+
     case 'ACTUALIZAR_PAGO_COMPROBANTE': {
       const c = nextState.comprobantes.find((x) => x.id === action.payload.comprobanteId);
       if (!c) return;
@@ -657,6 +687,8 @@ function itemFromRow(r: any): ItemCompra {
   return {
     id: r.id,
     productoId: r.producto_id ?? undefined,
+    insumoId: r.insumo_id ?? undefined,
+    unidad: r.unidad ?? undefined,
     descripcion: r.descripcion,
     cantidad: Number(r.cantidad),
     precioUnitario: Number(r.precio_unitario),
@@ -782,6 +814,10 @@ async function fetchComprasState(): Promise<ComprasState> {
     medioPago: r.medio_pago,
     montoPagado: Number(r.monto_pagado),
     saldoPendiente: Number(r.saldo_pendiente),
+    controlRemision: r.control_remision ?? 'no',
+    numeroRemito: r.numero_remito ?? undefined,
+    stockActualizado: r.stock_actualizado ?? false,
+    recepcionId: r.recepcion_id ?? undefined,
     notas: r.notas ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,

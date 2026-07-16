@@ -3,6 +3,8 @@
 // Edgy Gestión · Core administrativo
 // ============================================================
 
+import type { UnidadMedida } from '@/modules/productos-stock/types';
+
 // ─── Proveedor ───────────────────────────────────────────────
 
 export type CondicionIvaProveedor =
@@ -34,6 +36,21 @@ export interface Proveedor {
 export interface ItemCompra {
   id: string;
   productoId?: string;
+  /**
+   * Vínculo opcional a un Insumo del catálogo de Productos y Stock (materia
+   * prima) -- mutuamente excluyente con productoId. Permite que "Actualizar
+   * stock" (ver actualizarStockCompra.ts) sepa a qué insumo sumarle stock.
+   * Si ninguno de los dos está cargado, la línea sigue siendo texto libre
+   * como siempre (comportamiento default sin cambios).
+   */
+  insumoId?: string;
+  /**
+   * Unidad en la que se cargó `cantidad` en esta línea. Puede diferir de la
+   * unidad de stock real del insumo/producto vinculado (ej. compraste "kg"
+   * de un insumo que lleva el stock en "gramo") -- se convierte con
+   * convertirUnidad() al generar la Recepción.
+   */
+  unidad?: UnidadMedida;
   descripcion: string;
   cantidad: number;
   precioUnitario: number;
@@ -118,6 +135,14 @@ export type MedioPagoCompra =
   | 'cuenta_corriente'
   | 'otro';
 
+// ─── Conexión Compras -> Recepción (stock) ───────────────────
+// 'si': la mercadería tiene un control de remito separado -- la Recepción
+// física se confirma más adelante en Productos y Stock, y "Actualizar
+// stock" queda deshabilitado en el modal para no duplicar el ingreso.
+// 'no': la factura representa la llegada real de la mercadería, así que
+// se puede empujar el stock directamente desde el modal de Compras.
+export type ControlRemision = 'si' | 'no';
+
 export interface ComprobanteCompra {
   id: string;
   tipo: TipoComprobanteCompra;
@@ -134,6 +159,13 @@ export interface ComprobanteCompra {
   medioPago: MedioPagoCompra;
   montoPagado: number;
   saldoPendiente: number;
+  controlRemision: ControlRemision;
+  numeroRemito?: string;
+  /** true una vez que se generó la Recepción correspondiente en Productos y
+   * Stock -- evita sumar el mismo stock dos veces. */
+  stockActualizado: boolean;
+  /** id de la Recepción generada en Productos y Stock, si stockActualizado. */
+  recepcionId?: string;
   notas?: string;
   createdAt: string;
   updatedAt: string;

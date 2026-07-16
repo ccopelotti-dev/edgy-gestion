@@ -14,15 +14,19 @@ import {
   Receipt,
   Download,
   Loader2,
+  Factory,
+  CheckCircle2,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { descargarComprobanteCompraPdf } from '../lib/pdfComprobantes';
+import { actualizarStockPorCompra } from '../lib/actualizarStockCompra';
 import {
   useComprobantesCompra,
   useProveedores,
   useOrdenesCompra,
   usePagos,
+  useCompras,
   useComprasDispatch,
 } from '../data/store';
 import {
@@ -40,7 +44,13 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { TipoComprobanteCompra, EstadoComprobanteCompra } from '../types';
+import type {
+  TipoComprobanteCompra,
+  EstadoComprobanteCompra,
+  ComprobanteCompra,
+  ItemComprobanteCompra,
+  ControlRemision,
+} from '../types';
 import {
   TIPO_COMPROBANTE_COMPRA_LABEL,
   ESTADO_COMPROBANTE_COMPRA_LABEL,
@@ -54,6 +64,7 @@ export default function Comprobantes() {
   const proveedores = useProveedores();
   const ordenesCompra = useOrdenesCompra();
   const pagos = usePagos();
+  const comprasState = useCompras();
   const dispatch = useComprasDispatch();
 
   // ── Filtros ───────────────────────────────────────────────
@@ -71,6 +82,9 @@ export default function Comprobantes() {
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  // Conexión Compras -> Recepción: ícono de fila para comprobantes ya
+  // guardados que todavía no empujaron su stock (ver handleActualizarStockExistente).
+  const [actualizandoStockId, setActualizandoStockId] = useState<string | null>(null);
 
   // ── KPIs ─────────────────────────────────────────────────
 
@@ -126,28 +140,37 @@ export default function Comprobantes() {
 
   // ── Handlers ──────────────────────────────────────────────
 
-  const handleSaveComprobante = (data: {
-    tipo: any;
+  const handleSaveComprobante = async (data: {
+    tipo: TipoComprobanteCompra;
     proveedorId: string;
     fecha: string;
     fechaVencimiento: string;
     medioPago: any;
-    items: any[];
+    items: Omit<ItemComprobanteCompra, 'id'>[];
+    controlRemision: ControlRemision;
+    numeroRemito: string;
+    // Conexión Compras -> Recepción: true si se apretó "Actualizar stock"
+    // (guarda el comprobante Y empuja el stock ya mismo), false si fue
+    // "Guardar" (solo el registro fiscal -- el stock se actualiza después,
+    // a mano en Recepción o con el ícono de la fila).
+    actualizarStock: boolean;
   }) => {
     const now = nowISO();
-    const subtotal = data.items.reduce((s: number, i: any) => s + i.subtotal, 0);
-    const montoIva = data.items.reduce((s: number, i: any) => s + i.montoIva, 0);
+    const subtotal = data.items.reduce((s, i) => s + i.subtotal, 0);
+    const montoIva = data.items.reduce((s, i) => s + i.montoIva, 0);
     const total = subtotal + montoIva;
+    const comprobanteId = generarId();
+    const itemsConId: ItemComprobanteCompra[] = data.items.map((it) => ({ ...it, id: generarId() }));
 
     dispatch({
       type: 'ADD_COMPROBANTE_COMPRA',
       payload: {
-        id: generarId(),
+        id: comprobanteId,
         tipo: data.tipo,
         proveedorId: data.proveedorId,
         fecha: data.fecha,
         fechaVencimiento: data.fechaVencimiento || undefined,
-        items: data.items.map((it: any) => ({ ...it, id: generarId() })),
+        items: itemsConId,
         subtotal,
         montoIva,
         total,
@@ -155,10 +178,70 @@ export default function Comprobantes() {
         medioPago: data.medioPago,
         montoPagado: 0,
         saldoPendiente: total,
+        controlRemision: data.controlRemision,
+        numeroRemito: data.numeroRemito || undefined,
+        stockActualizado: false,
         createdAt: now,
         updatedAt: now,
       },
     });
+
+    if (data.actualizarStock && empresaActual) {
+      const numeroFormateado = formatNumero(
+        PREFIJO_COMPROBANTE_COMPRA[data.tipo],
+        comprasState.nextNumeroComprobante[data.tipo],
+      );
+      const resultado = await actualizarStockPorCompra(itemsConId, {
+        clienteId: empresaActual.id,
+        proveedorNombre: nombreProveedor(data.proveedorId),
+        fecha: data.fecha,
+        numeroRemito: data.numeroRemito || undefined,
+        numeroComprobante: numeroFormateado,
+      });
+      if (resultado) {
+        dispatch({
+          type: 'MARCAR_STOCK_ACTUALIZADO',
+          payload: { comprobanteId, recepcionId: resultado.recepcionId },
+        });
+        if (resultado.advertenciasConversion.length > 0) {
+          alert(
+            `Comprobante guardado y stock actualizado, con advertencias:\n\n${resultado.advertenciasConversion.join('\n')}`,
+          );
+        }
+      } else {
+        alert(
+          'El comprobante se guardó, pero no se pudo actualizar el stock. Podés reintentarlo desde el ícono de la fila.',
+        );
+      }
+    }
+  };
+
+  const handleActualizarStockExistente = async (comp: ComprobanteCompra) => {
+    if (!empresaActual) return;
+    setActualizandoStockId(comp.id);
+    try {
+      const numeroFormateado = formatNumero(PREFIJO_COMPROBANTE_COMPRA[comp.tipo], comp.numero);
+      const resultado = await actualizarStockPorCompra(comp.items, {
+        clienteId: empresaActual.id,
+        proveedorNombre: nombreProveedor(comp.proveedorId),
+        fecha: comp.fecha,
+        numeroRemito: comp.numeroRemito,
+        numeroComprobante: numeroFormateado,
+      });
+      if (resultado) {
+        dispatch({
+          type: 'MARCAR_STOCK_ACTUALIZADO',
+          payload: { comprobanteId: comp.id, recepcionId: resultado.recepcionId },
+        });
+        if (resultado.advertenciasConversion.length > 0) {
+          alert(`Stock actualizado, con advertencias:\n\n${resultado.advertenciasConversion.join('\n')}`);
+        }
+      } else {
+        alert('No se pudo actualizar el stock. Verificá que haya líneas vinculadas a un insumo o producto.');
+      }
+    } finally {
+      setActualizandoStockId(null);
+    }
   };
 
   const handleAnular = (id: string) => {
@@ -345,6 +428,30 @@ export default function Comprobantes() {
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
+                          {comp.stockActualizado ? (
+                            <span
+                              title="Stock actualizado en Productos y Stock"
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+                            >
+                              <CheckCircle2 className="h-3 w-3" /> Stock
+                            </span>
+                          ) : (
+                            comp.controlRemision === 'no' &&
+                            comp.items.some((i) => i.insumoId || i.productoId) && (
+                              <button
+                                onClick={() => handleActualizarStockExistente(comp)}
+                                disabled={actualizandoStockId === comp.id}
+                                className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"
+                                title="Actualizar stock (generar recepción)"
+                              >
+                                {actualizandoStockId === comp.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Factory className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            )
+                          )}
                           {(comp.estado === 'pendiente' || comp.estado === 'pagado_parcial') && (
                             <>
                               <button onClick={() => handleRegistrarPago(comp.id)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Registrar pago">
@@ -371,6 +478,7 @@ export default function Comprobantes() {
                                 <tr className="bg-gray-50 text-gray-600">
                                   <th className="text-left px-3 py-2 font-medium">Descripcion</th>
                                   <th className="text-right px-3 py-2 font-medium">Cant.</th>
+                                  <th className="text-left px-3 py-2 font-medium">UM</th>
                                   <th className="text-right px-3 py-2 font-medium">Precio</th>
                                   <th className="text-right px-3 py-2 font-medium">Dto.%</th>
                                   <th className="text-right px-3 py-2 font-medium">IVA</th>
@@ -380,8 +488,18 @@ export default function Comprobantes() {
                               <tbody>
                                 {comp.items.map((item) => (
                                   <tr key={item.id} className="border-t border-gray-100">
-                                    <td className="px-3 py-2">{item.descripcion}</td>
+                                    <td className="px-3 py-2">
+                                      {item.descripcion}
+                                      {(item.insumoId || item.productoId) && (
+                                        <span
+                                          className={`ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${item.insumoId ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}
+                                        >
+                                          {item.insumoId ? 'Insumo' : 'Producto'}
+                                        </span>
+                                      )}
+                                    </td>
                                     <td className="px-3 py-2 text-right">{item.cantidad}</td>
+                                    <td className="px-3 py-2 text-gray-500">{item.unidad ?? '—'}</td>
                                     <td className="px-3 py-2 text-right">{formatARS(item.precioUnitario)}</td>
                                     <td className="px-3 py-2 text-right">{item.descuento}%</td>
                                     <td className="px-3 py-2 text-right">{item.alicuotaIva}%</td>
@@ -391,6 +509,16 @@ export default function Comprobantes() {
                               </tbody>
                             </table>
                           </div>
+
+                          {/* Conexión con Recepción */}
+                          <p className="text-sm text-gray-600 mb-2">
+                            Control de Remisión: <span className="font-medium">{comp.controlRemision === 'si' ? 'Sí' : 'No'}</span>
+                            {comp.numeroRemito && (
+                              <>
+                                {' · '}Remito Nro. <span className="font-mono text-xs font-medium">{comp.numeroRemito}</span>
+                              </>
+                            )}
+                          </p>
 
                           {/* Linked OC */}
                           {linkedOC && (
