@@ -3,7 +3,7 @@
 // Edgy Gestion · ABM y gestion de proveedores
 // ============================================================
 
-import { useState, useMemo } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import {
   Search,
   Plus,
@@ -202,13 +202,13 @@ export default function Proveedores() {
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">
                 <th className="px-4 py-3 font-medium w-8" />
-                <th className="px-4 py-3 font-medium">Nombre</th>
-                <th className="px-4 py-3 font-medium">CUIT</th>
-                <th className="px-4 py-3 font-medium">Cond. IVA</th>
-                <th className="px-4 py-3 font-medium">Rubro</th>
-                <th className="px-4 py-3 text-right font-medium">Saldo</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 font-medium">Acciones</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[11rem]">Nombre</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[8rem]">CUIT</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[10rem]">Cond. IVA</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[9rem]">Rubro</th>
+                <th className="px-4 py-3 text-right font-medium whitespace-nowrap min-w-[8rem]">Saldo</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Estado</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -218,7 +218,7 @@ export default function Proveedores() {
                 const ultPagos = ultimosPagos(prov.id);
 
                 return (
-                  <tbody key={prov.id}>
+                  <Fragment key={prov.id}>
                     <tr
                       className="border-t border-gray-100 hover:bg-gray-50/50 cursor-pointer"
                       onClick={() => setExpandedId(isExpanded ? null : prov.id)}
@@ -226,17 +226,17 @@ export default function Proveedores() {
                       <td className="px-4 py-3 text-gray-400">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{prov.nombre}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{formatCuit(prov.cuit)}</td>
-                      <td className="px-4 py-3 text-gray-600">{CONDICION_IVA_PROV_LABEL[prov.condicionIva]}</td>
-                      <td className="px-4 py-3 text-gray-600">{prov.rubro ?? '—'}</td>
-                      <td className="px-4 py-3 text-right"><Amount value={prov.saldoCuentaCorriente} /></td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{prov.nombre}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{formatCuit(prov.cuit)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{CONDICION_IVA_PROV_LABEL[prov.condicionIva]}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{prov.rubro ?? '—'}</td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap"><Amount value={prov.saldoCuentaCorriente} size="xs" /></td>
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${prov.activo ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                           {prov.activo ? 'Activo' : 'Inactivo'}
                         </span>
                       </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <button onClick={() => handleEditarProveedor(prov)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Editar">
                             <Edit2 className="h-3.5 w-3.5" />
@@ -305,7 +305,7 @@ export default function Proveedores() {
                         </td>
                       </tr>
                     )}
-                  </tbody>
+                  </Fragment>
                 );
               })}
             </tbody>
