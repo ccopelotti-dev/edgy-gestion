@@ -19,6 +19,9 @@ import {
   LayoutPanelLeft,
   ArrowUpToLine,
   ArrowDownToLine,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from 'lucide-react'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { generarImagenPromocionalCombo } from '../../lib/imagenPromocional'
@@ -33,9 +36,8 @@ import type { Combo } from '../../types'
 // Canvas (ver lib/imagenPromocional.ts), sin subir nada a ningún servidor.
 //
 // Todas las elecciones de esta pantalla (fotos, diseño, posición de logo y
-// etiqueta, colores) son efímeras -- no se guardan en el combo, arrancan de
-// cero cada vez que se abre el diálogo, igual que ya funcionaba el selector
-// de fotos.
+// etiqueta, colores, posición de precio) son efímeras -- no se guardan en el
+// combo, arrancan de cero cada vez que se abre el diálogo.
 
 interface ImagenPromocionalDialogProps {
   open: boolean
@@ -46,6 +48,7 @@ interface ImagenPromocionalDialogProps {
 type LayoutFoto = 'lado_a_lado' | 'arriba_abajo' | 'protagonista'
 type LogoPos = 'arriba' | 'abajo'
 type BadgePos = 'arriba_logo' | 'abajo_logo'
+type PrecioPos = 'izquierda' | 'centro' | 'derecha'
 
 export function ImagenPromocionalDialog({
   open,
@@ -71,6 +74,11 @@ export function ImagenPromocionalDialog({
   const [badgeColorFondo, setBadgeColorFondo] = useState('#ffffff')
   const [badgeColorTexto, setBadgeColorTexto] = useState('#0f172a')
 
+  // Posición horizontal del precio y sus colores -- a pedido del usuario.
+  const [precioPos, setPrecioPos] = useState<PrecioPos>('izquierda')
+  const [precioColorFondo, setPrecioColorFondo] = useState('#facc15')
+  const [precioColorTexto, setPrecioColorTexto] = useState('#0f172a')
+
   const tieneLogo = !!cliente?.logo_url
   const tieneBadge = !!combo?.etiqueta?.trim()
 
@@ -84,6 +92,9 @@ export function ImagenPromocionalDialog({
       setBadgePos('arriba_logo')
       setBadgeColorFondo('#ffffff')
       setBadgeColorTexto(cliente?.color_marca || '#0f172a')
+      setPrecioPos('izquierda')
+      setPrecioColorFondo('#facc15')
+      setPrecioColorTexto('#0f172a')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, combo])
@@ -121,6 +132,9 @@ export function ImagenPromocionalDialog({
       badgePos,
       badgeColorFondo,
       badgeColorTexto,
+      precioPos,
+      precioColorFondo,
+      precioColorTexto,
     })
       .then((url) => {
         if (activo) setDataUrl(url)
@@ -136,7 +150,20 @@ export function ImagenPromocionalDialog({
     return () => {
       activo = false
     }
-  }, [open, combo, cliente, fotosIdx, layout, logoPos, badgePos, badgeColorFondo, badgeColorTexto])
+  }, [
+    open,
+    combo,
+    cliente,
+    fotosIdx,
+    layout,
+    logoPos,
+    badgePos,
+    badgeColorFondo,
+    badgeColorTexto,
+    precioPos,
+    precioColorFondo,
+    precioColorTexto,
+  ])
 
   const nombreArchivo = combo
     ? `combo-${combo.nombre.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}.jpg`
@@ -340,6 +367,71 @@ export function ImagenPromocionalDialog({
               </div>
             </div>
           )}
+
+          {/* Posición y colores del precio */}
+          <div className="flex flex-col items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2.5 w-full">
+            <span className="text-xs text-muted-foreground">Precio</span>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPrecioPos('izquierda')}
+                className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                  precioPos === 'izquierda'
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-transparent bg-background text-muted-foreground hover:border-muted-foreground/30'
+                }`}
+              >
+                <AlignLeft className="h-4 w-4" />
+                Izquierda
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrecioPos('centro')}
+                className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                  precioPos === 'centro'
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-transparent bg-background text-muted-foreground hover:border-muted-foreground/30'
+                }`}
+              >
+                <AlignCenter className="h-4 w-4" />
+                Centro
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrecioPos('derecha')}
+                className={`flex items-center gap-1.5 rounded-md border-2 px-3 py-1.5 text-xs transition-colors ${
+                  precioPos === 'derecha'
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-transparent bg-background text-muted-foreground hover:border-muted-foreground/30'
+                }`}
+              >
+                <AlignRight className="h-4 w-4" />
+                Derecha
+              </button>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                Fondo
+                <input
+                  type="color"
+                  value={precioColorFondo}
+                  onChange={(e) => setPrecioColorFondo(e.target.value)}
+                  className="h-7 w-9 cursor-pointer rounded border border-input p-0.5"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                Letra
+                <input
+                  type="color"
+                  value={precioColorTexto}
+                  onChange={(e) => setPrecioColorTexto(e.target.value)}
+                  className="h-7 w-9 cursor-pointer rounded border border-input p-0.5"
+                />
+              </label>
+            </div>
+          </div>
         </div>
 
         <DialogFooter>

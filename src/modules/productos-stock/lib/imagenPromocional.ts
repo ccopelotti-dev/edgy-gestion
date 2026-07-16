@@ -45,6 +45,12 @@ export interface DatosImagenPromocionalCombo {
   badgeColorFondo?: string
   /** Color de la tipografía de la etiqueta (hex). Default color de marca. */
   badgeColorTexto?: string
+  /** Posición horizontal del badge de precio. Default izquierda. */
+  precioPos?: 'izquierda' | 'centro' | 'derecha'
+  /** Color de fondo del badge de precio (hex). Default automático según colorMarca. */
+  precioColorFondo?: string
+  /** Color de la tipografía del badge de precio (hex). Default automático. */
+  precioColorTexto?: string
 }
 
 // Rectángulo vertical (antes era un cuadrado 1080x1080) -- 50% más de alto,
@@ -112,19 +118,28 @@ function esColorClaro(hex: string): boolean {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6
 }
 
-/** Dibuja `texto` varias veces con micro-desplazamientos para simular una
- * tipografía "pesada" (Black/Heavy) sin depender de que el navegador tenga
- * instalada esa variante para la fuente genérica sans-serif -- pedido del
- * usuario ("letra Bold pesada") para la etiqueta/badge del flyer. */
-function fillTextPesado(ctx: CanvasRenderingContext2D, texto: string, x: number, y: number) {
-  const offsets: Array<[number, number]> = [
+/** Dibuja `texto` varias veces con micro-desplazamientos (escalados según
+ * `factorGrosor`) para simular una tipografía "pesada" (Black/Heavy) sin
+ * depender de que el navegador tenga instalada esa variante para la fuente
+ * genérica sans-serif -- pedido del usuario ("letra Bold pesada") para la
+ * etiqueta/badge del flyer. */
+function fillTextPesado(
+  ctx: CanvasRenderingContext2D,
+  texto: string,
+  x: number,
+  y: number,
+  factorGrosor = 1,
+) {
+  const offsetsBase: Array<[number, number]> = [
     [0, 0],
     [0.8, 0],
     [0, 0.8],
     [0.8, 0.8],
     [-0.4, -0.4],
   ]
-  for (const [dx, dy] of offsets) ctx.fillText(texto, x + dx, y + dy)
+  for (const [dx, dy] of offsetsBase) {
+    ctx.fillText(texto, x + dx * factorGrosor, y + dy * factorGrosor)
+  }
 }
 
 /**
@@ -162,9 +177,23 @@ export async function generarImagenPromocionalCombo(
   // La banda (logo, y opcionalmente la etiqueta arriba o debajo de él) se
   // ubica al principio o al final del flyer según `logoPos` -- foto y texto
   // siempre van "en el medio", en el mismo orden.
-  const logoSize = 130
-  const badgeFontSize = 44
-  const badgeH = badgeFontSize + 18 * 2 // 80
+  //
+  // Logo y etiqueta agrandados a pedido del usuario ("necesita más
+  // protagonismo"): logo ~3x el tamaño original (130 → 390), etiqueta ~2.5x
+  // (tipografía y caja, 44px → 110px), manteniendo las mismas proporciones
+  // internas (padding, radio de esquina, offset de la letra pesada) para que
+  // se vea igual de prolijo, solo que más grande.
+  const logoSize = 390
+  const logoRadius = 48
+  const logoPad = 36
+
+  const badgeFontSize = 110
+  const factorGrosorBadge = badgeFontSize / 44
+  const padXBadge = 70
+  const padYBadge = 45
+  const badgeH = badgeFontSize + padYBadge * 2
+  const badgeRadius = 35
+
   const paddingBanda = 32
   const gapBandaInterno = 20
 
@@ -252,10 +281,9 @@ export async function generarImagenPromocionalCombo(
           ctx.save()
           ctx.fillStyle = 'rgba(255,255,255,0.92)'
           ctx.beginPath()
-          ctx.roundRect(logoX, cursorY, logoSize, logoSize, 16)
+          ctx.roundRect(logoX, cursorY, logoSize, logoSize, logoRadius)
           ctx.fill()
-          const pad = 12
-          dibujarCover(ctx, logo, logoX + pad, cursorY + pad, logoSize - pad * 2, logoSize - pad * 2)
+          dibujarCover(ctx, logo, logoX + logoPad, cursorY + logoPad, logoSize - logoPad * 2, logoSize - logoPad * 2)
           ctx.restore()
         } catch {
           // Sin logo -- no rompe la generación.
@@ -265,16 +293,16 @@ export async function generarImagenPromocionalCombo(
         const texto = datos.etiqueta!.trim()
         ctx.font = `bold ${badgeFontSize}px sans-serif`
         const anchoTexto = ctx.measureText(texto).width
-        const padXBadge = 28
         const badgeW = anchoTexto + padXBadge * 2
         const badgeX = (ANCHO - badgeW) / 2
         ctx.fillStyle = badgeColorFondo
         ctx.beginPath()
-        ctx.roundRect(badgeX, cursorY, badgeW, badgeH, 14)
+        ctx.roundRect(badgeX, cursorY, badgeW, badgeH, badgeRadius)
         ctx.fill()
         ctx.fillStyle = badgeColorTexto
         ctx.textBaseline = 'alphabetic'
-        fillTextPesado(ctx, texto, badgeX + padXBadge, cursorY + badgeH - 22)
+        const offsetDesdeAbajo = padYBadge + 4 * factorGrosorBadge
+        fillTextPesado(ctx, texto, badgeX + padXBadge, cursorY + badgeH - offsetDesdeAbajo, factorGrosorBadge)
         cursorY += badgeH + gapBandaInterno
       }
     }
@@ -292,6 +320,17 @@ export async function generarImagenPromocionalCombo(
   }
 
   // ── Precio (bien resaltado, badge de color contrastante) ──────────────
+  // Posición horizontal y colores configurables a pedido del usuario.
+  const precioPos = datos.precioPos ?? 'izquierda'
+  const precioColorFondoDefault = esColorClaro(colorMarca) ? '#0f172a' : '#facc15'
+  const precioColorFondo = datos.precioColorFondo && /^#[0-9a-fA-F]{6}$/.test(datos.precioColorFondo)
+    ? datos.precioColorFondo
+    : precioColorFondoDefault
+  const precioColorTextoDefault = esColorClaro(precioColorFondo) ? '#0f172a' : '#ffffff'
+  const precioColorTexto = datos.precioColorTexto && /^#[0-9a-fA-F]{6}$/.test(datos.precioColorTexto)
+    ? datos.precioColorTexto
+    : precioColorTextoDefault
+
   const precioTexto = formatARS(datos.precio)
   ctx.font = 'bold 84px sans-serif'
   const anchoPrecio = ctx.measureText(precioTexto).width
@@ -299,16 +338,18 @@ export async function generarImagenPromocionalCombo(
   const padY = 24
   const badgeWPrecio = anchoPrecio + padX * 2
   const badgeHPrecio = 84 + padY * 2 - 10
-  const badgeXPrecio = 40
+  const margenPrecio = 40
+  let badgeXPrecio = margenPrecio
+  if (precioPos === 'centro') badgeXPrecio = (ANCHO - badgeWPrecio) / 2
+  else if (precioPos === 'derecha') badgeXPrecio = ANCHO - margenPrecio - badgeWPrecio
   const badgeYPrecio = yFoto + altoFoto + 36
 
-  const colorBadgePrecio = esColorClaro(colorMarca) ? '#0f172a' : '#facc15'
-  ctx.fillStyle = colorBadgePrecio
+  ctx.fillStyle = precioColorFondo
   ctx.beginPath()
   ctx.roundRect(badgeXPrecio, badgeYPrecio, badgeWPrecio, badgeHPrecio, 18)
   ctx.fill()
 
-  ctx.fillStyle = esColorClaro(colorBadgePrecio) ? '#0f172a' : '#ffffff'
+  ctx.fillStyle = precioColorTexto
   ctx.fillText(precioTexto, badgeXPrecio + padX, badgeYPrecio + badgeHPrecio - padY - 8)
 
   // ── Descripción / texto de promoción ──────────────────────────────────
