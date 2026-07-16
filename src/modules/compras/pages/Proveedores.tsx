@@ -16,8 +16,12 @@ import {
   Mail,
   MapPin,
   FileText,
+  FileBarChart2,
+  ReceiptText,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
 import {
   useProveedores,
   useComprobantesCompra,
@@ -32,6 +36,10 @@ import {
 } from '../components/compras/display';
 import { ProveedorDialog, PagoDialog } from '../components/compras/dialogs';
 import {
+  descargarResumenCuentaProveedorPdf,
+  descargarComprobantePagoPdf,
+} from '../lib/pdfComprobantes';
+import {
   formatCuit,
   formatDate,
   formatARS,
@@ -39,7 +47,7 @@ import {
   PREFIJO_COMPROBANTE_COMPRA,
   nowISO,
 } from '../lib/format';
-import type { Proveedor } from '../types';
+import type { Proveedor, PagoCompra } from '../types';
 import { CONDICION_IVA_PROV_LABEL, generarId } from '../types';
 
 // ─── Componente principal ───────────────────────────────────
@@ -49,6 +57,9 @@ export default function Proveedores() {
   const comprobantes = useComprobantesCompra();
   const pagos = usePagos();
   const dispatch = useComprasDispatch();
+  // Fase 17b: Resumen de cuenta y Comprobante de Pago -- mismo motor de PDF
+  // compartido que ya usan Comprobantes/OC/Cotizaciones.
+  const { cliente: empresaActual } = useClienteActual();
 
   // ── Filtros ───────────────────────────────────────────────
 
@@ -62,6 +73,8 @@ export default function Proveedores() {
   const [editProveedor, setEditProveedor] = useState<Proveedor | null>(null);
   const [pagoDialogOpen, setPagoDialogOpen] = useState(false);
   const [pagoProveedorId, setPagoProveedorId] = useState<string | null>(null);
+  const [generandoResumenId, setGenerandoResumenId] = useState<string | null>(null);
+  const [generandoPagoPdfId, setGenerandoPagoPdfId] = useState<string | null>(null);
 
   // ── Datos filtrados ───────────────────────────────────────
 
@@ -135,6 +148,27 @@ export default function Proveedores() {
         createdAt: nowISO(),
       },
     });
+  };
+
+  const handleDescargarResumenCuenta = async (prov: Proveedor) => {
+    if (!empresaActual) return;
+    setGenerandoResumenId(prov.id);
+    try {
+      await descargarResumenCuentaProveedorPdf(empresaActual, prov, comprobantes, pagos);
+    } finally {
+      setGenerandoResumenId(null);
+    }
+  };
+
+  const handleDescargarComprobantePago = async (pago: PagoCompra) => {
+    if (!empresaActual) return;
+    setGenerandoPagoPdfId(pago.id);
+    try {
+      const prov = proveedores.find((p) => p.id === pago.proveedorId);
+      await descargarComprobantePagoPdf(empresaActual, prov, pago, comprobantes, 'Proveedor');
+    } finally {
+      setGenerandoPagoPdfId(null);
+    }
   };
 
   // ── Helpers ───────────────────────────────────────────────
@@ -247,6 +281,18 @@ export default function Proveedores() {
                           <button onClick={() => handleToggleActivo(prov.id)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title={prov.activo ? 'Desactivar' : 'Activar'}>
                             <Power className="h-3.5 w-3.5" />
                           </button>
+                          <button
+                            onClick={() => handleDescargarResumenCuenta(prov)}
+                            disabled={generandoResumenId === prov.id}
+                            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+                            title="Resumen de cuenta (PDF)"
+                          >
+                            {generandoResumenId === prov.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <FileBarChart2 className="h-3.5 w-3.5" />
+                            )}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -297,6 +343,18 @@ export default function Proveedores() {
                                     <span className="text-gray-500">{formatDate(p.fecha)}</span>
                                     <MedioPagoBadge medio={p.medioPago} />
                                     <Amount value={p.monto} size="sm" />
+                                    <button
+                                      onClick={() => handleDescargarComprobantePago(p)}
+                                      disabled={generandoPagoPdfId === p.id}
+                                      className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md disabled:opacity-50"
+                                      title="Comprobante de Pago (PDF)"
+                                    >
+                                      {generandoPagoPdfId === p.id ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <ReceiptText className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
                                   </div>
                                 ))}
                               </div>

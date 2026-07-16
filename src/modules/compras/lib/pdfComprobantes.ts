@@ -1,6 +1,7 @@
 // ============================================================
 // Módulo Compras — helpers de descarga de PDF
 // Edgy Gestión · Fase 17 (auditoría e ícono de descarga PDF en listados)
+// + Fase 17b (Resumen de cuenta y Comprobante de Pago, en Proveedores)
 //
 // Mismo motor compartido que Ventas (src/lib/comprobantes-pdf), con
 // el proveedor en el lugar del "cliente" del PDF -- el motor no le
@@ -8,21 +9,34 @@
 // cual. Cubre los tres documentos de Compras que ya tienen sus datos
 // completos en memoria: Comprobantes, Órdenes de compra y Pedidos de
 // cotización.
+//
+// Fase 17b suma dos documentos nuevos, propios de Proveedores: el
+// Resumen de cuenta (ledger clásico con saldo corriente) y el
+// Comprobante de Pago (documento inverso a un Recibo -- acá somos
+// nosotros los que pagamos).
 // ============================================================
 
 import {
   generarComprobantePdf,
   type EmpresaParaPdf,
 } from '@/lib/comprobantes-pdf/generarComprobantePdf';
+import {
+  generarResumenCuentaPdf,
+  type MovimientoResumenCuenta,
+} from '@/lib/comprobantes-pdf/generarResumenCuentaPdf';
+import {
+  generarComprobantePagoPdf,
+} from '@/lib/comprobantes-pdf/generarComprobantePagoPdf';
 import type { Cliente as ClienteEmpresa } from '@/types';
-import { formatDate, formatNumero, PREFIJO_COMPROBANTE_COMPRA } from './format';
+import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE_COMPRA } from './format';
 import type {
   ComprobanteCompra,
   OrdenCompra,
   PedidoCotizacion,
   Proveedor,
+  PagoCompra,
 } from '../types';
-import { TIPO_COMPROBANTE_COMPRA_LABEL } from '../types';
+import { TIPO_COMPROBANTE_COMPRA_LABEL, MEDIO_PAGO_COMPRA_LABEL } from '../types';
 
 function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
   return {
@@ -129,6 +143,106 @@ export async function descargarCotizacionPdf(
       subtotal: cot.subtotal,
       total: cot.total,
       notas: cot.notas ?? null,
+    },
+    numero,
+  );
+}
+
+// ─── Fase 17b: Resumen de cuenta ─────────────────────────────
+
+/** Arma la lista cronológica de movimientos (comprobantes + pagos) de un
+ * proveedor para el Resumen de cuenta -- factura/nota de débito suman al
+ * "Debe" (aumentan lo que le debemos), nota de crédito y pagos van al
+ * "Haber" (lo disminuyen). Los comprobantes anulados no cuentan: nunca
+ * llegaron a afectar el saldo real. */
+function construirMovimientosProveedor(
+  proveedorId: string,
+  comprobantes: ComprobanteCompra[],
+  pagos: PagoCompra[],
+): MovimientoResumenCuenta[] {
+  type MovimientoConFecha = MovimientoResumenCuenta & { _orden: string };
+
+  const deComprobantes: MovimientoConFecha[] = comprobantes
+    .filter((c) => c.proveedorId === proveedorId && c.estado !== 'anulado')
+    .map((c) => ({
+      fecha: formatDate(c.fecha),
+      comprobante: formatNumero(PREFIJO_COMPROBANTE_COMPRA[c.tipo], c.numero),
+      detalle: TIPO_COMPROBANTE_COMPRA_LABEL[c.tipo],
+      debe: c.tipo === 'nota_credito' ? undefined : c.total,
+      haber: c.tipo === 'nota_credito' ? c.total : undefined,
+      _orden: `${c.fecha}T${c.createdAt}`,
+    }));
+
+  const dePagos: MovimientoConFecha[] = pagos
+    .filter((p) => p.proveedorId === proveedorId)
+    .map((p) => ({
+      fecha: formatDate(p.fecha),
+      comprobante: `PAG-${String(p.numero).padStart(5, '0')}`,
+      detalle: MEDIO_PAGO_COMPRA_LABEL[p.medioPago],
+      haber: p.monto,
+      _orden: `${p.fecha}T${p.createdAt}`,
+    }));
+
+  return [...deComprobantes, ...dePagos]
+    .sort((a, b) => a._orden.localeCompare(b._orden))
+    .map(({ _orden, ...mov }) => mov);
+}
+
+/** Descarga el Resumen de cuenta clásico de un proveedor -- ledger con
+ * todos sus comprobantes y pagos históricos, saldo corriente fila a
+ * fila y saldo final (el mismo `proveedor.saldoCuentaCorriente`). */
+export async function descargarResumenCuentaProveedorPdf(
+  empresaActual: ClienteEmpresa,
+  proveedor: Proveedor,
+  comprobantes: ComprobanteCompra[],
+  pagos: PagoCompra[],
+): Promise<void> {
+  const movimientos = construirMovimientosProveedor(proveedor.id, comprobantes, pagos);
+  await generarResumenCuentaPdf(
+    empresaParaPdf(empresaActual),
+    {
+      entidadNombre: proveedor.nombre,
+      entidadDocumento: formatCuit(proveedor.cuit),
+      saldoInicial: 0,
+      movimientos,
+      saldoFinal: proveedor.saldoCuentaCorriente,
+    },
+    `resumen-cuenta-${proveedor.nombre.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+  );
+}
+
+// ─── Fase 17b: Comprobante de Pago ────────────────────────────
+
+/** Descarga el Comprobante de Pago de un pago ya registrado -- documento
+ * inverso a un Recibo (acá somos nosotros los que le pagamos al
+ * proveedor), con el detalle de a qué comprobantes se imputó. */
+export async function descargarComprobantePagoPdf(
+  empresaActual: ClienteEmpresa,
+  proveedor: Proveedor | undefined,
+  pago: PagoCompra,
+  comprobantes: ComprobanteCompra[],
+  proveedorNombreFallback: string,
+): Promise<void> {
+  const numero = `PAG-${String(pago.numero).padStart(5, '0')}`;
+  await generarComprobantePagoPdf(
+    empresaParaPdf(empresaActual),
+    {
+      numero,
+      fecha: formatDate(pago.fecha),
+      pagadoA: nombreProveedorFallback(proveedor, proveedorNombreFallback),
+      pagadoADocumento: proveedor ? formatCuit(proveedor.cuit) : null,
+      monto: pago.monto,
+      medioPagoLabel: MEDIO_PAGO_COMPRA_LABEL[pago.medioPago],
+      imputaciones: pago.imputaciones.map((imp) => {
+        const comp = comprobantes.find((c) => c.id === imp.comprobanteId);
+        return {
+          comprobante: comp
+            ? formatNumero(PREFIJO_COMPROBANTE_COMPRA[comp.tipo], comp.numero)
+            : 'Comprobante eliminado',
+          montoImputado: imp.montoImputado,
+        };
+      }),
+      notas: pago.notas ?? null,
     },
     numero,
   );
