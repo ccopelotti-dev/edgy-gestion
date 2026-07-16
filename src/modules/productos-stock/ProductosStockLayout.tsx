@@ -15,15 +15,11 @@ import {
   PackageCheck,
   ArrowLeftRight,
   ClipboardCheck,
-  RotateCcw,
   ArrowUpDown,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from './data/store'
 
 export function ProductosStockLayout() {
-  const { dispatch } = useProductosStock()
   const { pathname } = useLocation()
   const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
 
@@ -49,22 +45,11 @@ export function ProductosStockLayout() {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Productos y Stock</h1>
-          <p className="text-muted-foreground text-sm">
-            Catálogo, insumos, formulación de productos y control de inventario
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => dispatch({ type: 'RESET' })}
-          className="self-start"
-        >
-          <RotateCcw className="mr-2 h-4 w-4" />
-          Restablecer datos demo
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Productos y Stock</h1>
+        <p className="text-muted-foreground text-sm">
+          Catálogo, insumos, formulación de productos y control de inventario
+        </p>
       </div>
 
       {/* Tab navigation */}
