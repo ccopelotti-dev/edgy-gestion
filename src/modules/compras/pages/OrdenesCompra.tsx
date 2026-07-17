@@ -16,6 +16,7 @@ import {
   ClipboardList,
   Download,
   Loader2,
+  DollarSign,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -33,7 +34,7 @@ import {
   Amount,
   EmptyState,
 } from '../components/compras/display';
-import { ComprobanteCompraDialog } from '../components/compras/dialogs';
+import { ComprobanteCompraDialog, OrdenCompraPreciosDialog } from '../components/compras/dialogs';
 import { actualizarStockPorCompra } from '../lib/actualizarStockCompra';
 import {
   formatDate,
@@ -43,7 +44,7 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision } from '../types';
+import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra } from '../types';
 import {
   ESTADO_OC_LABEL,
   generarId,
@@ -73,6 +74,10 @@ export default function OrdenesCompra() {
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  // Fase 21 (punto 3 de Cotizaciones): una vez generada la OC desde una
+  // cotización respondida, acá se cargan los precios cotizados y se
+  // confirman -- ver OrdenCompraPreciosDialog.
+  const [preciosOrdenId, setPreciosOrdenId] = useState<string | null>(null);
 
   // ── Inline form state ─────────────────────────────────────
 
@@ -175,6 +180,22 @@ export default function OrdenesCompra() {
 
   const cambiarEstado = (id: string, nuevoEstado: EstadoOrdenCompra) => {
     dispatch({ type: 'CAMBIAR_ESTADO_OC', payload: { id, nuevoEstado } });
+  };
+
+  const handleGuardarPrecios = (ordenId: string, itemsActualizados: ItemCompra[]) => {
+    const orden = ordenesCompra.find((o) => o.id === ordenId);
+    if (!orden) return;
+    const subtotal = itemsActualizados.reduce((s, i) => s + i.subtotal, 0);
+    dispatch({
+      type: 'UPDATE_ORDEN_COMPRA',
+      payload: {
+        ...orden,
+        items: itemsActualizados,
+        subtotal,
+        total: subtotal,
+        updatedAt: nowISO(),
+      },
+    });
   };
 
   const handleDescargarPdf = async (oc: (typeof ordenesCompra)[number]) => {
@@ -463,6 +484,9 @@ export default function OrdenesCompra() {
                         <div className="flex items-center gap-1">
                           {oc.estado === 'pendiente' && (
                             <>
+                              <button onClick={() => setPreciosOrdenId(oc.id)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cargar precios cotizados / confirmar">
+                                <DollarSign className="h-3.5 w-3.5" />
+                              </button>
                               <button onClick={() => cambiarEstado(oc.id, 'parcial')} className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg" title="Marcar parcial">
                                 <Package className="h-3.5 w-3.5" />
                               </button>
@@ -570,6 +594,15 @@ export default function OrdenesCompra() {
         onOpenChange={setComprobanteDialogOpen}
         proveedores={proveedores.filter((p) => p.activo)}
         onSave={handleSaveComprobante}
+      />
+
+      {/* Cargar precios cotizados / confirmar OC */}
+      <OrdenCompraPreciosDialog
+        open={preciosOrdenId !== null}
+        onOpenChange={(v) => { if (!v) setPreciosOrdenId(null); }}
+        orden={ordenesCompra.find((o) => o.id === preciosOrdenId) ?? undefined}
+        proveedorNombre={preciosOrdenId ? nombreProveedor(ordenesCompra.find((o) => o.id === preciosOrdenId)?.proveedorId ?? '') : undefined}
+        onSave={(items) => { if (preciosOrdenId) handleGuardarPrecios(preciosOrdenId, items); }}
       />
     </div>
   );

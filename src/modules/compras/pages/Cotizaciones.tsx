@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   XCircle,
   MessageSquare,
+  MessageCircle,
+  Mail,
   ClipboardList,
   FileSearch,
   Download,
@@ -36,8 +38,9 @@ import {
 } from '../components/compras/display';
 import { CotizacionDialog } from '../components/compras/dialogs';
 import { formatDate, formatARS, formatNumero, nowISO } from '../lib/format';
-import type { EstadoCotizacion } from '../types';
+import type { EstadoCotizacion, Proveedor } from '../types';
 import { ESTADO_COTIZACION_LABEL, generarId } from '../types';
+import type { UnidadMedida } from '@/modules/productos-stock/types';
 
 // ─── Componente principal ───────────────────────────────────
 
@@ -101,7 +104,10 @@ export default function Cotizaciones() {
     fecha: string;
     validezDias: number;
     notas: string;
-    items: { descripcion: string; cantidad: number; precioUnitario: number; descuento: number; subtotal: number }[];
+    items: {
+      descripcion: string; cantidad: number; precioUnitario: number; descuento: number; subtotal: number;
+      insumoId?: string; productoId?: string; unidad?: UnidadMedida;
+    }[];
   }) => {
     const now = nowISO();
     const fechaVenc = new Date(data.fecha);
@@ -147,6 +153,49 @@ export default function Cotizaciones() {
 
   const convertirAOC = (cotizacionId: string) => {
     dispatch({ type: 'CONVERTIR_COTIZACION_A_OC', payload: { cotizacionId } });
+  };
+
+  // Envío por email / WhatsApp al proveedor -- todavía no hay un motor de
+  // envío real (API de mail transaccional / WhatsApp Business), así que se
+  // arma un link mailto:/wa.me con asunto y texto ya redactados a partir de
+  // los datos de la cotización, y se abre el cliente de correo o WhatsApp
+  // Web del propio usuario. Cuando se sume el motor real, este armado de
+  // asunto/texto se puede reutilizar tal cual.
+  const armarTextoCotizacion = (cot: (typeof cotizaciones)[number]) => {
+    const numero = formatNumero('COT', cot.numero);
+    const lineas = cot.items.map(
+      (it) => `- ${it.descripcion} · cant. ${it.cantidad}${it.unidad ? ` ${it.unidad}` : ''}`,
+    );
+    return {
+      asunto: `Pedido de cotización ${numero}`,
+      cuerpo:
+        `Hola${nombreProveedor(cot.proveedorId) !== 'Desconocido' ? ` ${nombreProveedor(cot.proveedorId)}` : ''},\n\n` +
+        `Les solicitamos cotización para los siguientes ítems (Pedido ${numero}, válido ${cot.validezDias} días desde el ${formatDate(cot.fecha)}):\n\n` +
+        `${lineas.join('\n')}\n\n` +
+        `${cot.notas ? `Notas: ${cot.notas}\n\n` : ''}` +
+        `Quedamos a la espera de sus precios.\nSaludos.`,
+    };
+  };
+
+  const marcarEnviadoSiBorrador = (cot: (typeof cotizaciones)[number]) => {
+    if (cot.estado === 'borrador') cambiarEstado(cot.id, 'enviado');
+  };
+
+  const handleEnviarEmail = (cot: (typeof cotizaciones)[number], proveedor?: Proveedor) => {
+    if (!proveedor?.email) return;
+    const { asunto, cuerpo } = armarTextoCotizacion(cot);
+    const url = `mailto:${proveedor.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+    window.open(url, '_blank');
+    marcarEnviadoSiBorrador(cot);
+  };
+
+  const handleEnviarWhatsapp = (cot: (typeof cotizaciones)[number], proveedor?: Proveedor) => {
+    if (!proveedor?.telefono) return;
+    const telefono = proveedor.telefono.replace(/\D/g, '');
+    const { cuerpo } = armarTextoCotizacion(cot);
+    const url = `https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`;
+    window.open(url, '_blank');
+    marcarEnviadoSiBorrador(cot);
   };
 
   const handleDescargarPdf = async (cot: (typeof cotizaciones)[number]) => {
@@ -224,6 +273,7 @@ export default function Cotizaciones() {
               {cotizacionesFiltradas.map((cot) => {
                 const isExpanded = expandedId === cot.id;
                 const linkedOC = ocNumero(cot.ordenCompraId);
+                const proveedorCot = proveedores.find((p) => p.id === cot.proveedorId);
 
                 return (
                   <tbody key={cot.id}>
@@ -240,18 +290,36 @@ export default function Cotizaciones() {
                       <td className="px-4 py-3 text-right"><Amount value={cot.total} /></td>
                       <td className="px-4 py-3"><EstadoCotizacionBadge estado={cot.estado} /></td>
                       <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleDescargarPdf(cot)}
-                          disabled={generandoPdfId === cot.id}
-                          title="Descargar PDF"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                        >
-                          {generandoPdfId === cot.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Download className="h-4 w-4" />
-                          )}
-                        </button>
+                        <div className="flex items-center justify-center gap-0.5">
+                          <button
+                            onClick={() => handleDescargarPdf(cot)}
+                            disabled={generandoPdfId === cot.id}
+                            title="Descargar PDF"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                          >
+                            {generandoPdfId === cot.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleEnviarEmail(cot, proveedorCot)}
+                            disabled={!proveedorCot?.email}
+                            title={proveedorCot?.email ? `Enviar por email a ${proveedorCot.email}` : 'El proveedor no tiene email cargado'}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-gray-400"
+                          >
+                            <Mail className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleEnviarWhatsapp(cot, proveedorCot)}
+                            disabled={!proveedorCot?.telefono}
+                            title={proveedorCot?.telefono ? `Enviar por WhatsApp a ${proveedorCot.telefono}` : 'El proveedor no tiene teléfono cargado'}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-green-600 disabled:opacity-30 disabled:hover:text-gray-400"
+                          >
+                            <MessageCircle className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
@@ -280,7 +348,7 @@ export default function Cotizaciones() {
                           )}
                           {cot.estado === 'respondido' && (
                             <>
-                              <button onClick={() => convertirAOC(cot.id)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Aprobar y crear OC">
+                              <button onClick={() => convertirAOC(cot.id)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Generar Orden de Compra (con los precios recibidos)">
                                 <CheckCircle2 className="h-3.5 w-3.5" />
                               </button>
                               <button onClick={() => cambiarEstado(cot.id, 'cancelado')} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Cancelar">

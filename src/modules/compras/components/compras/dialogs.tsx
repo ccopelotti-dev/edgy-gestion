@@ -17,6 +17,8 @@ import type {
   ImputacionPago,
   ItemComprobanteCompra,
   ControlRemision,
+  OrdenCompra,
+  ItemCompra,
 } from '../../types';
 
 import {
@@ -258,7 +260,10 @@ interface CotizacionDialogProps {
     fecha: string;
     validezDias: number;
     notas: string;
-    items: { descripcion: string; cantidad: number; precioUnitario: number; descuento: number; subtotal: number }[];
+    items: {
+      descripcion: string; cantidad: number; precioUnitario: number; descuento: number; subtotal: number;
+      insumoId?: string; productoId?: string; unidad?: UnidadMedida;
+    }[];
   }) => void;
 }
 
@@ -268,15 +273,29 @@ interface CotizacionItemRow {
   cantidad: number;
   precioUnitario: number;
   descuento: number;
+  /** Vínculo opcional al catálogo real de Productos y Stock -- ver
+   * buscador de insumo/producto más abajo. Mutuamente excluyentes. */
+  insumoId?: string;
+  productoId?: string;
+  unidad: UnidadMedida;
 }
 
 function newCotizacionItemRow(): CotizacionItemRow {
-  return { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0 };
+  return { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, unidad: 'unidad' };
 }
 
 /** Una fila de item se considera incompleta si falta la descripcion. */
 function filaCotizacionIncompleta(item: CotizacionItemRow): boolean {
   return !item.descripcion.trim();
+}
+
+/** Una fila "vacía" es la fila manual en blanco que arranca el modal (o
+ * cualquier fila agregada con "+Agregar" que el operador todavía no tocó):
+ * sin descripción y sin vínculo a catálogo. Al vincular un insumo/producto
+ * desde el buscador, esa fila se reutiliza en lugar de sumar una fila nueva
+ * y dejarla en blanco. */
+function filaCotizacionVacia(item: CotizacionItemRow): boolean {
+  return !item.descripcion.trim() && !item.insumoId && !item.productoId;
 }
 
 export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, validezDefault, onSave }: CotizacionDialogProps) {
@@ -291,6 +310,15 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
   const [intentoGuardar, setIntentoGuardar] = useState(false);
   const itemsSectionRef = useRef<HTMLDivElement>(null);
 
+  // Conexión con el catálogo real de Productos y Stock (mismo criterio que
+  // ComprobanteCompraDialog, Fase 18): permite formular el pedido de
+  // cotización eligiendo insumos/productos existentes en vez de tipear
+  // descripciones libres a mano.
+  const { cliente: clienteTenant } = useClienteActual();
+  const [insumosCatalogo, setInsumosCatalogo] = useState<InsumoCatalogoCompra[]>([]);
+  const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoCompra[]>([]);
+  const [busquedaCatalogo, setBusquedaCatalogo] = useState('');
+
   useEffect(() => {
     if (open) {
       if (cotizacion) {
@@ -300,6 +328,7 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
         setNotas(cotizacion.notas ?? '');
         setItems(cotizacion.items.map((it) => ({
           key: it.id, descripcion: it.descripcion, cantidad: it.cantidad, precioUnitario: it.precioUnitario, descuento: it.descuento,
+          insumoId: it.insumoId, productoId: it.productoId, unidad: (it.unidad as UnidadMedida) ?? 'unidad',
         })));
       } else {
         setProveedorId('');
@@ -310,8 +339,93 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
       }
       setErrors({});
       setIntentoGuardar(false);
+      setBusquedaCatalogo('');
     }
   }, [open, cotizacion, validezDefault]);
+
+  useEffect(() => {
+    if (!open || !clienteTenant?.id) return;
+    let activo = true;
+
+    async function cargarCatalogo() {
+      const [insumosRes, productosRes] = await Promise.all([
+        supabase
+          .from('insumos')
+          .select('id, nombre, unidad, costo, stock')
+          .eq('cliente_id', clienteTenant!.id)
+          .order('nombre'),
+        supabase
+          .from('productos')
+          .select('id, nombre, unidad_venta, costo, stock')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('estado', 'activo')
+          .order('nombre'),
+      ]);
+      if (!activo) return;
+
+      setInsumosCatalogo(
+        ((insumosRes.data ?? []) as any[]).map((i) => ({
+          id: i.id,
+          nombre: i.nombre,
+          unidad: i.unidad as UnidadMedida,
+          costo: Number(i.costo),
+          stock: Number(i.stock),
+        })),
+      );
+      setProductosCatalogo(
+        ((productosRes.data ?? []) as any[]).map((p) => ({
+          id: p.id,
+          nombre: p.nombre,
+          unidad: p.unidad_venta as UnidadMedida,
+          costo: Number(p.costo),
+          stock: Number(p.stock),
+        })),
+      );
+    }
+
+    cargarCatalogo();
+    return () => {
+      activo = false;
+    };
+  }, [open, clienteTenant?.id]);
+
+  const sugerenciasCatalogoCotizacion = useMemo<SugerenciaCatalogoCompra[]>(() => {
+    const q = busquedaCatalogo.trim().toLowerCase();
+    if (!q) return [];
+    const insumos: SugerenciaCatalogoCompra[] = insumosCatalogo
+      .filter((i) => i.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'insumo' as const, item }));
+    const productos: SugerenciaCatalogoCompra[] = productosCatalogo
+      .filter((p) => p.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'producto' as const, item }));
+    return [...insumos, ...productos].slice(0, 8);
+  }, [busquedaCatalogo, insumosCatalogo, productosCatalogo]);
+
+  const handleAgregarLineaInsumoCotizacion = useCallback((insumo: InsumoCatalogoCompra) => {
+    const nuevaLinea: CotizacionItemRow = {
+      key: generarId(), descripcion: insumo.nombre, cantidad: 1, precioUnitario: insumo.costo, descuento: 0,
+      insumoId: insumo.id, unidad: insumo.unidad,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaCotizacionVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
+    setBusquedaCatalogo('');
+  }, []);
+
+  const handleAgregarLineaProductoCotizacion = useCallback((producto: ProductoCatalogoCompra) => {
+    const nuevaLinea: CotizacionItemRow = {
+      key: generarId(), descripcion: producto.nombre, cantidad: 1, precioUnitario: producto.costo, descuento: 0,
+      productoId: producto.id, unidad: producto.unidad,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaCotizacionVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
+    setBusquedaCatalogo('');
+  }, []);
 
   const updateItem = (index: number, field: keyof CotizacionItemRow, value: string | number) => {
     setItems((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
@@ -348,6 +462,7 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
       items: items.map((item) => ({
         descripcion: item.descripcion.trim(), cantidad: item.cantidad,
         precioUnitario: item.precioUnitario, descuento: item.descuento, subtotal: getSubtotal(item),
+        insumoId: item.insumoId, productoId: item.productoId, unidad: item.unidad,
       })),
     });
     onOpenChange(false);
@@ -357,7 +472,7 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
-        <Dialog.Content className={contentWideClass}>
+        <Dialog.Content className={contentComprobanteClass}>
           <div className="flex items-center justify-between mb-5">
             <Dialog.Title className="text-lg font-semibold text-gray-900">
               {cotizacion ? 'Editar cotizacion' : 'Nueva cotizacion'}
@@ -404,12 +519,69 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
                 </div>
               )}
 
+              {/* Buscador de insumo/producto real del catálogo -- clic en una
+                  sugerencia agrega una fila ya vinculada (con su unidad de
+                  stock precargada). La carga manual (texto libre) sigue
+                  disponible vía "Agregar". */}
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={busquedaCatalogo}
+                  onChange={(e) => setBusquedaCatalogo(e.target.value)}
+                  placeholder="Vincular a un insumo o producto del catálogo..."
+                  className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+                />
+                {sugerenciasCatalogoCotizacion.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                    {sugerenciasCatalogoCotizacion.map((s) =>
+                      s.tipo === 'insumo' ? (
+                        <button
+                          key={`insumo-${s.item.id}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaInsumoCotizacion(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1.5 text-gray-900">
+                            {s.item.nombre}
+                            <span className="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                              Insumo
+                            </span>
+                          </span>
+                          <span className="text-gray-500">
+                            Stock {s.item.stock} {unidadAbrev(s.item.unidad)}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          key={`producto-${s.item.id}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaProductoCotizacion(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1.5 text-gray-900">
+                            {s.item.nombre}
+                            <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+                              Producto
+                            </span>
+                          </span>
+                          <span className="text-gray-500">
+                            Stock {s.item.stock} {unidadAbrev(s.item.unidad)}
+                          </span>
+                        </button>
+                      ),
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-gray-600">
                       <th className="text-left px-3 py-2 font-medium">Descripcion</th>
                       <th className="text-right px-3 py-2 font-medium w-20">Cant.</th>
+                      <th className="text-left px-3 py-2 font-medium w-24">UM</th>
                       <th className="text-right px-3 py-2 font-medium w-24">Precio</th>
                       <th className="text-right px-3 py-2 font-medium w-16">Dto.%</th>
                       <th className="text-right px-3 py-2 font-medium w-24">Subtotal</th>
@@ -419,21 +591,43 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
                   <tbody>
                     {items.map((item, idx) => {
                       const filaInvalida = intentoGuardar && filaCotizacionIncompleta(item);
+                      const vinculada = Boolean(item.insumoId || item.productoId);
                       return (
                         <tr
                           key={item.key}
                           className={`border-t border-gray-100 ${filaInvalida ? 'bg-red-50' : ''}`}
                         >
                           <td className="px-2 py-1.5">
-                            <input
-                              className={`w-full border-0 bg-transparent text-sm focus:outline-none ${filaInvalida ? 'ring-1 ring-red-400 rounded' : ''}`}
-                              placeholder={filaInvalida ? 'Falta la descripcion' : 'Descripcion'}
-                              value={item.descripcion}
-                              onChange={(e) => updateItem(idx, 'descripcion', e.target.value)}
-                            />
+                            <div className="flex items-center gap-1">
+                              <input
+                                className={`w-full border-0 bg-transparent text-sm focus:outline-none ${filaInvalida ? 'ring-1 ring-red-400 rounded' : ''}`}
+                                placeholder={filaInvalida ? 'Falta la descripcion' : 'Descripcion'}
+                                value={item.descripcion}
+                                onChange={(e) => updateItem(idx, 'descripcion', e.target.value)}
+                              />
+                              {vinculada && (
+                                <span
+                                  title={item.insumoId ? 'Vinculada a un insumo' : 'Vinculada a un producto'}
+                                  className={`shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${item.insumoId ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}
+                                >
+                                  {item.insumoId ? 'Insumo' : 'Producto'}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-2 py-1.5">
                             <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={1} value={item.cantidad} onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))} />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <select
+                              className="w-full border-0 bg-transparent text-xs focus:outline-none"
+                              value={item.unidad}
+                              onChange={(e) => updateItem(idx, 'unidad', e.target.value as UnidadMedida)}
+                            >
+                              {UNIDADES.map((u) => (
+                                <option key={u.value} value={u.value}>{u.label}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-2 py-1.5">
                             <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} step={0.01} value={item.precioUnitario} onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))} />
@@ -1387,4 +1581,140 @@ export function PagoDialog({ open, onOpenChange, proveedor, comprobantesPendient
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+// ─── 5. OrdenCompraPreciosDialog ────────────────────────────
+//
+// Punto 3 del pedido de Cotizaciones (Fase 21): una vez generada la OC a
+// partir de una cotización respondida, acá se cargan los precios que el
+// proveedor cotizó (por si no venían cargados en la cotización, o llegaron
+// distintos) y se "confirma" -- guardar acá es la confirmación: deja la OC
+// con los precios definitivos, lista para recepción/facturación.
+
+interface OrdenCompraPreciosDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  orden?: OrdenCompra;
+  proveedorNombre?: string;
+  onSave: (items: ItemCompra[]) => void;
+}
+
+interface OrdenCompraItemRow {
+  key: string;
+  id: string;
+  descripcion: string;
+  cantidad: number;
+  precioUnitario: number;
+  descuento: number;
+  productoId?: string;
+  insumoId?: string;
+  unidad?: UnidadMedida;
+}
+
+export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorNombre, onSave }: OrdenCompraPreciosDialogProps) {
+  const [items, setItems] = useState<OrdenCompraItemRow[]>([]);
+
+  useEffect(() => {
+    if (open && orden) {
+      setItems(orden.items.map((it) => ({
+        key: it.id, id: it.id, descripcion: it.descripcion, cantidad: it.cantidad,
+        precioUnitario: it.precioUnitario, descuento: it.descuento,
+        productoId: it.productoId, insumoId: it.insumoId, unidad: it.unidad,
+      })));
+    }
+  }, [open, orden]);
+
+  const updateItem = (index: number, field: keyof OrdenCompraItemRow, value: string | number) => {
+    setItems((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+  };
+
+  const getSubtotal = (item: OrdenCompraItemRow) => calcularSubtotalItem(item.cantidad, item.precioUnitario, item.descuento);
+  const total = items.reduce((sum, item) => sum + getSubtotal(item), 0);
+
+  const handleSave = () => {
+    onSave(items.map((item) => ({
+      id: item.id, descripcion: item.descripcion, cantidad: item.cantidad,
+      precioUnitario: item.precioUnitario, descuento: item.descuento, subtotal: getSubtotal(item),
+      productoId: item.productoId, insumoId: item.insumoId, unidad: item.unidad,
+    })));
+    onOpenChange(false);
+  };
+
+  if (!orden) return null;
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentWideClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">
+              Cargar precios cotizados — OC {formatOCNumeroCorto(orden.numero)}
+            </Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+
+          {proveedorNombre && (
+            <p className="text-sm text-gray-500 -mt-3 mb-4">Proveedor: {proveedorNombre}</p>
+          )}
+
+          <div className="space-y-5">
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600">
+                    <th className="text-left px-3 py-2 font-medium">Descripcion</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">Cant.</th>
+                    <th className="text-right px-3 py-2 font-medium w-28">Precio cotizado</th>
+                    <th className="text-right px-3 py-2 font-medium w-16">Dto.%</th>
+                    <th className="text-right px-3 py-2 font-medium w-24">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, idx) => (
+                    <tr key={item.key} className="border-t border-gray-100">
+                      <td className="px-3 py-2 text-gray-900">{item.descripcion}</td>
+                      <td className="px-2 py-1.5">
+                        <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} step={0.01} value={item.cantidad} onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))} />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          autoFocus={idx === 0}
+                          className="w-full text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+                          type="number" min={0} step={0.01} value={item.precioUnitario}
+                          onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))}
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} max={100} value={item.descuento} onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))} />
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-700 font-medium">{formatARS(getSubtotal(item))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end">
+              <div className="w-64 text-sm">
+                <div className="flex justify-between pt-1.5 border-t border-gray-200 font-semibold">
+                  <span className="text-gray-900">TOTAL</span>
+                  <span className="text-gray-900">{formatARS(total)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Confirmar precios</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function formatOCNumeroCorto(numero: number): string {
+  return `OC-${numero.toString().padStart(5, '0')}`;
 }
