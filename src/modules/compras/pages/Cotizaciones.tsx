@@ -3,7 +3,7 @@
 // Edgy Gestion · Gestion de pedidos de cotizacion
 // ============================================================
 
-import { useState, useMemo } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import {
   Search,
   Plus,
@@ -260,13 +260,13 @@ export default function Cotizaciones() {
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">
                 <th className="px-4 py-3 font-medium w-8" />
-                <th className="px-4 py-3 font-medium">Numero</th>
-                <th className="px-4 py-3 font-medium">Proveedor</th>
-                <th className="px-4 py-3 font-medium">Fecha</th>
-                <th className="px-4 py-3 text-right font-medium">Total</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 w-10" />
-                <th className="px-4 py-3 font-medium">Acciones</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Numero</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[11rem]">Proveedor</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Fecha</th>
+                <th className="px-4 py-3 text-right font-medium whitespace-nowrap min-w-[7rem]">Total</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Estado</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]" />
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -276,7 +276,7 @@ export default function Cotizaciones() {
                 const proveedorCot = proveedores.find((p) => p.id === cot.proveedorId);
 
                 return (
-                  <tbody key={cot.id}>
+                  <Fragment key={cot.id}>
                     <tr
                       className="border-t border-gray-100 hover:bg-gray-50/50 cursor-pointer"
                       onClick={() => setExpandedId(isExpanded ? null : cot.id)}
@@ -284,12 +284,12 @@ export default function Cotizaciones() {
                       <td className="px-4 py-3 text-gray-400">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">{formatNumero('COT', cot.numero)}</td>
-                      <td className="px-4 py-3 text-gray-900">{nombreProveedor(cot.proveedorId)}</td>
-                      <td className="px-4 py-3 text-gray-600">{formatDate(cot.fecha)}</td>
-                      <td className="px-4 py-3 text-right"><Amount value={cot.total} /></td>
-                      <td className="px-4 py-3"><EstadoCotizacionBadge estado={cot.estado} /></td>
-                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{formatNumero('COT', cot.numero)}</td>
+                      <td className="px-4 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{nombreProveedor(cot.proveedorId)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(cot.fecha)}</td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap"><Amount value={cot.total} size="xs" /></td>
+                      <td className="px-4 py-3 whitespace-nowrap"><EstadoCotizacionBadge estado={cot.estado} /></td>
+                      <td className="px-4 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-0.5">
                           <button
                             onClick={() => handleDescargarPdf(cot)}
@@ -401,7 +401,7 @@ export default function Cotizaciones() {
                         </td>
                       </tr>
                     )}
-                  </tbody>
+                  </Fragment>
                 );
               })}
             </tbody>

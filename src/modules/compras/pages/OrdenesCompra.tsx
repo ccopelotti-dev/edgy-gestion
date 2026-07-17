@@ -3,7 +3,7 @@
 // Edgy Gestion · Gestion de ordenes de compra
 // ============================================================
 
-import { useState, useMemo } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import {
   Search,
   Plus,
@@ -435,14 +435,14 @@ export default function OrdenesCompra() {
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">
                 <th className="px-4 py-3 font-medium w-8" />
-                <th className="px-4 py-3 font-medium">Numero</th>
-                <th className="px-4 py-3 font-medium">Proveedor</th>
-                <th className="px-4 py-3 font-medium">Fecha</th>
-                <th className="px-4 py-3 font-medium">Entrega</th>
-                <th className="px-4 py-3 text-right font-medium">Total</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 w-10" />
-                <th className="px-4 py-3 font-medium">Acciones</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Numero</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[11rem]">Proveedor</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Fecha</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Entrega</th>
+                <th className="px-4 py-3 text-right font-medium whitespace-nowrap min-w-[7rem]">Total</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[8rem]">Estado</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[3rem]" />
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -452,7 +452,7 @@ export default function OrdenesCompra() {
                 const comps = comprobantesDeOC(oc.id);
 
                 return (
-                  <tbody key={oc.id}>
+                  <Fragment key={oc.id}>
                     <tr
                       className="border-t border-gray-100 hover:bg-gray-50/50 cursor-pointer"
                       onClick={() => setExpandedId(isExpanded ? null : oc.id)}
@@ -460,13 +460,13 @@ export default function OrdenesCompra() {
                       <td className="px-4 py-3 text-gray-400">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">{formatNumero('OC', oc.numero)}</td>
-                      <td className="px-4 py-3 text-gray-900">{nombreProveedor(oc.proveedorId)}</td>
-                      <td className="px-4 py-3 text-gray-600">{formatDate(oc.fecha)}</td>
-                      <td className="px-4 py-3 text-gray-600">{oc.fechaEntrega ? formatDate(oc.fechaEntrega) : '—'}</td>
-                      <td className="px-4 py-3 text-right"><Amount value={oc.total} /></td>
-                      <td className="px-4 py-3"><EstadoOCBadge estado={oc.estado} /></td>
-                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">{formatNumero('OC', oc.numero)}</td>
+                      <td className="px-4 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{nombreProveedor(oc.proveedorId)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(oc.fecha)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{oc.fechaEntrega ? formatDate(oc.fechaEntrega) : '—'}</td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap"><Amount value={oc.total} size="xs" /></td>
+                      <td className="px-4 py-3 whitespace-nowrap"><EstadoOCBadge estado={oc.estado} /></td>
+                      <td className="px-4 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => handleDescargarPdf(oc)}
                           disabled={generandoPdfId === oc.id}
@@ -580,7 +580,7 @@ export default function OrdenesCompra() {
                         </td>
                       </tr>
                     )}
-                  </tbody>
+                  </Fragment>
                 );
               })}
             </tbody>
