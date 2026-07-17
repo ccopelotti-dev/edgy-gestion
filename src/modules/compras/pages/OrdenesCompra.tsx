@@ -17,6 +17,8 @@ import {
   Download,
   Loader2,
   Tag,
+  Mail,
+  MessageCircle,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -44,7 +46,7 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra } from '../types';
+import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra, Proveedor } from '../types';
 import {
   ESTADO_OC_LABEL,
   generarId,
@@ -202,6 +204,40 @@ export default function OrdenesCompra() {
         updatedAt: nowISO(),
       },
     });
+  };
+
+  // Envío por email / WhatsApp al proveedor -- mismo criterio que en
+  // Cotizaciones: sin motor de envío real todavía, se arma un link
+  // mailto:/wa.me con el detalle de la OC ya redactado.
+  const armarTextoOC = (oc: (typeof ordenesCompra)[number]) => {
+    const numero = formatNumero('OC', oc.numero);
+    const lineas = oc.items.map(
+      (it) => `- ${it.descripcion} · cant. ${it.cantidad}${it.unidad ? ` ${it.unidad}` : ''}`,
+    );
+    return {
+      asunto: `Orden de Compra ${numero}`,
+      cuerpo:
+        `Hola${nombreProveedor(oc.proveedorId) !== 'Desconocido' ? ` ${nombreProveedor(oc.proveedorId)}` : ''},\n\n` +
+        `Te enviamos la Orden de Compra ${numero} del ${formatDate(oc.fecha)}` +
+        `${oc.fechaEntrega ? `, con entrega estimada para el ${formatDate(oc.fechaEntrega)}` : ''}:\n\n` +
+        `${lineas.join('\n')}\n\n` +
+        `Total: ${formatARS(oc.total)}\n\n` +
+        `${oc.notas ? `Notas: ${oc.notas}\n\n` : ''}` +
+        `Saludos.`,
+    };
+  };
+
+  const handleEnviarEmailOC = (oc: (typeof ordenesCompra)[number], proveedor?: Proveedor) => {
+    if (!proveedor?.email) return;
+    const { asunto, cuerpo } = armarTextoOC(oc);
+    window.open(`mailto:${proveedor.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`, '_blank');
+  };
+
+  const handleEnviarWhatsappOC = (oc: (typeof ordenesCompra)[number], proveedor?: Proveedor) => {
+    if (!proveedor?.telefono) return;
+    const telefono = proveedor.telefono.replace(/\D/g, '');
+    const { cuerpo } = armarTextoOC(oc);
+    window.open(`https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`, '_blank');
   };
 
   const handleDescargarPdf = async (oc: (typeof ordenesCompra)[number]) => {
@@ -447,7 +483,6 @@ export default function OrdenesCompra() {
                 <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Entrega</th>
                 <th className="px-4 py-3 text-right font-medium whitespace-nowrap min-w-[7rem]">Total</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[8rem]">Estado</th>
-                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[3rem]" />
                 <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
               </tr>
             </thead>
@@ -456,6 +491,7 @@ export default function OrdenesCompra() {
                 const isExpanded = expandedId === oc.id;
                 const linkedCot = cotNumero(oc.cotizacionId);
                 const comps = comprobantesDeOC(oc.id);
+                const proveedorOC = proveedores.find((p) => p.id === oc.proveedorId);
 
                 return (
                   <Fragment key={oc.id}>
@@ -472,22 +508,36 @@ export default function OrdenesCompra() {
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{oc.fechaEntrega ? formatDate(oc.fechaEntrega) : '—'}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap"><Amount value={oc.total} size="xs" /></td>
                       <td className="px-4 py-3 whitespace-nowrap"><EstadoOCBadge estado={oc.estado} /></td>
-                      <td className="px-4 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleDescargarPdf(oc)}
-                          disabled={generandoPdfId === oc.id}
-                          title="Descargar PDF"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                        >
-                          {generandoPdfId === oc.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Download className="h-4 w-4" />
-                          )}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDescargarPdf(oc)}
+                            disabled={generandoPdfId === oc.id}
+                            title="Descargar PDF"
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+                          >
+                            {generandoPdfId === oc.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Download className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleEnviarEmailOC(oc, proveedorOC)}
+                            disabled={!proveedorOC?.email}
+                            title={proveedorOC?.email ? `Enviar por email a ${proveedorOC.email}` : 'El proveedor no tiene email cargado'}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                          >
+                            <Mail className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleEnviarWhatsappOC(oc, proveedorOC)}
+                            disabled={!proveedorOC?.telefono}
+                            title={proveedorOC?.telefono ? `Enviar por WhatsApp a ${proveedorOC.telefono}` : 'El proveedor no tiene teléfono cargado'}
+                            className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                          </button>
                           {oc.estado === 'pendiente' && (
                             <>
                               <button onClick={() => setPreciosOrdenId(oc.id)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cargar precios cotizados, IVA e impuestos / confirmar">
@@ -529,7 +579,7 @@ export default function OrdenesCompra() {
                     {/* Expanded detail */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={9} className="bg-gray-50/50 px-8 py-4">
+                        <td colSpan={8} className="bg-gray-50/50 px-8 py-4">
                           {/* Items */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
                           <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
