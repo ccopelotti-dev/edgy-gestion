@@ -9,7 +9,6 @@ import {
   Plus,
   ChevronDown,
   ChevronUp,
-  Send,
   Edit2,
   CheckCircle2,
   XCircle,
@@ -265,7 +264,6 @@ export default function Cotizaciones() {
                 <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Fecha</th>
                 <th className="px-4 py-3 text-right font-medium whitespace-nowrap min-w-[7rem]">Total</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]">Estado</th>
-                <th className="px-4 py-3 font-medium whitespace-nowrap min-w-[7rem]" />
                 <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
               </tr>
             </thead>
@@ -289,45 +287,38 @@ export default function Cotizaciones() {
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(cot.fecha)}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap"><Amount value={cot.total} size="xs" /></td>
                       <td className="px-4 py-3 whitespace-nowrap"><EstadoCotizacionBadge estado={cot.estado} /></td>
-                      <td className="px-4 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-0.5">
+                      <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleDescargarPdf(cot)}
                             disabled={generandoPdfId === cot.id}
                             title="Descargar PDF"
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
                           >
                             {generandoPdfId === cot.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             ) : (
-                              <Download className="h-4 w-4" />
+                              <Download className="h-3.5 w-3.5" />
                             )}
                           </button>
                           <button
                             onClick={() => handleEnviarEmail(cot, proveedorCot)}
                             disabled={!proveedorCot?.email}
                             title={proveedorCot?.email ? `Enviar por email a ${proveedorCot.email}` : 'El proveedor no tiene email cargado'}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-gray-400"
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
                           >
-                            <Mail className="h-4 w-4" />
+                            <Mail className="h-3.5 w-3.5" />
                           </button>
                           <button
                             onClick={() => handleEnviarWhatsapp(cot, proveedorCot)}
                             disabled={!proveedorCot?.telefono}
                             title={proveedorCot?.telefono ? `Enviar por WhatsApp a ${proveedorCot.telefono}` : 'El proveedor no tiene teléfono cargado'}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-green-600 disabled:opacity-30 disabled:hover:text-gray-400"
+                            className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
                           >
-                            <MessageCircle className="h-4 w-4" />
+                            <MessageCircle className="h-3.5 w-3.5" />
                           </button>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
                           {cot.estado === 'borrador' && (
                             <>
-                              <button onClick={() => cambiarEstado(cot.id, 'enviado')} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Enviar">
-                                <Send className="h-3.5 w-3.5" />
-                              </button>
                               <button onClick={() => { setEditCotizacion(cot); setDialogOpen(true); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Editar">
                                 <Edit2 className="h-3.5 w-3.5" />
                               </button>
@@ -357,7 +348,7 @@ export default function Cotizaciones() {
                             </>
                           )}
                           {cot.estado === 'aprobado' && linkedOC && (
-                            <span className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
+                            <span className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full whitespace-nowrap">
                               <ClipboardList className="h-3 w-3 inline mr-1" />{linkedOC}
                             </span>
                           )}
@@ -368,7 +359,7 @@ export default function Cotizaciones() {
                     {/* Expanded detail */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={8} className="bg-gray-50/50 px-8 py-4">
+                        <td colSpan={7} className="bg-gray-50/50 px-8 py-4">
                           {/* Items */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
                           <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
