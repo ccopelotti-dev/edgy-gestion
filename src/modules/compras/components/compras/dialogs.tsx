@@ -19,6 +19,7 @@ import type {
   ControlRemision,
   OrdenCompra,
   ItemCompra,
+  ImpuestoOrdenCompra,
 } from '../../types';
 
 import {
@@ -1596,7 +1597,7 @@ interface OrdenCompraPreciosDialogProps {
   onOpenChange: (open: boolean) => void;
   orden?: OrdenCompra;
   proveedorNombre?: string;
-  onSave: (items: ItemCompra[]) => void;
+  onSave: (data: { items: ItemCompra[]; montoIva: number; otrosImpuestos: ImpuestoOrdenCompra[] }) => void;
 }
 
 interface OrdenCompraItemRow {
@@ -1609,10 +1610,29 @@ interface OrdenCompraItemRow {
   productoId?: string;
   insumoId?: string;
   unidad?: UnidadMedida;
+  /** IVA por línea -- opcional: no todos los proveedores facturan lo mismo
+   * (algunos ítems pueden ir a alícuota reducida, exentos, etc.). */
+  alicuotaIva: number;
+}
+
+const ALICUOTAS_IVA = [0, 10.5, 21, 27] as const;
+
+interface OtroImpuestoRow {
+  key: string;
+  concepto: string;
+  monto: number;
+}
+
+function nuevoOtroImpuestoRow(): OtroImpuestoRow {
+  return { key: generarId(), concepto: '', monto: 0 };
 }
 
 export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorNombre, onSave }: OrdenCompraPreciosDialogProps) {
   const [items, setItems] = useState<OrdenCompraItemRow[]>([]);
+  // Percepciones/impuestos adicionales cargados a mano -- percepción de
+  // Ganancias, percepción de IIBB, impuesto a los débitos y créditos
+  // bancarios, etc. Lista libre porque varía según proveedor/jurisdicción.
+  const [otrosImpuestos, setOtrosImpuestos] = useState<OtroImpuestoRow[]>([]);
 
   useEffect(() => {
     if (open && orden) {
@@ -1620,7 +1640,11 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
         key: it.id, id: it.id, descripcion: it.descripcion, cantidad: it.cantidad,
         precioUnitario: it.precioUnitario, descuento: it.descuento,
         productoId: it.productoId, insumoId: it.insumoId, unidad: it.unidad,
+        alicuotaIva: it.alicuotaIva ?? 21,
       })));
+      setOtrosImpuestos(
+        (orden.otrosImpuestos ?? []).map((imp) => ({ key: imp.id, concepto: imp.concepto, monto: imp.monto })),
+      );
     }
   }, [open, orden]);
 
@@ -1629,14 +1653,33 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
   };
 
   const getSubtotal = (item: OrdenCompraItemRow) => calcularSubtotalItem(item.cantidad, item.precioUnitario, item.descuento);
-  const total = items.reduce((sum, item) => sum + getSubtotal(item), 0);
+  const getIva = (item: OrdenCompraItemRow) => getSubtotal(item) * (item.alicuotaIva / 100);
+
+  const subtotal = items.reduce((sum, item) => sum + getSubtotal(item), 0);
+  const totalIva = items.reduce((sum, item) => sum + getIva(item), 0);
+
+  const addOtroImpuesto = () => setOtrosImpuestos((prev) => [...prev, nuevoOtroImpuestoRow()]);
+  const removeOtroImpuesto = (index: number) => setOtrosImpuestos((prev) => prev.filter((_, i) => i !== index));
+  const updateOtroImpuesto = (index: number, field: keyof OtroImpuestoRow, value: string | number) => {
+    setOtrosImpuestos((prev) => prev.map((imp, i) => (i === index ? { ...imp, [field]: value } : imp)));
+  };
+  const totalOtrosImpuestos = otrosImpuestos.reduce((sum, imp) => sum + (imp.monto || 0), 0);
+
+  const totalFinal = subtotal + totalIva + totalOtrosImpuestos;
 
   const handleSave = () => {
-    onSave(items.map((item) => ({
-      id: item.id, descripcion: item.descripcion, cantidad: item.cantidad,
-      precioUnitario: item.precioUnitario, descuento: item.descuento, subtotal: getSubtotal(item),
-      productoId: item.productoId, insumoId: item.insumoId, unidad: item.unidad,
-    })));
+    onSave({
+      items: items.map((item) => ({
+        id: item.id, descripcion: item.descripcion, cantidad: item.cantidad,
+        precioUnitario: item.precioUnitario, descuento: item.descuento, subtotal: getSubtotal(item),
+        productoId: item.productoId, insumoId: item.insumoId, unidad: item.unidad,
+        alicuotaIva: item.alicuotaIva, montoIva: getIva(item),
+      })),
+      montoIva: totalIva,
+      otrosImpuestos: otrosImpuestos
+        .filter((imp) => imp.concepto.trim() || imp.monto)
+        .map((imp) => ({ id: generarId(), concepto: imp.concepto.trim() || 'Otro impuesto', monto: imp.monto })),
+    });
     onOpenChange(false);
   };
 
@@ -1646,7 +1689,7 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
-        <Dialog.Content className={contentWideClass}>
+        <Dialog.Content className={contentComprobanteClass}>
           <div className="flex items-center justify-between mb-5">
             <Dialog.Title className="text-lg font-semibold text-gray-900">
               Cargar precios cotizados — OC {formatOCNumeroCorto(orden.numero)}
@@ -1667,6 +1710,7 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
                     <th className="text-right px-3 py-2 font-medium w-20">Cant.</th>
                     <th className="text-right px-3 py-2 font-medium w-28">Precio cotizado</th>
                     <th className="text-right px-3 py-2 font-medium w-16">Dto.%</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">IVA</th>
                     <th className="text-right px-3 py-2 font-medium w-24">Subtotal</th>
                   </tr>
                 </thead>
@@ -1688,6 +1732,17 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
                       <td className="px-2 py-1.5">
                         <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} max={100} value={item.descuento} onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))} />
                       </td>
+                      <td className="px-2 py-1.5">
+                        <select
+                          className="w-full border-0 bg-transparent text-xs text-right focus:outline-none"
+                          value={item.alicuotaIva}
+                          onChange={(e) => updateItem(idx, 'alicuotaIva', Number(e.target.value))}
+                        >
+                          {ALICUOTAS_IVA.map((a) => (
+                            <option key={a} value={a}>{a}%</option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="px-3 py-1.5 text-right text-gray-700 font-medium">{formatARS(getSubtotal(item))}</td>
                     </tr>
                   ))}
@@ -1695,11 +1750,68 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
               </table>
             </div>
 
+            {/* Otros impuestos: percepción de Ganancias, percepción de
+                IIBB, impuesto a los débitos y créditos bancarios, etc. */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-900">Otros impuestos / percepciones</h3>
+                <button type="button" className={`${btnSecondary} flex items-center gap-1 text-xs py-1.5 px-3`} onClick={addOtroImpuesto}>
+                  <Plus className="w-3.5 h-3.5" /> Agregar impuesto
+                </button>
+              </div>
+              {otrosImpuestos.length === 0 ? (
+                <p className="text-xs text-gray-400">Sin percepciones cargadas -- ej. Ganancias, IIBB, débitos y créditos bancarios.</p>
+              ) : (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {otrosImpuestos.map((imp, idx) => (
+                        <tr key={imp.key} className={idx > 0 ? 'border-t border-gray-100' : ''}>
+                          <td className="px-3 py-1.5">
+                            <input
+                              className="w-full border-0 bg-transparent text-sm focus:outline-none"
+                              placeholder="Ej. Percepción IIBB"
+                              value={imp.concepto}
+                              onChange={(e) => updateOtroImpuesto(idx, 'concepto', e.target.value)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 w-32">
+                            <input
+                              className="w-full text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+                              type="number" min={0} step={0.01} value={imp.monto}
+                              onChange={(e) => updateOtroImpuesto(idx, 'monto', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-1 py-1.5 w-10">
+                            <button type="button" className={btnIcon} onClick={() => removeOtroImpuesto(idx)}><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end">
-              <div className="w-64 text-sm">
+              <div className="w-64 text-sm space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Subtotal</span>
+                  <span className="text-gray-900">{formatARS(subtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">IVA</span>
+                  <span className="text-gray-900">{formatARS(totalIva)}</span>
+                </div>
+                {otrosImpuestos.map((imp) => (
+                  <div className="flex justify-between" key={imp.key}>
+                    <span className="text-gray-500">{imp.concepto.trim() || 'Otro impuesto'}</span>
+                    <span className="text-gray-900">{formatARS(imp.monto || 0)}</span>
+                  </div>
+                ))}
                 <div className="flex justify-between pt-1.5 border-t border-gray-200 font-semibold">
                   <span className="text-gray-900">TOTAL</span>
-                  <span className="text-gray-900">{formatARS(total)}</span>
+                  <span className="text-gray-900">{formatARS(totalFinal)}</span>
                 </div>
               </div>
             </div>

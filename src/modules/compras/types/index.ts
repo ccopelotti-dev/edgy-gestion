@@ -56,6 +56,15 @@ export interface ItemCompra {
   precioUnitario: number;
   descuento: number;            // %
   subtotal: number;             // cantidad * precio * (1 - desc/100)
+  /**
+   * IVA de la línea -- opcional acá porque en un Pedido de Cotización no
+   * aplica (no es un documento fiscal), pero en una Orden de Compra sirve
+   * para estimar el costo total real antes de recibir la factura (ver
+   * OrdenCompraPreciosDialog, Fase 21). En ComprobanteCompra este campo es
+   * obligatorio -- ver ItemComprobanteCompra más abajo.
+   */
+  alicuotaIva?: number;         // 0, 10.5, 21, 27
+  montoIva?: number;
 }
 
 export interface ItemComprobanteCompra extends ItemCompra {
@@ -98,6 +107,16 @@ export type EstadoOrdenCompra =
   | 'recibida'
   | 'cancelada';
 
+/** Impuesto/percepción adicional cargado a mano en una Orden de Compra --
+ * percepción de Ganancias, percepción de IIBB, impuesto a los débitos y
+ * créditos bancarios, etc. Lista libre porque varía mucho según proveedor
+ * y jurisdicción; cada uno suma directo al total (no lleva alícuota). */
+export interface ImpuestoOrdenCompra {
+  id: string;
+  concepto: string;
+  monto: number;
+}
+
 export interface OrdenCompra {
   id: string;
   numero: number;
@@ -108,6 +127,11 @@ export interface OrdenCompra {
   estado: EstadoOrdenCompra;
   items: ItemCompra[];
   subtotal: number;
+  /** Suma de `montoIva` de los items (ver ItemCompra.alicuotaIva). */
+  montoIva?: number;
+  /** Percepciones/impuestos adicionales -- ver ImpuestoOrdenCompra. */
+  otrosImpuestos?: ImpuestoOrdenCompra[];
+  /** subtotal + montoIva + suma(otrosImpuestos). */
   total: number;
   notas?: string;
   comprobanteIds: string[];

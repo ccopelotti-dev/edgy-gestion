@@ -357,6 +357,8 @@ function itemToRow(item: ItemCompra, fkColumn: string, fkValue: string) {
     precio_unitario: item.precioUnitario,
     descuento: item.descuento,
     subtotal: item.subtotal,
+    alicuota_iva: item.alicuotaIva ?? null,
+    monto_iva: item.montoIva ?? null,
   };
 }
 
@@ -405,6 +407,8 @@ function ordenCompraToRow(o: OrdenCompra, clienteId: string) {
     fecha_entrega: o.fechaEntrega ?? null,
     estado: o.estado,
     subtotal: o.subtotal,
+    monto_iva: o.montoIva ?? null,
+    otros_impuestos: o.otrosImpuestos ?? [],
     total: o.total,
     notas: o.notas ?? null,
   };
@@ -695,6 +699,8 @@ function itemFromRow(r: any): ItemCompra {
     precioUnitario: Number(r.precio_unitario),
     descuento: Number(r.descuento),
     subtotal: Number(r.subtotal),
+    alicuotaIva: r.alicuota_iva != null ? Number(r.alicuota_iva) : undefined,
+    montoIva: r.monto_iva != null ? Number(r.monto_iva) : undefined,
   };
 }
 
@@ -785,6 +791,8 @@ async function fetchComprasState(): Promise<ComprasState> {
     estado: r.estado,
     items: ocItemsByOc.get(r.id) ?? [],
     subtotal: Number(r.subtotal),
+    montoIva: r.monto_iva != null ? Number(r.monto_iva) : undefined,
+    otrosImpuestos: (r.otros_impuestos ?? []) as OrdenCompra['otrosImpuestos'],
     total: Number(r.total),
     notas: r.notas ?? undefined,
     comprobanteIds: comprobanteIdsPorOc.get(r.id) ?? [],

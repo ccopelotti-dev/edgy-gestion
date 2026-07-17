@@ -16,7 +16,7 @@ import {
   ClipboardList,
   Download,
   Loader2,
-  DollarSign,
+  Tag,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -44,7 +44,7 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra } from '../types';
+import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra } from '../types';
 import {
   ESTADO_OC_LABEL,
   generarId,
@@ -182,17 +182,23 @@ export default function OrdenesCompra() {
     dispatch({ type: 'CAMBIAR_ESTADO_OC', payload: { id, nuevoEstado } });
   };
 
-  const handleGuardarPrecios = (ordenId: string, itemsActualizados: ItemCompra[]) => {
+  const handleGuardarPrecios = (
+    ordenId: string,
+    data: { items: ItemCompra[]; montoIva: number; otrosImpuestos: ImpuestoOrdenCompra[] },
+  ) => {
     const orden = ordenesCompra.find((o) => o.id === ordenId);
     if (!orden) return;
-    const subtotal = itemsActualizados.reduce((s, i) => s + i.subtotal, 0);
+    const subtotal = data.items.reduce((s, i) => s + i.subtotal, 0);
+    const totalOtrosImpuestos = data.otrosImpuestos.reduce((s, i) => s + i.monto, 0);
     dispatch({
       type: 'UPDATE_ORDEN_COMPRA',
       payload: {
         ...orden,
-        items: itemsActualizados,
+        items: data.items,
         subtotal,
-        total: subtotal,
+        montoIva: data.montoIva,
+        otrosImpuestos: data.otrosImpuestos,
+        total: subtotal + data.montoIva + totalOtrosImpuestos,
         updatedAt: nowISO(),
       },
     });
@@ -484,8 +490,8 @@ export default function OrdenesCompra() {
                         <div className="flex items-center gap-1">
                           {oc.estado === 'pendiente' && (
                             <>
-                              <button onClick={() => setPreciosOrdenId(oc.id)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cargar precios cotizados / confirmar">
-                                <DollarSign className="h-3.5 w-3.5" />
+                              <button onClick={() => setPreciosOrdenId(oc.id)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cargar precios cotizados, IVA e impuestos / confirmar">
+                                <Tag className="h-3.5 w-3.5" />
                               </button>
                               <button onClick={() => cambiarEstado(oc.id, 'parcial')} className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg" title="Marcar parcial">
                                 <Package className="h-3.5 w-3.5" />
@@ -551,6 +557,34 @@ export default function OrdenesCompra() {
                             </table>
                           </div>
 
+                          {/* IVA / otros impuestos, si ya se cargaron precios */}
+                          {((oc.montoIva ?? 0) > 0 || (oc.otrosImpuestos?.length ?? 0) > 0) && (
+                            <div className="flex justify-end mb-3">
+                              <div className="w-64 text-sm space-y-1">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-500">Subtotal</span>
+                                  <span className="text-gray-900">{formatARS(oc.subtotal)}</span>
+                                </div>
+                                {(oc.montoIva ?? 0) > 0 && (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-500">IVA</span>
+                                    <span className="text-gray-900">{formatARS(oc.montoIva ?? 0)}</span>
+                                  </div>
+                                )}
+                                {oc.otrosImpuestos?.map((imp) => (
+                                  <div className="flex justify-between" key={imp.id}>
+                                    <span className="text-gray-500">{imp.concepto}</span>
+                                    <span className="text-gray-900">{formatARS(imp.monto)}</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between pt-1.5 border-t border-gray-200 font-semibold">
+                                  <span className="text-gray-900">TOTAL</span>
+                                  <span className="text-gray-900">{formatARS(oc.total)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Linked cotizacion */}
                           {linkedCot && (
                             <p className="text-sm text-gray-600 mb-2">
@@ -602,7 +636,7 @@ export default function OrdenesCompra() {
         onOpenChange={(v) => { if (!v) setPreciosOrdenId(null); }}
         orden={ordenesCompra.find((o) => o.id === preciosOrdenId) ?? undefined}
         proveedorNombre={preciosOrdenId ? nombreProveedor(ordenesCompra.find((o) => o.id === preciosOrdenId)?.proveedorId ?? '') : undefined}
-        onSave={(items) => { if (preciosOrdenId) handleGuardarPrecios(preciosOrdenId, items); }}
+        onSave={(data) => { if (preciosOrdenId) handleGuardarPrecios(preciosOrdenId, data); }}
       />
     </div>
   );
