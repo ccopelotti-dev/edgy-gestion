@@ -41,6 +41,7 @@ import {
   formatARS,
   formatDate,
   formatNumero,
+  formatNumeroComprobanteCompra,
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
@@ -405,13 +406,8 @@ export default function Comprobantes() {
                       <td className="px-4 py-3 text-gray-400">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">
-                        <div>{formatNumero(PREFIJO_COMPROBANTE_COMPRA[comp.tipo], comp.numero)}</div>
-                        {comp.numeroComprobanteProveedor && (
-                          <div className="text-gray-400 font-normal mt-0.5" title="Nro. de Comprobante del proveedor">
-                            {comp.numeroComprobanteProveedor}
-                          </div>
-                        )}
+                      <td className="px-4 py-3 font-mono text-xs" title={comp.numeroComprobanteProveedor ? 'Nro. de comprobante del proveedor' : 'Sin nro. del proveedor cargado -- se muestra el correlativo interno'}>
+                        {formatNumeroComprobanteCompra(comp.tipo, comp.numero, comp.numeroComprobanteProveedor)}
                       </td>
                       <td className="px-4 py-3">
                         <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">

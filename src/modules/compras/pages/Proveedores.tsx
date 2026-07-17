@@ -43,8 +43,7 @@ import {
   formatCuit,
   formatDate,
   formatARS,
-  formatNumero,
-  PREFIJO_COMPROBANTE_COMPRA,
+  formatNumeroComprobanteCompra,
   nowISO,
 } from '../lib/format';
 import type { Proveedor, PagoCompra } from '../types';
@@ -321,7 +320,7 @@ export default function Proveedores() {
                                 <div className="space-y-1">
                                   {pendientes.slice(0, 5).map((c) => (
                                     <div key={c.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm border border-gray-100">
-                                      <span className="font-mono text-xs">{formatNumero(PREFIJO_COMPROBANTE_COMPRA[c.tipo], c.numero)}</span>
+                                      <span className="font-mono text-xs">{formatNumeroComprobanteCompra(c.tipo, c.numero, c.numeroComprobanteProveedor)}</span>
                                       <span className="text-gray-500">{formatDate(c.fecha)}</span>
                                       <EstadoComprobanteBadge estado={c.estado} />
                                       <Amount value={c.saldoPendiente} size="sm" />

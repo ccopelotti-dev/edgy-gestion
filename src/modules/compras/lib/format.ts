@@ -53,6 +53,23 @@ export const PREFIJO_COMPROBANTE_COMPRA: Record<string, string> = {
   nota_debito: 'NDC',
 };
 
+/** Número a mostrar en los listados de Comprobantes: mantiene el prefijo
+ * interno (FC/NCC/NDC) para distinguir el tipo de un vistazo, pero la
+ * parte numérica es la del PROVEEDOR (`numeroComprobanteProveedor`, el que
+ * viene impreso en la factura física) apenas está cargada -- nuestro
+ * correlativo interno es solo un ID de Supabase sin ninguna utilidad fuera
+ * del sistema. Si todavía no se cargó ese dato (comprobantes viejos), cae
+ * al correlativo interno para no dejar el número vacío. */
+export function formatNumeroComprobanteCompra(
+  tipo: string,
+  numero: number,
+  numeroComprobanteProveedor?: string | null,
+): string {
+  const prefijo = PREFIJO_COMPROBANTE_COMPRA[tipo] ?? tipo;
+  const parteNumerica = numeroComprobanteProveedor?.trim() || numero.toString().padStart(5, '0');
+  return `${prefijo}-${parteNumerica}`;
+}
+
 export function formatCuit(cuit: string): string {
   if (!cuit || cuit.length !== 11) return cuit || '—';
   return `${cuit.slice(0, 2)}-${cuit.slice(2, 10)}-${cuit.slice(10)}`;
