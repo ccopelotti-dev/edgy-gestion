@@ -674,6 +674,12 @@ interface ComprobanteCompraDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   proveedores: Proveedor[];
+  /** Si se abre desde "Registrar factura" en una Orden de Compra puntual,
+   * precarga proveedor + items + otros impuestos desde ahí (con los
+   * precios/IVA ya confirmados en "Cargar precios cotizados") y vincula el
+   * comprobante resultante a esa OC. Sin esto, el modal arranca en blanco
+   * (alta manual, como siempre). */
+  ordenCompra?: OrdenCompra;
   onSave: (data: {
     tipo: TipoComprobanteCompra;
     proveedorId: string;
@@ -689,6 +695,12 @@ interface ComprobanteCompraDialogProps {
     /** true si se apretó "Actualizar stock" (guardar + empujar stock de una),
      * false si se apretó "Guardar" (solo el registro fiscal, sin tocar stock). */
     actualizarStock: boolean;
+    /** Percepciones/impuestos adicionales -- mismo criterio que en la OC
+     * (Fase 21): Ganancias, IIBB, débitos y créditos bancarios, etc. */
+    otrosImpuestos: ImpuestoOrdenCompra[];
+    /** Si el comprobante viene de "Registrar factura" en una OC, el id de
+     * esa OC para vincularlos (ver ComprobanteCompra.ordenCompraId). */
+    ordenCompraId?: string;
   }) => void;
 }
 
@@ -749,13 +761,17 @@ function soloDigitos(raw: string, max: number): string {
   return raw.replace(/\D/g, '').slice(0, max);
 }
 
-export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSave }: ComprobanteCompraDialogProps) {
+export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, ordenCompra, onSave }: ComprobanteCompraDialogProps) {
   const [tipo, setTipo] = useState<TipoComprobanteCompra>('factura');
   const [proveedorId, setProveedorId] = useState('');
   const [fecha, setFecha] = useState(todayISO());
   const [fechaVencimiento, setFechaVencimiento] = useState('');
   const [medioPago, setMedioPago] = useState<MedioPagoCompra>('transferencia');
   const [items, setItems] = useState<ComprobanteItemRow[]>([newComprobanteItemRow()]);
+  // Percepciones/impuestos adicionales -- mismo componente que en
+  // OrdenCompraPreciosDialog (Fase 21): Ganancias, IIBB, débitos y
+  // créditos bancarios, etc. Si viene de una OC, se precargan las suyas.
+  const [otrosImpuestos, setOtrosImpuestos] = useState<OtroImpuestoRow[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   // Se activa recien despues del primer intento fallido de guardar: a partir
   // de ahi, las filas incompletas se resaltan en rojo en vivo.
@@ -805,11 +821,9 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
   useEffect(() => {
     if (open) {
       setTipo('factura');
-      setProveedorId('');
       setFecha(todayISO());
       setFechaVencimiento('');
       setMedioPago('transferencia');
-      setItems([newComprobanteItemRow()]);
       setErrors({});
       setIntentoGuardar(false);
       setComprobantePtoVta('');
@@ -819,8 +833,28 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
       setRemitoPtoVta('');
       setRemitoNumero('');
       setBusquedaCatalogo('');
+      if (ordenCompra) {
+        setProveedorId(ordenCompra.proveedorId);
+        setItems(
+          ordenCompra.items.length
+            ? ordenCompra.items.map((it) => ({
+                key: generarId(), descripcion: it.descripcion, cantidad: it.cantidad,
+                precioUnitario: it.precioUnitario, descuento: it.descuento,
+                alicuotaIva: it.alicuotaIva ?? 21,
+                insumoId: it.insumoId, productoId: it.productoId, unidad: it.unidad ?? 'unidad',
+              }))
+            : [newComprobanteItemRow()],
+        );
+        setOtrosImpuestos(
+          (ordenCompra.otrosImpuestos ?? []).map((imp) => ({ key: imp.id, concepto: imp.concepto, monto: imp.monto })),
+        );
+      } else {
+        setProveedorId('');
+        setItems([newComprobanteItemRow()]);
+        setOtrosImpuestos([]);
+      }
     }
-  }, [open]);
+  }, [open, ordenCompra]);
 
   useEffect(() => {
     if (!open || !clienteTenant?.id) return;
@@ -939,7 +973,15 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
 
   const totalNeto = items.reduce((sum, item) => sum + getSubtotal(item), 0);
   const totalIva = items.reduce((sum, item) => sum + getIva(item), 0);
-  const totalFinal = totalNeto + totalIva;
+
+  const addOtroImpuesto = () => setOtrosImpuestos((prev) => [...prev, nuevoOtroImpuestoRow()]);
+  const removeOtroImpuesto = (index: number) => setOtrosImpuestos((prev) => prev.filter((_, i) => i !== index));
+  const updateOtroImpuesto = (index: number, field: keyof OtroImpuestoRow, value: string | number) => {
+    setOtrosImpuestos((prev) => prev.map((imp, i) => (i === index ? { ...imp, [field]: value } : imp)));
+  };
+  const totalOtrosImpuestos = otrosImpuestos.reduce((sum, imp) => sum + (imp.monto || 0), 0);
+
+  const totalFinal = totalNeto + totalIva + totalOtrosImpuestos;
 
   // Solo tiene sentido "Actualizar stock" si al menos una línea está
   // vinculada al catálogo real (insumo o producto) -- una línea de texto
@@ -996,6 +1038,10 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
       controlRemision,
       numeroRemito,
       actualizarStock,
+      otrosImpuestos: otrosImpuestos
+        .filter((imp) => imp.concepto.trim() || imp.monto)
+        .map((imp) => ({ id: generarId(), concepto: imp.concepto.trim() || 'Otro impuesto', monto: imp.monto })),
+      ordenCompraId: ordenCompra?.id,
     });
     onOpenChange(false);
   };
@@ -1261,6 +1307,49 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
               </div>
             </div>
 
+            {/* Otros impuestos: percepción de Ganancias, percepción de
+                IIBB, impuesto a los débitos y créditos bancarios, etc. */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-900">Otros impuestos / percepciones</h3>
+                <button type="button" className={`${btnSecondary} flex items-center gap-1 text-xs py-1.5 px-3`} onClick={addOtroImpuesto}>
+                  <Plus className="w-3.5 h-3.5" /> Agregar impuesto
+                </button>
+              </div>
+              {otrosImpuestos.length === 0 ? (
+                <p className="text-xs text-gray-400">Sin percepciones cargadas -- ej. Ganancias, IIBB, débitos y créditos bancarios.</p>
+              ) : (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {otrosImpuestos.map((imp, idx) => (
+                        <tr key={imp.key} className={idx > 0 ? 'border-t border-gray-100' : ''}>
+                          <td className="px-3 py-1.5">
+                            <input
+                              className="w-full border-0 bg-transparent text-sm focus:outline-none"
+                              placeholder="Ej. Percepción IIBB"
+                              value={imp.concepto}
+                              onChange={(e) => updateOtroImpuesto(idx, 'concepto', e.target.value)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 w-32">
+                            <input
+                              className="w-full text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+                              type="number" min={0} step={0.01} value={imp.monto}
+                              onChange={(e) => updateOtroImpuesto(idx, 'monto', Number(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-1 py-1.5 w-10">
+                            <button type="button" className={btnIcon} onClick={() => removeOtroImpuesto(idx)}><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             {/* Totals */}
             <div className="flex justify-end">
               <div className="w-64 space-y-1.5 text-sm">
@@ -1272,6 +1361,12 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, onSav
                   <span className="text-gray-500">IVA</span>
                   <span className="text-gray-900">{formatARS(totalIva)}</span>
                 </div>
+                {otrosImpuestos.map((imp) => (
+                  <div className="flex justify-between" key={imp.key}>
+                    <span className="text-gray-500">{imp.concepto.trim() || 'Otro impuesto'}</span>
+                    <span className="text-gray-900">{formatARS(imp.monto || 0)}</span>
+                  </div>
+                ))}
                 <div className="flex justify-between pt-1.5 border-t border-gray-200 font-semibold">
                   <span className="text-gray-900">TOTAL</span>
                   <span className="text-gray-900">{formatARS(totalFinal)}</span>

@@ -73,6 +73,11 @@ export default function OrdenesCompra() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
+  // Cuando "Registrar factura" se aprieta desde una OC puntual, guardamos
+  // cuál para precargar el comprobante (proveedor, items, IVA y otros
+  // impuestos ya confirmados) y vincularlo -- ver ComprobanteCompraDialog
+  // prop `ordenCompra`.
+  const [ordenParaFacturar, setOrdenParaFacturar] = useState<(typeof ordenesCompra)[number] | null>(null);
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
@@ -264,11 +269,17 @@ export default function OrdenesCompra() {
     numeroRemito: string;
     // Conexión Compras -> Recepción (misma lógica que en Comprobantes.tsx).
     actualizarStock: boolean;
+    /** Percepciones/impuestos adicionales -- mismo criterio que en la OC. */
+    otrosImpuestos?: ImpuestoOrdenCompra[];
+    /** Si viene de "Registrar factura" en una OC puntual, la vincula. */
+    ordenCompraId?: string;
   }) => {
     const now = nowISO();
     const subtotal = data.items.reduce((s, i) => s + i.subtotal, 0);
     const montoIva = data.items.reduce((s, i) => s + i.montoIva, 0);
-    const total = subtotal + montoIva;
+    const otrosImpuestos = data.otrosImpuestos ?? [];
+    const totalOtrosImpuestos = otrosImpuestos.reduce((s, imp) => s + (imp.monto || 0), 0);
+    const total = subtotal + montoIva + totalOtrosImpuestos;
     const comprobanteId = generarId();
     const itemsConId: ItemComprobanteCompra[] = data.items.map((it) => ({ ...it, id: generarId() }));
 
@@ -278,11 +289,13 @@ export default function OrdenesCompra() {
         id: comprobanteId,
         tipo: data.tipo,
         proveedorId: data.proveedorId,
+        ordenCompraId: data.ordenCompraId,
         fecha: data.fecha,
         fechaVencimiento: data.fechaVencimiento || undefined,
         items: itemsConId,
         subtotal,
         montoIva,
+        otrosImpuestos,
         total,
         estado: 'pendiente',
         medioPago: data.medioPago,
@@ -549,7 +562,7 @@ export default function OrdenesCompra() {
                               <button onClick={() => cambiarEstado(oc.id, 'recibida')} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Marcar recibida">
                                 <PackageCheck className="h-3.5 w-3.5" />
                               </button>
-                              <button onClick={() => setComprobanteDialogOpen(true)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
+                              <button onClick={() => { setOrdenParaFacturar(oc); setComprobanteDialogOpen(true); }} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
                                 <FileText className="h-3.5 w-3.5" />
                               </button>
                               <button onClick={() => cambiarEstado(oc.id, 'cancelada')} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Cancelar">
@@ -562,13 +575,13 @@ export default function OrdenesCompra() {
                               <button onClick={() => cambiarEstado(oc.id, 'recibida')} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Marcar recibida">
                                 <PackageCheck className="h-3.5 w-3.5" />
                               </button>
-                              <button onClick={() => setComprobanteDialogOpen(true)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
+                              <button onClick={() => { setOrdenParaFacturar(oc); setComprobanteDialogOpen(true); }} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
                                 <FileText className="h-3.5 w-3.5" />
                               </button>
                             </>
                           )}
                           {oc.estado === 'recibida' && comps.length === 0 && (
-                            <button onClick={() => setComprobanteDialogOpen(true)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
+                            <button onClick={() => { setOrdenParaFacturar(oc); setComprobanteDialogOpen(true); }} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Registrar factura">
                               <FileText className="h-3.5 w-3.5" />
                             </button>
                           )}
@@ -675,8 +688,9 @@ export default function OrdenesCompra() {
       {/* Comprobante Dialog */}
       <ComprobanteCompraDialog
         open={comprobanteDialogOpen}
-        onOpenChange={setComprobanteDialogOpen}
+        onOpenChange={(v) => { setComprobanteDialogOpen(v); if (!v) setOrdenParaFacturar(null); }}
         proveedores={proveedores.filter((p) => p.activo)}
+        ordenCompra={ordenParaFacturar ?? undefined}
         onSave={handleSaveComprobante}
       />
 

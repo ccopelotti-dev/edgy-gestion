@@ -178,6 +178,8 @@ export interface ComprobanteCompra {
   items: ItemComprobanteCompra[];
   subtotal: number;
   montoIva: number;
+  /** Percepciones/impuestos adicionales -- ver ImpuestoOrdenCompra. */
+  otrosImpuestos?: ImpuestoOrdenCompra[];
   total: number;
   estado: EstadoComprobanteCompra;
   medioPago: MedioPagoCompra;
