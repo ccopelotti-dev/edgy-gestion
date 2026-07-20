@@ -1,5 +1,6 @@
 -- ============================================================
 -- Backfill de datos (NO cambia el esquema) -- Fase Ventas, 8 hallazgos
+-- Edgy Gestión · schema edgy_gestion
 -- ============================================================
 -- Ejecutar UNA sola vez en el SQL Editor de Supabase, DESPUÉS de haber
 -- deployado el código con el fix de saldoCuentaCorriente (ver
@@ -29,6 +30,8 @@
 -- y los pasos 2-3 son recálculos idempotentes (no acumulan).
 -- ============================================================
 
+set search_path to edgy_gestion, public;
+
 -- 1) Reconciliar COB-00003 -> FAC-00012 (Roberto García)
 DO $$
 DECLARE
@@ -42,30 +45,30 @@ DECLARE
   v_nuevo_saldo numeric;
 BEGIN
   SELECT co.id, co.monto INTO v_cobro_id, v_cobro_monto
-  FROM cobros co
-  JOIN clientes_venta cl ON cl.id = co.cliente_venta_id
+  FROM edgy_gestion.cobros co
+  JOIN edgy_gestion.clientes_venta cl ON cl.id = co.cliente_venta_id
   WHERE co.numero = 3 AND cl.nombre ILIKE 'Roberto Garc%'
   LIMIT 1;
 
   SELECT cv.id, cv.saldo_pendiente, cv.total, cv.monto_cobrado
     INTO v_factura_id, v_factura_saldo, v_factura_total, v_monto_cobrado
-  FROM comprobantes_venta cv
-  JOIN clientes_venta cl ON cl.id = cv.cliente_venta_id
+  FROM edgy_gestion.comprobantes_venta cv
+  JOIN edgy_gestion.clientes_venta cl ON cl.id = cv.cliente_venta_id
   WHERE cv.numero = 12 AND cv.tipo = 'factura' AND cl.nombre ILIKE 'Roberto Garc%'
   LIMIT 1;
 
   IF v_cobro_id IS NULL OR v_factura_id IS NULL THEN
     RAISE NOTICE 'Reconciliación COB-00003/FAC-00012: no se encontraron los registros esperados (¿ya se corrigió, o cambiaron los datos?). Sin cambios.';
-  ELSIF EXISTS (SELECT 1 FROM cobro_imputaciones WHERE cobro_id = v_cobro_id) THEN
+  ELSIF EXISTS (SELECT 1 FROM edgy_gestion.cobro_imputaciones WHERE cobro_id = v_cobro_id) THEN
     RAISE NOTICE 'Reconciliación COB-00003: ya tiene imputaciones cargadas. Sin cambios.';
   ELSE
     v_imputar := LEAST(v_cobro_monto, v_factura_saldo);
     v_nuevo_saldo := GREATEST(0, ROUND((v_factura_total - (v_monto_cobrado + v_imputar))::numeric, 2));
 
-    INSERT INTO cobro_imputaciones (id, cobro_id, comprobante_id, monto_imputado)
+    INSERT INTO edgy_gestion.cobro_imputaciones (id, cobro_id, comprobante_id, monto_imputado)
     VALUES (gen_random_uuid(), v_cobro_id, v_factura_id, v_imputar);
 
-    UPDATE comprobantes_venta
+    UPDATE edgy_gestion.comprobantes_venta
     SET monto_cobrado = v_monto_cobrado + v_imputar,
         saldo_pendiente = v_nuevo_saldo,
         estado = CASE WHEN v_nuevo_saldo <= 0.01 THEN 'cobrado' ELSE 'cobrado_parcial' END
@@ -76,38 +79,38 @@ BEGIN
 END $$;
 
 -- 2) Despegar comprobantes con residuo de coma flotante y redondear
-UPDATE comprobantes_venta
+UPDATE edgy_gestion.comprobantes_venta
 SET saldo_pendiente = 0,
     estado = 'cobrado'
 WHERE estado = 'cobrado_parcial' AND saldo_pendiente > 0 AND saldo_pendiente <= 0.01;
 
-UPDATE comprobantes_compra
+UPDATE edgy_gestion.comprobantes_compra
 SET saldo_pendiente = 0,
     estado = 'pagado'
 WHERE estado = 'pagado_parcial' AND saldo_pendiente > 0 AND saldo_pendiente <= 0.01;
 
-UPDATE comprobantes_venta SET saldo_pendiente = ROUND(saldo_pendiente::numeric, 2);
-UPDATE comprobantes_compra SET saldo_pendiente = ROUND(saldo_pendiente::numeric, 2);
+UPDATE edgy_gestion.comprobantes_venta SET saldo_pendiente = ROUND(saldo_pendiente::numeric, 2);
+UPDATE edgy_gestion.comprobantes_compra SET saldo_pendiente = ROUND(saldo_pendiente::numeric, 2);
 
 -- 3) Recomputar saldo_cuenta_corriente desde la deuda real vigente
-UPDATE clientes_venta cl
+UPDATE edgy_gestion.clientes_venta cl
 SET saldo_cuenta_corriente = COALESCE((
   SELECT SUM(CASE
     WHEN cv.tipo = 'factura' THEN cv.saldo_pendiente
     WHEN cv.tipo = 'nota_credito' THEN -cv.total
     ELSE 0
   END)
-  FROM comprobantes_venta cv
+  FROM edgy_gestion.comprobantes_venta cv
   WHERE cv.cliente_venta_id = cl.id AND cv.estado <> 'anulado'
 ), 0);
 
-UPDATE proveedores pr
+UPDATE edgy_gestion.proveedores pr
 SET saldo_cuenta_corriente = COALESCE((
   SELECT SUM(CASE
     WHEN cc.tipo = 'factura' THEN cc.saldo_pendiente
     WHEN cc.tipo = 'nota_credito' THEN -cc.total
     ELSE 0
   END)
-  FROM comprobantes_compra cc
+  FROM edgy_gestion.comprobantes_compra cc
   WHERE cc.proveedor_id = pr.id AND cc.estado <> 'anulado'
 ), 0);
