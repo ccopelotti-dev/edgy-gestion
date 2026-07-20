@@ -36,7 +36,7 @@ import {
   Amount,
   EmptyState,
 } from '../components/compras/display';
-import { ComprobanteCompraDialog, PagoDialog } from '../components/compras/dialogs';
+import { ComprobanteCompraDialog, OrdenPagoDialog } from '../components/compras/dialogs';
 import {
   formatARS,
   formatDate,
@@ -51,6 +51,7 @@ import type {
   ComprobanteCompra,
   ItemComprobanteCompra,
   ControlRemision,
+  PagoCompra,
 } from '../types';
 import {
   TIPO_COMPROBANTE_COMPRA_LABEL,
@@ -272,19 +273,29 @@ export default function Comprobantes() {
     setPagoDialogOpen(true);
   };
 
-  const handleSavePago = (data: { fecha: string; monto: number; medioPago: string; imputaciones: { comprobanteId: string; montoImputado: number }[] }) => {
+  const handleSavePago = (data: {
+    fecha: string;
+    monto: number;
+    medioPago: string;
+    imputaciones: { comprobanteId: string; montoImputado: number }[];
+    lineasPago: PagoCompra['lineasPago'];
+  }) => {
     const comp = pagoComprobanteId ? comprobantes.find((c) => c.id === pagoComprobanteId) : null;
     if (!comp) return;
+    const now = nowISO();
     dispatch({
       type: 'ADD_PAGO',
       payload: {
         id: generarId(),
         proveedorId: comp.proveedorId,
         fecha: data.fecha,
+        estado: 'pendiente',
         monto: data.monto,
         medioPago: data.medioPago as any,
         imputaciones: data.imputaciones,
-        createdAt: nowISO(),
+        lineasPago: data.lineasPago,
+        createdAt: now,
+        updatedAt: now,
       },
     });
   };
@@ -577,7 +588,7 @@ export default function Comprobantes() {
       />
 
       {pagoProveedor && pagoComprobante && (
-        <PagoDialog
+        <OrdenPagoDialog
           open={pagoDialogOpen}
           onOpenChange={setPagoDialogOpen}
           proveedor={pagoProveedor}

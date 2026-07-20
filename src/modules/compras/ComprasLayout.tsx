@@ -11,6 +11,7 @@ import {
   FileSearch,
   ClipboardList,
   Receipt,
+  Wallet,
 } from 'lucide-react';
 
 interface TabDef {
@@ -28,6 +29,7 @@ const tabs: TabDef[] = [
   { to: `${BASE}/cotizaciones`,     label: 'Cotizaciones',       icon: FileSearch },
   { to: `${BASE}/ordenes-compra`,   label: 'Ordenes de Compra',  icon: ClipboardList },
   { to: `${BASE}/comprobantes`,     label: 'Comprobantes',       icon: Receipt },
+  { to: `${BASE}/ordenes-pago`,     label: 'Ordenes de Pago',    icon: Wallet },
 ];
 
 export default function ComprasLayout() {

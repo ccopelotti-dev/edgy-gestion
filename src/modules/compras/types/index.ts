@@ -212,16 +212,59 @@ export interface ImputacionPago {
   montoImputado: number;
 }
 
+/**
+ * Orden de Pago -- estado de vida de un PagoCompra. Una orden se arma en
+ * `pendiente` (se decide qué se cancela y con qué combinación de medios,
+ * sin comprometer todavía ninguna cuenta bancaria ni cheque real) y recién
+ * al confirmarla pasa a `pagada` (ver ConfirmarPagoDialog): ahí se elige la
+ * cuenta bancaria real para las líneas de transferencia/efectivo, se emiten
+ * los cheques reales en Tesorería para las líneas de cheque, y se actualiza
+ * el saldo de los comprobantes y del proveedor. Los pagos históricos
+ * (previos a esta fase) quedan como `pagada` -- ya estaban ejecutados.
+ */
+export type EstadoPagoCompra = 'pendiente' | 'pagada' | 'anulada';
+
+/**
+ * Una línea de pago describe UNA forma de pago dentro de una Orden de Pago.
+ * Pueden combinarse varias en una misma orden -- ej. parte por transferencia
+ * y el resto con 3 cheques a 30/60/90 días, según las condiciones pactadas
+ * con el proveedor. La cuenta bancaria real (transferencia/efectivo) y el
+ * cheque real emitido en Tesorería se resuelven recién al confirmar el pago
+ * -- acá solo se planifica.
+ */
+export interface LineaPago {
+  id: string;
+  medioPago: MedioPagoCompra;
+  monto: number;
+  /** Transferencia / efectivo -- cuenta bancaria real, elegida al confirmar. */
+  cuentaBancariaId?: string;
+  /** Cheque -- datos del cheque a emitir (puede ser diferido). Pueden
+   * cargarse ya al armar la orden, o completarse recién al confirmar. */
+  chequeNumero?: string;
+  chequeBanco?: string;
+  /** Fecha de pago/vencimiento del cheque. */
+  chequeFechaPago?: string;
+  /** Id del Cheque ya creado en Tesorería -- se completa al confirmar. */
+  chequeId?: string;
+}
+
 export interface PagoCompra {
   id: string;
   numero: number;
   proveedorId: string;
   fecha: string;
+  estado: EstadoPagoCompra;
   monto: number;
+  /** Medio "principal" -- si la orden combina medios distintos entre sus
+   * líneas, queda en 'otro'. El detalle real está en `lineasPago`. */
   medioPago: MedioPagoCompra;
   imputaciones: ImputacionPago[];
+  lineasPago: LineaPago[];
+  /** Fecha en que se confirmó/ejecutó el pago (estado pasa a 'pagada'). */
+  fechaConfirmacion?: string;
   notas?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 // ─── Estado global ───────────────────────────────────────────

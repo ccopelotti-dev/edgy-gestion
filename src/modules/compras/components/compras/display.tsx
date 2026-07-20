@@ -17,6 +17,7 @@ import type {
   EstadoOrdenCompra,
   EstadoComprobanteCompra,
   MedioPagoCompra,
+  EstadoPagoCompra,
 } from '../../types';
 
 import {
@@ -131,6 +132,28 @@ export function EstadoComprobanteBadge({ estado }: { estado: EstadoComprobanteCo
   return (
     <Badge color={estadoComprobanteColor[estado]}>
       {ESTADO_COMPROBANTE_COMPRA_LABEL[estado]}
+    </Badge>
+  );
+}
+
+// ─── EstadoPagoBadge (Orden de Pago) ────────────────────────
+
+const ESTADO_PAGO_LABEL: Record<EstadoPagoCompra, string> = {
+  pendiente: 'Pendiente',
+  pagada: 'Pagada',
+  anulada: 'Anulada',
+};
+
+const estadoPagoColor: Record<EstadoPagoCompra, string> = {
+  pendiente: 'amber',
+  pagada: 'green',
+  anulada: 'red',
+};
+
+export function EstadoPagoBadge({ estado }: { estado: EstadoPagoCompra }) {
+  return (
+    <Badge color={estadoPagoColor[estado]}>
+      {ESTADO_PAGO_LABEL[estado]}
     </Badge>
   );
 }

@@ -251,6 +251,14 @@ export async function descargarComprobantePagoPdf(
           montoImputado: imp.montoImputado,
         };
       }),
+      lineasPago: (pago.lineasPago ?? []).map((linea) => ({
+        medioPagoLabel: MEDIO_PAGO_COMPRA_LABEL[linea.medioPago],
+        monto: linea.monto,
+        detalle:
+          linea.medioPago === 'cheque'
+            ? `N.º ${linea.chequeNumero ?? '—'} · ${linea.chequeBanco ?? '—'}${linea.chequeFechaPago ? ` · vence ${formatDate(linea.chequeFechaPago)}` : ''}`
+            : null,
+      })),
       notas: pago.notas ?? null,
     },
     numero,

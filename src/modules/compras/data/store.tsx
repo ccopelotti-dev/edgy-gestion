@@ -36,6 +36,7 @@ import type {
   OrdenCompra,
   ComprobanteCompra,
   PagoCompra,
+  LineaPago,
   EstadoCotizacion,
   EstadoOrdenCompra,
   EstadoComprobanteCompra,
@@ -48,7 +49,7 @@ import { generarId } from '../types';
 import { SEED_STATE } from './seed';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { registrarMovimientoTesoreria } from '@/lib/tesoreriaSync';
+import { registrarMovimientoTesoreria, emitirChequeProveedor } from '@/lib/tesoreriaSync';
 import { todayISO } from '../lib/format';
 
 // ─── Action Types (idénticos a la versión anterior) ───────────
@@ -70,6 +71,8 @@ type ComprasAction =
   | { type: 'MARCAR_STOCK_ACTUALIZADO'; payload: { comprobanteId: string; recepcionId: string } }
   | { type: 'ACTUALIZAR_PAGO_COMPROBANTE'; payload: { comprobanteId: string; montoPagado: number } }
   | { type: 'ADD_PAGO'; payload: Omit<PagoCompra, 'numero'> }
+  | { type: 'CONFIRMAR_PAGO'; payload: { id: string; lineasPago: LineaPago[]; fecha: string } }
+  | { type: 'ANULAR_PAGO'; payload: { id: string } }
   | { type: 'UPDATE_CONFIG'; payload: Partial<ComprasConfig> }
   | { type: 'SET_STATE'; payload: ComprasState };
 
@@ -290,8 +293,27 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
     }
 
     case 'ADD_PAGO': {
+      // Solo arma la Orden de Pago (estado 'pendiente' u opcionalmente ya
+      // 'pagada' si el llamador la confirma al toque) -- NO toca todavía
+      // comprobantes ni saldo del proveedor. Eso se difiere a
+      // CONFIRMAR_PAGO, que es cuando el dinero realmente sale (ver Fase 22,
+      // Orden de Pago).
       const numero = state.nextNumeroPago;
       const pago: PagoCompra = { ...action.payload, numero } as PagoCompra;
+      return { ...state, pagos: [...state.pagos, pago], nextNumeroPago: numero + 1 };
+    }
+
+    case 'CONFIRMAR_PAGO': {
+      const pagoActual = state.pagos.find((p) => p.id === action.payload.id);
+      if (!pagoActual || pagoActual.estado !== 'pendiente') return state;
+
+      const pago: PagoCompra = {
+        ...pagoActual,
+        estado: 'pagada',
+        lineasPago: action.payload.lineasPago,
+        fechaConfirmacion: action.payload.fecha,
+        updatedAt: now,
+      };
 
       let comprobantes = [...state.comprobantes];
       for (const imp of pago.imputaciones) {
@@ -312,7 +334,24 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
         p.id === pago.proveedorId ? { ...p, saldoCuentaCorriente: p.saldoCuentaCorriente - pago.monto, updatedAt: now } : p,
       );
 
-      return { ...state, pagos: [...state.pagos, pago], nextNumeroPago: numero + 1, comprobantes, proveedores };
+      return {
+        ...state,
+        pagos: state.pagos.map((p) => (p.id === pago.id ? pago : p)),
+        comprobantes,
+        proveedores,
+      };
+    }
+
+    case 'ANULAR_PAGO': {
+      // Solo se puede anular una Orden de Pago que todavía no se confirmó
+      // -- no comprometió nada (ni comprobantes, ni saldo, ni Tesorería), así
+      // que anularla es un simple cambio de estado. Una orden ya 'pagada'
+      // no se anula desde acá (requeriría revertir movimientos bancarios y
+      // cheques reales).
+      return {
+        ...state,
+        pagos: state.pagos.map((p) => (p.id === action.payload.id && p.estado === 'pendiente' ? { ...p, estado: 'anulada', updatedAt: now } : p)),
+      };
     }
 
     case 'UPDATE_CONFIG':
@@ -448,8 +487,11 @@ function pagoToRow(p: PagoCompra, clienteId: string) {
     numero: p.numero,
     proveedor_id: p.proveedorId,
     fecha: p.fecha,
+    estado: p.estado,
     monto: p.monto,
     medio_pago: p.medioPago,
+    lineas_pago: p.lineasPago,
+    fecha_confirmacion: p.fechaConfirmacion ?? null,
     notas: p.notas ?? null,
   };
 }
@@ -637,6 +679,8 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
     }
 
     case 'ADD_PAGO': {
+      // Solo arma la Orden de Pago (estado 'pendiente') -- todavía no toca
+      // comprobantes, proveedor ni Tesorería. Eso ocurre en CONFIRMAR_PAGO.
       const pago = nextState.pagos.find((x) => x.id === action.payload.id);
       if (!pago) return;
       // Mismo fix: las imputaciones referencian al pago por id, así que se
@@ -645,14 +689,36 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
         .from('pagos_compra')
         .insert(pagoToRow(pago, clienteId))
         .then((res) => {
-          logErr('alta de pago')(res);
+          logErr('alta de orden de pago')(res);
           if (!res.error && pago.imputaciones.length) {
             supabase
               .from('pago_compra_imputaciones')
               .insert(pago.imputaciones.map((imp) => ({ id: generarId(), pago_id: pago.id, comprobante_id: imp.comprobanteId, monto_imputado: imp.montoImputado })))
-              .then(logErr('imputaciones de pago'));
+              .then(logErr('imputaciones de orden de pago'));
           }
         });
+      return;
+    }
+
+    case 'CONFIRMAR_PAGO': {
+      // Acá sí sale la plata de verdad: se actualiza el pago (estado +
+      // líneas de pago ya resueltas con cuenta/cheque real), los
+      // comprobantes imputados, el saldo del proveedor, y se refleja cada
+      // línea en Tesorería (transferencia/efectivo -> movimiento bancario
+      // en la cuenta elegida; cheque -> cheque emitido real).
+      const pago = nextState.pagos.find((x) => x.id === action.payload.id);
+      if (!pago) return;
+
+      supabase
+        .from('pagos_compra')
+        .update({
+          estado: pago.estado,
+          lineas_pago: pago.lineasPago,
+          fecha_confirmacion: pago.fechaConfirmacion ?? null,
+        })
+        .eq('id', pago.id)
+        .then(logErr('confirmación de orden de pago'));
+
       for (const imp of pago.imputaciones) {
         const c = nextState.comprobantes.find((x) => x.id === imp.comprobanteId);
         if (c) {
@@ -660,25 +726,55 @@ function syncToSupabase(action: ComprasAction, nextState: ComprasState, clienteI
             .from('comprobantes_compra')
             .update({ monto_pagado: c.montoPagado, saldo_pendiente: c.saldoPendiente, estado: c.estado })
             .eq('id', c.id)
-            .then(logErr('comprobante actualizado por pago'));
+            .then(logErr('comprobante actualizado por confirmación de pago'));
         }
       }
       const proveedor = nextState.proveedores.find((p) => p.id === pago.proveedorId);
-      if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras pago'));
-      // Un pago siempre representa dinero real saliendo (salvo cuenta
-      // corriente, que es solo un asiento contable). Reflejarlo en Tesorería.
-      if (pago.medioPago !== 'cuenta_corriente') {
-        registrarMovimientoTesoreria({
-          clienteId,
-          tipo: 'egreso',
-          medioPago: pago.medioPago,
-          monto: pago.monto,
-          concepto: `Pago N.º ${pago.numero} — ${proveedor?.nombre ?? 'Proveedor'}`,
-          categoria: 'Pago a proveedores',
-          fecha: pago.fecha,
-          origenModulo: 'compras',
-        });
+      if (proveedor) supabase.from('proveedores').update({ saldo_cuenta_corriente: proveedor.saldoCuentaCorriente }).eq('id', proveedor.id).then(logErr('saldo proveedor tras confirmación de pago'));
+
+      for (const linea of pago.lineasPago) {
+        if (linea.medioPago === 'cheque') {
+          if (linea.chequeId && linea.cuentaBancariaId) {
+            emitirChequeProveedor({
+              id: linea.chequeId,
+              clienteId,
+              numero: linea.chequeNumero ?? '',
+              banco: linea.chequeBanco ?? '',
+              beneficiario: proveedor?.nombre ?? 'Proveedor',
+              fechaEmision: pago.fechaConfirmacion ?? pago.fecha,
+              fechaPago: linea.chequeFechaPago ?? pago.fecha,
+              monto: linea.monto,
+              cuentaOrigenId: linea.cuentaBancariaId,
+              notas: `Orden de Pago N.º ${pago.numero}`,
+              origenId: pago.id,
+            });
+          }
+          continue;
+        }
+        // Un pago siempre representa dinero real saliendo (salvo cuenta
+        // corriente, que es solo un asiento contable).
+        if (linea.medioPago !== 'cuenta_corriente') {
+          registrarMovimientoTesoreria({
+            clienteId,
+            tipo: 'egreso',
+            medioPago: linea.medioPago,
+            monto: linea.monto,
+            concepto: `Pago N.º ${pago.numero} — ${proveedor?.nombre ?? 'Proveedor'}`,
+            categoria: 'Pago a proveedores',
+            fecha: pago.fechaConfirmacion ?? pago.fecha,
+            origenModulo: 'compras',
+            cuentaBancariaId: linea.cuentaBancariaId,
+            origenId: pago.id,
+          });
+        }
       }
+      return;
+    }
+
+    case 'ANULAR_PAGO': {
+      const pago = nextState.pagos.find((x) => x.id === action.payload.id);
+      if (!pago) return;
+      supabase.from('pagos_compra').update({ estado: pago.estado }).eq('id', pago.id).then(logErr('anulación de orden de pago'));
       return;
     }
 
@@ -847,11 +943,15 @@ async function fetchComprasState(): Promise<ComprasState> {
     numero: r.numero,
     proveedorId: r.proveedor_id,
     fecha: r.fecha,
+    estado: (r.estado ?? 'pagada') as PagoCompra['estado'],
     monto: Number(r.monto),
     medioPago: r.medio_pago,
     imputaciones: impByPago.get(r.id) ?? [],
+    lineasPago: (r.lineas_pago ?? []) as LineaPago[],
+    fechaConfirmacion: r.fecha_confirmacion ?? undefined,
     notas: r.notas ?? undefined,
     createdAt: r.created_at,
+    updatedAt: r.updated_at ?? r.created_at,
   }));
 
   const maxNumero = (arr: { numero: number }[]) => arr.reduce((max, x) => Math.max(max, x.numero), 0);

@@ -34,7 +34,7 @@ import {
   Amount,
   EmptyState,
 } from '../components/compras/display';
-import { ProveedorDialog, PagoDialog } from '../components/compras/dialogs';
+import { ProveedorDialog, OrdenPagoDialog } from '../components/compras/dialogs';
 import {
   descargarResumenCuentaProveedorPdf,
   descargarComprobantePagoPdf,
@@ -133,18 +133,28 @@ export default function Proveedores() {
     setPagoDialogOpen(true);
   };
 
-  const handleSavePago = (data: { fecha: string; monto: number; medioPago: string; imputaciones: { comprobanteId: string; montoImputado: number }[] }) => {
+  const handleSavePago = (data: {
+    fecha: string;
+    monto: number;
+    medioPago: string;
+    imputaciones: { comprobanteId: string; montoImputado: number }[];
+    lineasPago: PagoCompra['lineasPago'];
+  }) => {
     if (!pagoProveedorId) return;
+    const now = nowISO();
     dispatch({
       type: 'ADD_PAGO',
       payload: {
         id: generarId(),
         proveedorId: pagoProveedorId,
         fecha: data.fecha,
+        estado: 'pendiente',
         monto: data.monto,
         medioPago: data.medioPago as any,
         imputaciones: data.imputaciones,
-        createdAt: nowISO(),
+        lineasPago: data.lineasPago,
+        createdAt: now,
+        updatedAt: now,
       },
     });
   };
@@ -274,7 +284,7 @@ export default function Proveedores() {
                           <button onClick={() => handleEditarProveedor(prov)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Editar">
                             <Edit2 className="h-3.5 w-3.5" />
                           </button>
-                          <button onClick={() => handleRegistrarPago(prov.id)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Registrar pago">
+                          <button onClick={() => handleRegistrarPago(prov.id)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Nueva Orden de Pago">
                             <DollarSign className="h-3.5 w-3.5" />
                           </button>
                           <button onClick={() => handleToggleActivo(prov.id)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title={prov.activo ? 'Desactivar' : 'Activar'}>
@@ -341,6 +351,11 @@ export default function Proveedores() {
                                     <span className="font-mono text-xs">PAG-{String(p.numero).padStart(5, '0')}</span>
                                     <span className="text-gray-500">{formatDate(p.fecha)}</span>
                                     <MedioPagoBadge medio={p.medioPago} />
+                                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                                      p.estado === 'pagada' ? 'bg-green-50 text-green-700' : p.estado === 'anulada' ? 'bg-gray-100 text-gray-500' : 'bg-amber-50 text-amber-700'
+                                    }`}>
+                                      {p.estado === 'pagada' ? 'Pagada' : p.estado === 'anulada' ? 'Anulada' : 'Pendiente'}
+                                    </span>
                                     <Amount value={p.monto} size="sm" />
                                     <button
                                       onClick={() => handleDescargarComprobantePago(p)}
@@ -379,7 +394,7 @@ export default function Proveedores() {
       />
 
       {pagoProveedor && (
-        <PagoDialog
+        <OrdenPagoDialog
           open={pagoDialogOpen}
           onOpenChange={setPagoDialogOpen}
           proveedor={pagoProveedor}

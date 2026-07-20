@@ -58,6 +58,16 @@ interface RegistrarMovimientoOpts {
   categoria: string;
   fecha: string;
   origenModulo: 'ventas' | 'compras';
+  /**
+   * Cuenta bancaria real a debitar/acreditar (Orden de Pago, Fase 22) --
+   * cuando se pasa explícita, se usa tal cual y NO se auto-selecciona "la
+   * primera cuenta del cliente". Si se omite, se mantiene el comportamiento
+   * anterior (auto-selección) por compatibilidad con los llamadores
+   * existentes que todavía no permiten elegir cuenta.
+   */
+  cuentaBancariaId?: string;
+  /** Id de la entidad de origen (ej. PagoCompra) para trazabilidad. */
+  origenId?: string;
 }
 
 export async function registrarMovimientoTesoreria(opts: RegistrarMovimientoOpts): Promise<void> {
@@ -87,20 +97,23 @@ export async function registrarMovimientoTesoreria(opts: RegistrarMovimientoOpts
 
   if (!BANK_SETTLED.includes(medio)) return;
 
-  const { data: cuentas, error: errCuentas } = await supabase
-    .from('cuentas_bancarias')
-    .select('id')
-    .eq('cliente_id', opts.clienteId)
-    .order('created_at')
-    .limit(1);
+  let cuentaId = opts.cuentaBancariaId;
+  if (!cuentaId) {
+    const { data: cuentas, error: errCuentas } = await supabase
+      .from('cuentas_bancarias')
+      .select('id')
+      .eq('cliente_id', opts.clienteId)
+      .order('created_at')
+      .limit(1);
 
-  if (errCuentas) {
-    console.error('Tesorería · error buscando cuenta bancaria para el espejo:', errCuentas);
-    return;
+    if (errCuentas) {
+      console.error('Tesorería · error buscando cuenta bancaria para el espejo:', errCuentas);
+      return;
+    }
+    cuentaId = cuentas?.[0]?.id;
   }
 
-  const cuenta = cuentas?.[0];
-  if (!cuenta) {
+  if (!cuentaId) {
     console.warn(
       `Tesorería · no se generó el movimiento bancario espejo (origen: ${opts.origenModulo}, medio: "${medio}") porque no hay ninguna cuenta bancaria cargada. Cargá una cuenta en Tesorería > Bancos.`,
     );
@@ -110,7 +123,7 @@ export async function registrarMovimientoTesoreria(opts: RegistrarMovimientoOpts
   const { error: errBanco } = await supabase.from('movimientos_bancarios').insert({
     id: crypto.randomUUID(),
     cliente_id: opts.clienteId,
-    cuenta_id: cuenta.id,
+    cuenta_id: cuentaId,
     fecha: opts.fecha,
     tipo: opts.tipo,
     concepto: opts.concepto,
@@ -119,8 +132,77 @@ export async function registrarMovimientoTesoreria(opts: RegistrarMovimientoOpts
     monto: opts.monto,
     link_id: linkId,
     origen: opts.origenModulo,
+    origen_id: opts.origenId ?? null,
   });
   if (errBanco) {
     console.error(`Tesorería · error registrando movimiento bancario espejo desde ${opts.origenModulo}:`, errBanco);
+  }
+}
+
+// ─── Cuentas bancarias (para elegir cuenta real al confirmar un pago) ────
+
+export interface CuentaBancariaOpcion {
+  id: string;
+  banco: string;
+  alias: string;
+  numero: string;
+}
+
+export async function listarCuentasBancarias(clienteId: string): Promise<CuentaBancariaOpcion[]> {
+  const { data, error } = await supabase
+    .from('cuentas_bancarias')
+    .select('id, banco, alias, numero')
+    .eq('cliente_id', clienteId)
+    .order('created_at');
+  if (error) {
+    console.error('Tesorería · error listando cuentas bancarias:', error);
+    return [];
+  }
+  return (data ?? []) as CuentaBancariaOpcion[];
+}
+
+// ─── Cheque emitido a un proveedor (Orden de Pago, Fase 22) ──────────────
+//
+// Se crea directo en estado 'en_cartera' ("a pagar") -- el débito bancario
+// real recién ocurre cuando alguien lo marca 'cobrado' en Tesorería >
+// Cheques (mismo criterio que ya usa ese módulo: chequeAfectaBanco solo es
+// true para emitido+cobrado). Acá solo dejamos el cheque cargado con todos
+// sus datos, incluida la cuenta de origen, para que esa transición futura
+// no tenga que pedir nada más.
+
+export interface EmitirChequeOpts {
+  id: string;
+  clienteId: string;
+  numero: string;
+  banco: string;
+  /** Beneficiario -- a nombre de quién se emite (el proveedor). */
+  beneficiario: string;
+  fechaEmision: string;
+  fechaPago: string;
+  monto: number;
+  cuentaOrigenId: string;
+  notas?: string;
+  origenId?: string;
+}
+
+export async function emitirChequeProveedor(opts: EmitirChequeOpts): Promise<void> {
+  const { error } = await supabase.from('cheques').insert({
+    id: opts.id,
+    cliente_id: opts.clienteId,
+    tipo: 'emitido',
+    numero: opts.numero,
+    banco: opts.banco,
+    librador: opts.beneficiario,
+    fecha_recepcion: opts.fechaEmision,
+    fecha_cobro: opts.fechaPago,
+    monto: opts.monto,
+    estado: 'en_cartera',
+    cuenta_origen_id: opts.cuentaOrigenId,
+    notas: opts.notas ?? null,
+    origen_modulo: 'compras',
+    origen_id: opts.origenId ?? null,
+  });
+  if (error) {
+    console.error('Tesorería · error emitiendo cheque a proveedor:', error);
   }
 }

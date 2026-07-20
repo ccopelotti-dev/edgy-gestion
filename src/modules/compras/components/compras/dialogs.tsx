@@ -20,6 +20,8 @@ import type {
   OrdenCompra,
   ItemCompra,
   ImpuestoOrdenCompra,
+  PagoCompra,
+  LineaPago,
 } from '../../types';
 
 import {
@@ -1484,7 +1486,14 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
   );
 }
 
-// ─── 4. PagoDialog ──────────────────────────────────────────
+// ─── 4. OrdenPagoDialog ─────────────────────────────────────
+//
+// Fase 22 -- Orden de Pago. Reemplaza al viejo "Registrar pago" (medio
+// único + monto único): ahora se arma en estado 'pendiente' con una lista
+// de líneas de pago, porque un mismo pago puede combinar formas (ej. parte
+// transferencia + 3 cheques a 30/60/90 días, según lo pactado con el
+// proveedor). La cuenta bancaria real y los cheques reales se resuelven
+// recién al confirmar el pago -- ver ConfirmarPagoDialog más abajo.
 
 interface PagoDialogProps {
   open: boolean;
@@ -1496,6 +1505,7 @@ interface PagoDialogProps {
     monto: number;
     medioPago: MedioPagoCompra;
     imputaciones: ImputacionPago[];
+    lineasPago: LineaPago[];
   }) => void;
 }
 
@@ -1507,18 +1517,31 @@ interface ImputacionRow {
   montoImputado: number;
 }
 
-export function PagoDialog({ open, onOpenChange, proveedor, comprobantesPendientes, onSave }: PagoDialogProps) {
+interface LineaPagoFormRow {
+  key: string;
+  medioPago: MedioPagoCompra;
+  monto: number;
+  chequeNumero: string;
+  chequeBanco: string;
+  chequeFechaPago: string;
+}
+
+function nuevaLineaPagoRow(monto = 0): LineaPagoFormRow {
+  return { key: generarId(), medioPago: 'transferencia', monto, chequeNumero: '', chequeBanco: '', chequeFechaPago: '' };
+}
+
+export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPendientes, onSave }: PagoDialogProps) {
   const [fecha, setFecha] = useState(todayISO());
   const [monto, setMonto] = useState(0);
-  const [medioPago, setMedioPago] = useState<MedioPagoCompra>('transferencia');
   const [imputaciones, setImputaciones] = useState<ImputacionRow[]>([]);
+  const [lineasPago, setLineasPago] = useState<LineaPagoFormRow[]>([nuevaLineaPagoRow()]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open) {
       setFecha(todayISO());
       setMonto(0);
-      setMedioPago('transferencia');
+      setLineasPago([nuevaLineaPagoRow()]);
       setErrors({});
 
       const pendientes = comprobantesPendientes
@@ -1546,30 +1569,61 @@ export function PagoDialog({ open, onOpenChange, proveedor, comprobantesPendient
         return { ...imp, montoImputado: Math.round(asignar * 100) / 100 };
       }),
     );
+    // La primer línea de pago sigue al monto total mientras sea la única --
+    // en cuanto el usuario agrega otra línea, cada una se edita por separado.
+    setLineasPago((prev) => (prev.length === 1 ? [{ ...prev[0], monto: nuevoMonto }] : prev));
   }, []);
 
   const updateImputacion = (index: number, value: number) => {
     setImputaciones((prev) => prev.map((imp, i) => (i === index ? { ...imp, montoImputado: value } : imp)));
   };
 
+  const addLineaPago = () => setLineasPago((prev) => [...prev, nuevaLineaPagoRow()]);
+  const removeLineaPago = (index: number) => setLineasPago((prev) => prev.filter((_, i) => i !== index));
+  const updateLineaPago = (index: number, field: keyof LineaPagoFormRow, value: string | number) => {
+    setLineasPago((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+  };
+
   const totalImputado = imputaciones.reduce((sum, imp) => sum + imp.montoImputado, 0);
+  const totalLineasPago = lineasPago.reduce((sum, l) => sum + (l.monto || 0), 0);
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     if (monto <= 0) next.monto = 'El monto debe ser mayor a 0';
     if (totalImputado > monto + 0.01) next.imputaciones = 'La suma de imputaciones excede el monto';
     if (imputaciones.some((imp) => imp.montoImputado > imp.saldoPendiente + 0.01)) next.imputaciones = 'Una imputacion excede el saldo pendiente';
+    if (Math.abs(totalLineasPago - monto) > 0.01) next.lineasPago = 'La suma de las líneas de pago debe ser igual al monto';
     setErrors(next);
     return Object.keys(next).length === 0;
   };
 
   const handleSave = () => {
     if (!validate()) return;
+    // Todos los medios de una misma orden coinciden -> ese es el "medio
+    // principal" (compat con badges/reportes existentes); si se combinan
+    // distintos, queda en 'otro'.
+    const medios = new Set(lineasPago.map((l) => l.medioPago));
+    const medioPago: MedioPagoCompra = medios.size === 1 ? [...medios][0] : 'otro';
+
     onSave({
       fecha, monto, medioPago,
       imputaciones: imputaciones
         .filter((imp) => imp.montoImputado > 0)
         .map(({ comprobanteId, montoImputado }) => ({ comprobanteId, montoImputado })),
+      lineasPago: lineasPago
+        .filter((l) => l.monto > 0)
+        .map((l) => ({
+          id: generarId(),
+          medioPago: l.medioPago,
+          monto: l.monto,
+          ...(l.medioPago === 'cheque'
+            ? {
+                chequeNumero: l.chequeNumero.trim() || undefined,
+                chequeBanco: l.chequeBanco.trim() || undefined,
+                chequeFechaPago: l.chequeFechaPago || undefined,
+              }
+            : {}),
+        })),
     });
     onOpenChange(false);
   };
@@ -1581,35 +1635,27 @@ export function PagoDialog({ open, onOpenChange, proveedor, comprobantesPendient
         <Dialog.Content className={contentWideClass}>
           <div className="flex items-center justify-between mb-5">
             <Dialog.Title className="text-lg font-semibold text-gray-900">
-              Registrar pago — {proveedor.nombre}
+              Nueva Orden de Pago — {proveedor.nombre}
             </Dialog.Title>
             <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
           </div>
 
           <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>Fecha</label>
                 <input className={inputClass} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
               <div>
-                <label className={labelClass}>Monto *</label>
+                <label className={labelClass}>Monto a pagar *</label>
                 <input className={inputClass} type="number" min={0} step={0.01} value={monto} onChange={(e) => distribuirMonto(Number(e.target.value))} />
                 {errors.monto && <p className="text-xs text-red-600 mt-1">{errors.monto}</p>}
-              </div>
-              <div>
-                <label className={labelClass}>Medio de pago</label>
-                <select className={selectClass} value={medioPago} onChange={(e) => setMedioPago(e.target.value as MedioPagoCompra)}>
-                  {(Object.entries(MEDIO_PAGO_COMPRA_LABEL) as [MedioPagoCompra, string][]).map(([val, label]) => (
-                    <option key={val} value={val}>{label}</option>
-                  ))}
-                </select>
               </div>
             </div>
 
             {/* Imputacion table */}
             <div>
-              <h3 className="text-sm font-medium text-gray-900 mb-2">Imputacion a comprobantes</h3>
+              <h3 className="text-sm font-medium text-gray-900 mb-2">Imputación a comprobantes</h3>
               {errors.imputaciones && <p className="text-xs text-red-600 mb-2">{errors.imputaciones}</p>}
 
               {imputaciones.length === 0 ? (
@@ -1667,11 +1713,242 @@ export function PagoDialog({ open, onOpenChange, proveedor, comprobantesPendient
                 </div>
               </div>
             </div>
+
+            {/* Líneas de pago -- cómo se paga (puede combinar medios) */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-900">Líneas de pago</h3>
+                <button onClick={addLineaPago} className="flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900">
+                  <Plus className="w-3.5 h-3.5" /> Agregar línea de pago
+                </button>
+              </div>
+              {errors.lineasPago && <p className="text-xs text-red-600 mb-2">{errors.lineasPago}</p>}
+              <p className="text-xs text-gray-400 mb-2">
+                La cuenta bancaria y, si corresponde, el cheque real, se eligen recién al confirmar el pago.
+              </p>
+
+              <div className="space-y-2">
+                {lineasPago.map((linea, idx) => (
+                  <div key={linea.key} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <select
+                        className={`${selectClass} w-40`}
+                        value={linea.medioPago}
+                        onChange={(e) => updateLineaPago(idx, 'medioPago', e.target.value as MedioPagoCompra)}
+                      >
+                        {(Object.entries(MEDIO_PAGO_COMPRA_LABEL) as [MedioPagoCompra, string][]).map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                      <input
+                        className={`${inputClass} flex-1`}
+                        type="number" min={0} step={0.01}
+                        placeholder="Monto"
+                        value={linea.monto}
+                        onChange={(e) => updateLineaPago(idx, 'monto', Number(e.target.value))}
+                      />
+                      <button
+                        onClick={() => removeLineaPago(idx)}
+                        disabled={lineasPago.length <= 1}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-30"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    {linea.medioPago === 'cheque' && (
+                      <div className="grid grid-cols-3 gap-2 pl-1">
+                        <input
+                          className={`${inputClass} text-xs`}
+                          placeholder="Número de cheque"
+                          value={linea.chequeNumero}
+                          onChange={(e) => updateLineaPago(idx, 'chequeNumero', e.target.value)}
+                        />
+                        <input
+                          className={`${inputClass} text-xs`}
+                          placeholder="Banco"
+                          value={linea.chequeBanco}
+                          onChange={(e) => updateLineaPago(idx, 'chequeBanco', e.target.value)}
+                        />
+                        <input
+                          className={`${inputClass} text-xs`}
+                          type="date"
+                          title="Fecha de pago (vencimiento)"
+                          value={linea.chequeFechaPago}
+                          onChange={(e) => updateLineaPago(idx, 'chequeFechaPago', e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end mt-2">
+                <div className="text-sm">
+                  <span className="text-gray-500 mr-2">Total líneas de pago</span>
+                  <span className={Math.abs(totalLineasPago - monto) > 0.01 ? 'text-amber-600 font-medium' : 'text-gray-900 font-medium'}>
+                    {formatARS(totalLineasPago)}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
             <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
             <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── 4b. ConfirmarPagoDialog ────────────────────────────────
+//
+// Ejecuta una Orden de Pago 'pendiente': acá sí se elige la cuenta bancaria
+// real para las líneas de transferencia/efectivo, y se terminan de cargar
+// los datos del cheque (si no se cargaron ya al armar la orden) para las
+// líneas de cheque. Al confirmar, cada línea genera su movimiento real en
+// Tesorería (ver store.tsx, CONFIRMAR_PAGO).
+
+export interface CuentaBancariaOpcionDialog {
+  id: string;
+  banco: string;
+  alias: string;
+  numero: string;
+}
+
+interface ConfirmarPagoDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  pago?: PagoCompra;
+  proveedorNombre?: string;
+  cuentas: CuentaBancariaOpcionDialog[];
+  onConfirm: (data: { fecha: string; lineasPago: LineaPago[] }) => void;
+}
+
+interface LineaPagoConfirmRow extends LineaPago {}
+
+export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre, cuentas, onConfirm }: ConfirmarPagoDialogProps) {
+  const [fecha, setFecha] = useState(todayISO());
+  const [lineas, setLineas] = useState<LineaPagoConfirmRow[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open && pago) {
+      setFecha(todayISO());
+      setLineas(pago.lineasPago.map((l) => ({ ...l, cuentaBancariaId: l.cuentaBancariaId ?? cuentas[0]?.id })));
+      setError('');
+    }
+  }, [open, pago, cuentas]);
+
+  const updateLinea = (index: number, field: keyof LineaPago, value: string) => {
+    setLineas((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+  };
+
+  const handleConfirm = () => {
+    const faltaCuenta = lineas.some((l) => (l.medioPago === 'transferencia' || l.medioPago === 'efectivo' || l.medioPago === 'otro') && !l.cuentaBancariaId);
+    const faltaCheque = lineas.some((l) => l.medioPago === 'cheque' && (!l.chequeNumero?.trim() || !l.chequeBanco?.trim() || !l.chequeFechaPago || !l.cuentaBancariaId));
+    if (faltaCuenta) return setError('Elegí la cuenta bancaria para todas las líneas de transferencia/efectivo/otro.');
+    if (faltaCheque) return setError('Completá número, banco, fecha de pago y cuenta de origen para todas las líneas de cheque.');
+    setError('');
+
+    onConfirm({
+      fecha,
+      lineasPago: lineas.map((l) => (l.medioPago === 'cheque' ? { ...l, chequeId: l.chequeId ?? generarId() } : l)),
+    });
+    onOpenChange(false);
+  };
+
+  if (!pago) return null;
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentWideClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">
+              Confirmar pago — {proveedorNombre ?? 'Proveedor'}
+            </Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+
+          <div className="space-y-5">
+            <div>
+              <label className={labelClass}>Fecha de pago</label>
+              <input className={`${inputClass} max-w-xs`} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+            </div>
+
+            {cuentas.length === 0 && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                No hay ninguna cuenta bancaria cargada en Tesorería. Cargá una en Tesorería &gt; Bancos antes de confirmar transferencias o cheques.
+              </p>
+            )}
+
+            {error && <p className="text-xs text-red-600">{error}</p>}
+
+            <div className="space-y-3">
+              {lineas.map((linea, idx) => (
+                <div key={linea.id} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-900">{MEDIO_PAGO_COMPRA_LABEL[linea.medioPago]}</span>
+                    <span className="text-sm text-gray-700">{formatARS(linea.monto)}</span>
+                  </div>
+
+                  {(linea.medioPago === 'transferencia' || linea.medioPago === 'efectivo' || linea.medioPago === 'otro') && (
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Cuenta bancaria *</label>
+                      <select
+                        className={selectClass}
+                        value={linea.cuentaBancariaId ?? ''}
+                        onChange={(e) => updateLinea(idx, 'cuentaBancariaId', e.target.value)}
+                      >
+                        <option value="">Seleccionar...</option>
+                        {cuentas.map((c) => (
+                          <option key={c.id} value={c.id}>{c.banco} — {c.alias || c.numero}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {linea.medioPago === 'cheque' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Número de cheque *</label>
+                        <input className={inputClass} value={linea.chequeNumero ?? ''} onChange={(e) => updateLinea(idx, 'chequeNumero', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Banco *</label>
+                        <input className={inputClass} value={linea.chequeBanco ?? ''} onChange={(e) => updateLinea(idx, 'chequeBanco', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Fecha de pago *</label>
+                        <input className={inputClass} type="date" value={linea.chequeFechaPago ?? ''} onChange={(e) => updateLinea(idx, 'chequeFechaPago', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Cuenta de origen *</label>
+                        <select
+                          className={selectClass}
+                          value={linea.cuentaBancariaId ?? ''}
+                          onChange={(e) => updateLinea(idx, 'cuentaBancariaId', e.target.value)}
+                        >
+                          <option value="">Seleccionar...</option>
+                          {cuentas.map((c) => (
+                            <option key={c.id} value={c.id}>{c.banco} — {c.alias || c.numero}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleConfirm}>Confirmar pago</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

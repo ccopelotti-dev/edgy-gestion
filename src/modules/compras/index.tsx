@@ -12,6 +12,7 @@ import Proveedores from './pages/Proveedores';
 import Cotizaciones from './pages/Cotizaciones';
 import OrdenesCompra from './pages/OrdenesCompra';
 import Comprobantes from './pages/Comprobantes';
+import OrdenesPago from './pages/OrdenesPago';
 
 export default function ComprasModule() {
   return (
@@ -23,6 +24,7 @@ export default function ComprasModule() {
           <Route path="cotizaciones" element={<Cotizaciones />} />
           <Route path="ordenes-compra" element={<OrdenesCompra />} />
           <Route path="comprobantes" element={<Comprobantes />} />
+          <Route path="ordenes-pago" element={<OrdenesPago />} />
         </Route>
       </Routes>
     </ComprasProvider>
