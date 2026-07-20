@@ -204,9 +204,12 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
       const numero = state.nextNumeroComprobante[tipo];
       const comprobante: ComprobanteCompra = { ...action.payload, numero } as ComprobanteCompra;
 
+      // Misma lógica que Ventas (ver comentario en ADD_COMPROBANTE de
+      // ventas/data/store.tsx): la deuda real hacia el proveedor la define
+      // `saldoPendiente` de la factura, no el `medioPago` declarado.
       let proveedoresDelta: { proveedorId: string; delta: number } | null = null;
-      if (tipo === 'factura' && comprobante.medioPago === 'cuenta_corriente') {
-        proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: comprobante.total };
+      if (tipo === 'factura' && comprobante.saldoPendiente > 0) {
+        proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: comprobante.saldoPendiente };
       }
       if (tipo === 'nota_credito') {
         proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: -comprobante.total };
@@ -240,13 +243,12 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
       const comprobante = state.comprobantes.find((c) => c.id === action.payload.id);
       if (!comprobante || comprobante.estado === 'anulado') return state;
 
+      // Espejo exacto de ADD_COMPROBANTE_COMPRA (ver comentario ahí).
       let proveedoresDelta: { proveedorId: string; delta: number } | null = null;
-      if (comprobante.medioPago === 'cuenta_corriente') {
-        if (comprobante.tipo === 'factura') {
-          proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: -(comprobante.total - comprobante.montoPagado) };
-        } else if (comprobante.tipo === 'nota_credito') {
-          proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: comprobante.total };
-        }
+      if (comprobante.tipo === 'factura' && comprobante.saldoPendiente > 0) {
+        proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: -comprobante.saldoPendiente };
+      } else if (comprobante.tipo === 'nota_credito') {
+        proveedoresDelta = { proveedorId: comprobante.proveedorId, delta: comprobante.total };
       }
 
       return {
@@ -283,7 +285,11 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
           const saldoPendiente = c.total - montoPagado;
           let estado: EstadoComprobanteCompra = c.estado;
           if (c.estado !== 'anulado') {
-            if (saldoPendiente <= 0) estado = 'pagado';
+            // Tolerancia de 1 centavo -- evita que un residuo de coma
+            // flotante deje el comprobante trabado en 'pagado_parcial'
+            // mostrando "$0,00" pendiente para siempre (mismo bug
+            // confirmado del lado de Ventas, FAC-00008).
+            if (saldoPendiente <= 0.01) estado = 'pagado';
             else if (montoPagado > 0) estado = 'pagado_parcial';
             else estado = 'pendiente';
           }
@@ -323,7 +329,8 @@ function comprasReducer(state: ComprasState, action: ComprasAction): ComprasStat
           const nuevoSaldoPendiente = c.total - nuevoMontoPagado;
           let estado: EstadoComprobanteCompra = c.estado;
           if (c.estado !== 'anulado') {
-            if (nuevoSaldoPendiente <= 0) estado = 'pagado';
+            // Misma tolerancia de 1 centavo que en ACTUALIZAR_PAGO_COMPROBANTE.
+            if (nuevoSaldoPendiente <= 0.01) estado = 'pagado';
             else if (nuevoMontoPagado > 0) estado = 'pagado_parcial';
           }
           return { ...c, montoPagado: nuevoMontoPagado, saldoPendiente: Math.max(0, nuevoSaldoPendiente), estado, updatedAt: now };

@@ -19,6 +19,7 @@ import type {
   Presupuesto,
   PresupuestoItem,
   ImputacionCobro,
+  Orden,
 } from '../../types';
 
 import {
@@ -293,13 +294,17 @@ export function ClienteDialog({ open, onOpenChange, cliente, onSave }: ClienteDi
               </div>
               <div>
                 <label className={labelClass}>Límite crédito</label>
-                <input
-                  className={inputClass}
-                  type="number"
-                  min={0}
-                  value={form.limiteCredito}
-                  onChange={(e) => update('limiteCredito', Number(e.target.value))}
-                />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+                  <input
+                    className={`${inputClass} pl-6`}
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={form.limiteCredito}
+                    onChange={(e) => update('limiteCredito', Number(e.target.value))}
+                  />
+                </div>
               </div>
             </div>
 
@@ -334,6 +339,11 @@ interface ComprobanteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   clientes: Cliente[];
+  /** Si se abre desde "Facturar" en una Comanda/Orden de venta puntual,
+   * precarga cliente + items desde ahí (mismo criterio que
+   * ComprobanteCompraDialog.ordenCompra en Compras). Sin esto, el modal
+   * arranca en blanco (alta manual, como siempre). */
+  orden?: Orden;
   onSave: (data: {
     tipo: TipoComprobante;
     clienteId: string;
@@ -415,6 +425,7 @@ export function ComprobanteDialog({
   open,
   onOpenChange,
   clientes,
+  orden,
   onSave,
   modoEmisionDefault,
 }: ComprobanteDialogProps) {
@@ -444,17 +455,37 @@ export function ComprobanteDialog({
   useEffect(() => {
     if (open) {
       setTipo('factura');
-      setClienteId('');
       setFecha(todayISO());
       setMedioPago('efectivo');
       setModoEmision(modoEmisionDefault);
-      setItems([newItemRow()]);
       setDescuentoGeneral(0);
       setErrors({});
       setIntentoGuardar(false);
       setBusquedaProducto('');
+      if (orden) {
+        // Si el cliente de la orden no tiene un Cliente formal vinculado
+        // (pedido de invitado/canal externo), se deja en blanco para que
+        // el operador lo complete a mano -- ver contactoNombre/Telefono.
+        setClienteId(clientes.some((c) => c.id === orden.clienteId) ? orden.clienteId : '');
+        setItems(
+          orden.items.length
+            ? orden.items.map((it) => ({
+                key: generarId(),
+                descripcion: it.descripcion,
+                cantidad: it.cantidad,
+                precioUnitario: it.precioUnitario,
+                descuento: it.descuento,
+                alicuotaIva: 21,
+                productoId: it.productoId,
+              }))
+            : [newItemRow()],
+        );
+      } else {
+        setClienteId('');
+        setItems([newItemRow()]);
+      }
     }
-  }, [open, modoEmisionDefault]);
+  }, [open, modoEmisionDefault, orden, clientes]);
 
   useEffect(() => {
     if (!open || !clienteTenant?.id) return;
@@ -1039,6 +1070,15 @@ export function CobroDialog({
   };
 
   const totalImputado = imputaciones.reduce((sum, imp) => sum + imp.montoImputado, 0);
+  // Techo real de imputación: no tiene sentido pedirle al operador que
+  // impute más de lo que hay de deuda pendiente -- si el cobro es mayor
+  // a la deuda total, el excedente queda legítimamente "sin imputar"
+  // (a favor del cliente). Ver bug COB-00003: se guardó un cobro con
+  // imputaciones en cero mientras había una factura pendiente por el
+  // mismo importe exacto, dejando la factura "Emitida" para siempre y
+  // el saldo de cuenta corriente del cliente descontado igual.
+  const sumaSaldosPendientes = imputaciones.reduce((sum, imp) => sum + imp.saldoPendiente, 0);
+  const montoQueDeberiaImputarse = Math.min(monto, sumaSaldosPendientes);
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
@@ -1046,6 +1086,9 @@ export function CobroDialog({
     if (totalImputado > monto + 0.01) next.imputaciones = 'La suma de imputaciones excede el monto';
     const invalid = imputaciones.some((imp) => imp.montoImputado > imp.saldoPendiente + 0.01);
     if (invalid) next.imputaciones = 'Una imputación excede el saldo pendiente';
+    if (totalImputado < montoQueDeberiaImputarse - 0.01) {
+      next.imputaciones = `Falta imputar ${formatARS(montoQueDeberiaImputarse - totalImputado)} a comprobantes pendientes antes de guardar (o ajuste el monto del cobro).`;
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -1177,8 +1220,12 @@ export function CobroDialog({
                     <span className="text-gray-900">{formatARS(totalImputado)}</span>
                   </div>
                   <div className="flex justify-between font-medium">
-                    <span className="text-gray-500">Sin imputar</span>
-                    <span className={monto - totalImputado > 0.01 ? 'text-amber-600' : 'text-gray-900'}>
+                    <span className="text-gray-500">
+                      {monto - totalImputado > 0.01 && totalImputado >= montoQueDeberiaImputarse - 0.01
+                        ? 'Sin imputar (a favor del cliente)'
+                        : 'Sin imputar'}
+                    </span>
+                    <span className={totalImputado < montoQueDeberiaImputarse - 0.01 ? 'text-red-600' : monto - totalImputado > 0.01 ? 'text-amber-600' : 'text-gray-900'}>
                       {formatARS(monto - totalImputado)}
                     </span>
                   </div>
@@ -1225,6 +1272,10 @@ interface PresupuestoItemRow {
   cantidad: number;
   precioUnitario: number;
   descuento: number;
+  /** Vínculo opcional al catálogo real de Productos y Stock -- mismo
+   * criterio que el buscador de ComprobanteDialog (Fase 18). Si se deja
+   * sin vincular, la línea sigue siendo texto libre (fallback manual). */
+  productoId?: string;
 }
 
 function newPresupuestoItemRow(): PresupuestoItemRow {
@@ -1235,6 +1286,15 @@ function newPresupuestoItemRow(): PresupuestoItemRow {
     precioUnitario: 0,
     descuento: 0,
   };
+}
+
+/** Catálogo de productos para el buscador de "Nuevo presupuesto" -- mismo
+ * criterio que ProductoCatalogoItem de ComprobanteDialog, sin combos (un
+ * presupuesto cotiza productos puntuales, no combos armados). */
+interface ProductoCatalogoPresupuesto {
+  id: string;
+  nombre: string;
+  precioVenta: number;
 }
 
 /** Una fila de ítem se considera incompleta si falta la descripción o el precio. */
@@ -1263,6 +1323,13 @@ export function PresupuestoDialog({
   const [intentoGuardar, setIntentoGuardar] = useState(false);
   const itemsSectionRef = useRef<HTMLDivElement>(null);
 
+  // Buscador de catálogo (mismo criterio que ComprobanteDialog, Fase 18):
+  // el usuario pidió explícitamente que "Nuevo presupuesto" se relacione
+  // con el módulo Productos en vez de forzar carga manual de texto libre.
+  const { cliente: clienteTenant } = useClienteActual();
+  const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoPresupuesto[]>([]);
+  const [busquedaProducto, setBusquedaProducto] = useState('');
+
   useEffect(() => {
     if (open) {
       if (presupuesto) {
@@ -1279,6 +1346,7 @@ export function PresupuestoDialog({
             cantidad: it.cantidad,
             precioUnitario: it.precioUnitario,
             descuento: it.descuento,
+            productoId: it.productoId || undefined,
           })),
         );
       } else {
@@ -1292,8 +1360,59 @@ export function PresupuestoDialog({
       }
       setErrors({});
       setIntentoGuardar(false);
+      setBusquedaProducto('');
     }
   }, [open, presupuesto, validezDefault]);
+
+  useEffect(() => {
+    if (!open || !clienteTenant?.id) return;
+    let activo = true;
+
+    async function cargarCatalogo() {
+      const { data } = await supabase
+        .from('productos')
+        .select('id, nombre, precio_venta')
+        .eq('cliente_id', clienteTenant!.id)
+        .eq('disponible', true)
+        .eq('estado', 'activo')
+        .order('nombre');
+
+      if (!activo) return;
+      setProductosCatalogo(
+        ((data ?? []) as any[]).map((p) => ({
+          id: p.id,
+          nombre: p.nombre,
+          precioVenta: Number(p.precio_venta),
+        })),
+      );
+    }
+
+    cargarCatalogo();
+    return () => {
+      activo = false;
+    };
+  }, [open, clienteTenant?.id]);
+
+  const sugerenciasProducto = useMemo(() => {
+    const q = busquedaProducto.trim().toLowerCase();
+    if (!q) return [];
+    return productosCatalogo.filter((p) => p.nombre.toLowerCase().includes(q)).slice(0, 8);
+  }, [busquedaProducto, productosCatalogo]);
+
+  const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogoPresupuesto) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        key: generarId(),
+        descripcion: producto.nombre,
+        cantidad: 1,
+        precioUnitario: producto.precioVenta,
+        descuento: 0,
+        productoId: producto.id,
+      },
+    ]);
+    setBusquedaProducto('');
+  }, []);
 
   const updateItem = (index: number, field: keyof PresupuestoItemRow, value: string | number) => {
     setItems((prev) =>
@@ -1343,7 +1462,7 @@ export function PresupuestoDialog({
       notas,
       descuentoGeneral,
       items: items.map((item) => ({
-        productoId: '',
+        productoId: item.productoId ?? '',
         descripcion: item.descripcion.trim(),
         cantidad: item.cantidad,
         precioUnitario: item.precioUnitario,
@@ -1445,6 +1564,35 @@ export function PresupuestoDialog({
                   <p className="text-xs text-red-700">{errors.items}</p>
                 </div>
               )}
+
+              {/* Buscador de catálogo -- mismo criterio que en Nuevo comprobante
+                  (Fase 18): clic en una sugerencia agrega una fila ya vinculada
+                  al producto. La carga manual sigue disponible con "Agregar". */}
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={busquedaProducto}
+                  onChange={(e) => setBusquedaProducto(e.target.value)}
+                  placeholder="Buscar producto en el catálogo..."
+                  className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+                />
+                {sugerenciasProducto.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                    {sugerenciasProducto.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleAgregarLineaCatalogo(p)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      >
+                        <span className="text-gray-900">{p.nombre}</span>
+                        <span className="text-gray-500">{formatARS(p.precioVenta)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">

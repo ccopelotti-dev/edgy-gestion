@@ -254,9 +254,19 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
       const numero = state.nextNumeroComprobante[tipo];
       const comprobante: Comprobante = { ...action.payload, numero } as Comprobante;
 
+      // La deuda real de cta. cte. del cliente se define por lo que la
+      // factura deja pendiente de cobro (`saldoPendiente`), no por el
+      // `medioPago` declarado -- antes esto solo se incrementaba cuando
+      // medioPago === 'cuenta_corriente', así que una factura emitida con
+      // otro medio (ej. 'transferencia') que no se cobró al instante
+      // generaba una deuda real (saldoPendiente > 0 en el comprobante)
+      // que NUNCA se reflejaba en el agregado del cliente -- hasta que un
+      // Cobro posterior la descontaba igual, empujando el saldo a
+      // negativo (bug confirmado: Roberto García, Ana Fernández, Laura
+      // Sánchez -- ver backfill de saldoCuentaCorriente).
       let clientesDelta: { clienteId: string; delta: number } | null = null;
-      if (tipo === 'factura' && comprobante.medioPago === 'cuenta_corriente') {
-        clientesDelta = { clienteId: comprobante.clienteId, delta: comprobante.total };
+      if (tipo === 'factura' && comprobante.saldoPendiente > 0) {
+        clientesDelta = { clienteId: comprobante.clienteId, delta: comprobante.saldoPendiente };
       }
       if (tipo === 'nota_credito') {
         clientesDelta = { clienteId: comprobante.clienteId, delta: -comprobante.total };
@@ -288,13 +298,14 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
       const comprobante = state.comprobantes.find((c) => c.id === action.payload.id);
       if (!comprobante || comprobante.estado === 'anulado') return state;
 
+      // Espejo exacto de la lógica de ADD_COMPROBANTE (ver comentario ahí):
+      // se revierte lo que esa factura/NC efectivamente había sumado al
+      // agregado del cliente, sin volver a gatear por medioPago.
       let clientesDelta: { clienteId: string; delta: number } | null = null;
-      if (comprobante.medioPago === 'cuenta_corriente') {
-        if (comprobante.tipo === 'factura') {
-          clientesDelta = { clienteId: comprobante.clienteId, delta: -(comprobante.total - comprobante.montoCobrado) };
-        } else if (comprobante.tipo === 'nota_credito') {
-          clientesDelta = { clienteId: comprobante.clienteId, delta: comprobante.total };
-        }
+      if (comprobante.tipo === 'factura' && comprobante.saldoPendiente > 0) {
+        clientesDelta = { clienteId: comprobante.clienteId, delta: -comprobante.saldoPendiente };
+      } else if (comprobante.tipo === 'nota_credito') {
+        clientesDelta = { clienteId: comprobante.clienteId, delta: comprobante.total };
       }
 
       return {
@@ -329,7 +340,8 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
           const saldoPendiente = c.total - montoCobrado;
           let estado: EstadoComprobante = c.estado;
           if (c.estado !== 'anulado') {
-            if (saldoPendiente <= 0) estado = 'cobrado';
+            // Misma tolerancia de 1 centavo que en ADD_COBRO -- ver comentario ahí.
+            if (saldoPendiente <= 0.01) estado = 'cobrado';
             else if (montoCobrado > 0) estado = 'cobrado_parcial';
             else estado = 'emitido';
           }
@@ -350,7 +362,11 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
           const nuevoSaldoPendiente = c.total - nuevoMontoCobrado;
           let estado: EstadoComprobante = c.estado;
           if (c.estado !== 'anulado') {
-            if (nuevoSaldoPendiente <= 0) estado = 'cobrado';
+            // Tolerancia de 1 centavo: evita que un residuo de coma flotante
+            // (ej. 0.0000000002 acumulado en restas sucesivas) deje la
+            // factura trabada en 'cobrado_parcial' mostrando "$0,00"
+            // pendiente para siempre (bug confirmado en FAC-00008).
+            if (nuevoSaldoPendiente <= 0.01) estado = 'cobrado';
             else if (nuevoMontoCobrado > 0) estado = 'cobrado_parcial';
           }
           return { ...c, montoCobrado: nuevoMontoCobrado, saldoPendiente: Math.max(0, nuevoSaldoPendiente), estado, updatedAt: now };
@@ -946,6 +962,8 @@ async function fetchVentasState(): Promise<VentasState> {
     origenId: r.origen_id ?? undefined,
     origenCanal: r.origen_canal ?? undefined,
     origenExternoId: r.origen_externo_id ?? undefined,
+    contactoNombre: r.contacto_nombre ?? undefined,
+    contactoTelefono: r.contacto_telefono ?? undefined,
     comprobanteIds: comprobanteIdsPorOrden.get(r.id) ?? [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,

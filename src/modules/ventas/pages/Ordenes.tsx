@@ -114,9 +114,9 @@ export default function Ordenes() {
   // ── Helpers ───────────────────────────────────────────────
 
   const clienteNombre = useCallback(
-    (clienteId: string) => {
+    (clienteId: string, contactoNombre?: string) => {
       const c = clientes.find((cl) => cl.id === clienteId);
-      return c?.nombre ?? 'Desconocido';
+      return c?.nombre ?? contactoNombre ?? 'Desconocido';
     },
     [clientes],
   );
@@ -151,7 +151,7 @@ export default function Ordenes() {
       if (fechaDesde && o.fecha < fechaDesde) return false;
       if (fechaHasta && o.fecha > fechaHasta) return false;
       if (q) {
-        const nombre = clienteNombre(o.clienteId).toLowerCase();
+        const nombre = clienteNombre(o.clienteId, o.contactoNombre).toLowerCase();
         if (!nombre.includes(q)) return false;
       }
       return true;
@@ -619,7 +619,7 @@ export default function Ordenes() {
                     orden={orden}
                     terminoSingularMin={singularMin}
                     isExpanded={isExpanded}
-                    clienteNombre={clienteNombre(orden.clienteId)}
+                    clienteNombre={clienteNombre(orden.clienteId, orden.contactoNombre)}
                     comprobantesOrden={comprobantesOrden}
                     editandoEntrega={editandoEntrega}
                     entregaCantidades={entregaCantidades}
@@ -649,6 +649,7 @@ export default function Ordenes() {
             if (!open) setOrdenParaFacturar(null);
           }}
           clientes={clientes}
+          orden={ordenParaFacturar}
           onSave={handleSaveComprobante}
           modoEmisionDefault={config.modoEmisionDefault}
         />

@@ -147,6 +147,17 @@ export interface Orden {
   origenCanal?: string;           // 'mercadolibre', 'tiendanube', etc.
   origenExternoId?: string;       // ID en la plataforma externa
 
+  /**
+   * Nombre/teléfono de contacto -- ya existen como columnas propias en
+   * `ordenes_venta` (contacto_nombre/contacto_telefono) y las carga
+   * Delivery-WhatsApp cuando el pedido no tiene un Cliente formal
+   * vinculado (`clienteId` null). Ventas no las leía y por eso estas
+   * comandas aparecían como "Cliente: Desconocido" -- se usan acá como
+   * respaldo cuando no hay `clienteId`.
+   */
+  contactoNombre?: string;
+  contactoTelefono?: string;
+
   comprobanteIds: string[];       // comprobantes generados
   createdAt: string;
   updatedAt: string;

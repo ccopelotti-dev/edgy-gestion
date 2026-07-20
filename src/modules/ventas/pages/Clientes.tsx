@@ -18,8 +18,12 @@ import {
   FileText,
   CreditCard,
   User,
+  FileBarChart2,
+  ReceiptText,
+  Loader2,
 } from 'lucide-react';
 
+import { useClienteActual } from '@/hooks/useClienteActual';
 import {
   useClientes,
   useComprobantes,
@@ -35,6 +39,10 @@ import {
 } from '../components/ventas/display';
 import { ClienteDialog, CobroDialog } from '../components/ventas/dialogs';
 import {
+  descargarResumenCuentaClientePdf,
+  descargarReciboPdf,
+} from '../lib/pdfComprobantes';
+import {
   formatCuit,
   formatDate,
   formatARS,
@@ -42,7 +50,7 @@ import {
   PREFIJO_COMPROBANTE,
   daysUntil,
 } from '../lib/format';
-import type { Cliente, CategoriaCliente } from '../types';
+import type { Cliente, CategoriaCliente, Cobro } from '../types';
 import {
   CONDICION_IVA_LABEL,
   TIPO_DOCUMENTO_LABEL,
@@ -59,6 +67,11 @@ export default function Clientes() {
   const cobros = useCobros();
   const { categorias } = useVentas();
   const dispatch = useVentasDispatch();
+  // Resumen de cuenta y Recibo -- mismo motor de PDF compartido que ya
+  // usa Compras > Proveedores (Fase 17b, task #170).
+  const { cliente: empresaActual } = useClienteActual();
+  const [generandoResumenId, setGenerandoResumenId] = useState<string | null>(null);
+  const [generandoReciboId, setGenerandoReciboId] = useState<string | null>(null);
 
   // ── Filtros ───────────────────────────────────────────────
 
@@ -168,6 +181,27 @@ export default function Clientes() {
     setExpandedId((prev) => (prev === clienteId ? null : clienteId));
   };
 
+  const handleDescargarResumenCuenta = async (cliente: Cliente) => {
+    if (!empresaActual) return;
+    setGenerandoResumenId(cliente.id);
+    try {
+      await descargarResumenCuentaClientePdf(empresaActual, cliente, comprobantes, cobros);
+    } finally {
+      setGenerandoResumenId(null);
+    }
+  };
+
+  const handleDescargarRecibo = async (cobro: Cobro) => {
+    if (!empresaActual) return;
+    setGenerandoReciboId(cobro.id);
+    try {
+      const cliente = clientes.find((c) => c.id === cobro.clienteId);
+      await descargarReciboPdf(empresaActual, cliente, cobro, comprobantes, 'Cliente');
+    } finally {
+      setGenerandoReciboId(null);
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────
 
   return (
@@ -262,6 +296,10 @@ export default function Clientes() {
                   onRegistrarCobro={() => handleRegistrarCobro(cliente.id)}
                   comprobantes={comprobantes}
                   cobros={cobros}
+                  onDescargarResumen={() => handleDescargarResumenCuenta(cliente)}
+                  generandoResumen={generandoResumenId === cliente.id}
+                  onDescargarRecibo={handleDescargarRecibo}
+                  generandoReciboId={generandoReciboId}
                 />
               ))}
             </tbody>
@@ -330,6 +368,10 @@ interface ClienteRowProps {
   onRegistrarCobro: () => void;
   comprobantes: ReturnType<typeof useComprobantes>;
   cobros: ReturnType<typeof useCobros>;
+  onDescargarResumen: () => void;
+  generandoResumen: boolean;
+  onDescargarRecibo: (cobro: Cobro) => void;
+  generandoReciboId: string | null;
 }
 
 function ClienteRow({
@@ -342,6 +384,10 @@ function ClienteRow({
   onRegistrarCobro,
   comprobantes,
   cobros,
+  onDescargarResumen,
+  generandoResumen,
+  onDescargarRecibo,
+  generandoReciboId,
 }: ClienteRowProps) {
   // ── Datos del cliente expandido ───────────────────────────
 
@@ -553,6 +599,7 @@ function ClienteRow({
                           <th className="px-3 py-2 font-medium">Medio de pago</th>
                           <th className="px-3 py-2 text-right font-medium">Monto</th>
                           <th className="px-3 py-2 font-medium">Imputaciones</th>
+                          <th className="px-3 py-2 w-10" />
                         </tr>
                       </thead>
                       <tbody>
@@ -578,6 +625,23 @@ function ClienteRow({
                               {cobro.imputaciones.length === 1
                                 ? 'comprobante'
                                 : 'comprobantes'}
+                            </td>
+                            <td className="px-3 py-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDescargarRecibo(cobro);
+                                }}
+                                disabled={generandoReciboId === cobro.id}
+                                className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md disabled:opacity-50"
+                                title="Recibo (PDF)"
+                              >
+                                {generandoReciboId === cobro.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <ReceiptText className="h-3.5 w-3.5" />
+                                )}
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -624,6 +688,22 @@ function ClienteRow({
                 >
                   <Power className="h-3.5 w-3.5" />
                   {cliente.activo ? 'Desactivar' : 'Activar'}
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDescargarResumen();
+                  }}
+                  disabled={generandoResumen}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {generandoResumen ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <FileBarChart2 className="h-3.5 w-3.5" />
+                  )}
+                  Resumen de cuenta (PDF)
                 </button>
               </div>
             </div>
