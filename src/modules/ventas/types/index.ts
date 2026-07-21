@@ -107,9 +107,21 @@ export type TipoOrden =
   | 'produccion'                  // elaboración / manufactura
   | 'servicio';                   // prestación de servicios
 
+/**
+ * 'terminado' -- se agrega entre 'en_preparacion' y 'entregado' (migración
+ * 0060) para separar "la cocina ya terminó de preparar esto" de "el
+ * cliente ya se lo llevó/fue servido". Antes de este cambio, "Facturar"
+ * se habilitaba desde 'en_preparacion', lo que permitía facturar algo que
+ * todavía se podía modificar en cocina -- ahora se habilita recién desde
+ * 'terminado' en adelante. Esto además recupera la intención original del
+ * diseño de `ordenes_venta` (ver comentario de la migración 0034: la
+ * tabla real ya existía de antes con otro vocabulario y ese estado
+ * intermedio nunca se llegó a incorporar al frontend).
+ */
 export type EstadoOrden =
   | 'pendiente'
   | 'en_preparacion'
+  | 'terminado'
   | 'entregado_parcial'
   | 'entregado'                   // o "completado" para servicios
   | 'cancelado';
@@ -338,6 +350,7 @@ export const ESTADO_PRESUPUESTO_LABEL: Record<EstadoPresupuesto, string> = {
 export const ESTADO_ORDEN_LABEL: Record<EstadoOrden, string> = {
   pendiente: 'Pendiente',
   en_preparacion: 'En preparación',
+  terminado: 'Terminado',
   entregado_parcial: 'Entrega parcial',
   entregado: 'Entregado',
   cancelado: 'Cancelado',

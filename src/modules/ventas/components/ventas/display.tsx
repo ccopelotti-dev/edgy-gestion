@@ -140,6 +140,7 @@ export function EstadoPresupuestoBadge({
 const estadoOrdenColor: Record<EstadoOrden, string> = {
   pendiente: 'amber',
   en_preparacion: 'blue',
+  terminado: 'teal',
   entregado_parcial: 'purple',
   entregado: 'green',
   cancelado: 'red',

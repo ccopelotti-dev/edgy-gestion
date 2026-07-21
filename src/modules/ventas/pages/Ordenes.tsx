@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Play,
   Package,
+  PackageCheck,
   CheckCircle2,
   XCircle,
   FileText,
@@ -131,7 +132,10 @@ export default function Ordenes() {
 
     const pendientes = todasOrdenes.filter((o) => o.estado === 'pendiente').length;
     const enPreparacion = todasOrdenes.filter(
-      (o) => o.estado === 'en_preparacion' || o.estado === 'entregado_parcial',
+      (o) =>
+        o.estado === 'en_preparacion' ||
+        o.estado === 'terminado' ||
+        o.estado === 'entregado_parcial',
     ).length;
     const completadasMes = todasOrdenes.filter(
       (o) => o.estado === 'entregado' && o.fechaCompletada && o.fechaCompletada >= inicioMes,
@@ -602,6 +606,7 @@ export default function Ordenes() {
                 <th className="px-4 py-3 font-medium">Entrega</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
                 <th className="px-4 py-3 w-10" />
               </tr>
             </thead>
@@ -721,6 +726,64 @@ function OrdenRow({
         <td className="px-4 py-3">
           <EstadoOrdenBadge estado={o.estado} tipo={o.tipo} />
         </td>
+        <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1">
+            {o.estado === 'pendiente' && (
+              <>
+                <button
+                  onClick={() => onCambiarEstado('en_preparacion')}
+                  className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                  title="Iniciar preparación"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => onCambiarEstado('cancelado')}
+                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                  title="Cancelar"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            {o.estado === 'en_preparacion' && (
+              <button
+                onClick={() => onCambiarEstado('terminado')}
+                className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"
+                title="Marcar terminado"
+              >
+                <PackageCheck className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {(o.estado === 'terminado' || o.estado === 'entregado_parcial') && (
+              <>
+                <button
+                  onClick={() => onCambiarEstado('entregado')}
+                  className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                  title="Marcar entregado"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={onFacturar}
+                  className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg"
+                  title="Facturar"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            {o.estado === 'entregado' && comprobantesOrden.length === 0 && (
+              <button
+                onClick={onFacturar}
+                className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg"
+                title="Facturar"
+              >
+                <FileText className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </td>
         <td className="px-4 py-3 text-center">
           {isExpanded ? (
             <ChevronUp className="h-4 w-4 text-gray-400" />
@@ -733,7 +796,7 @@ function OrdenRow({
       {/* Panel expandido */}
       {isExpanded && (
         <tr>
-          <td colSpan={8} className="bg-gray-50 px-4 py-5">
+          <td colSpan={9} className="bg-gray-50 px-4 py-5">
             <div className="space-y-5">
               {/* Tabla de items */}
               <div>
@@ -896,83 +959,22 @@ function OrdenRow({
                 </div>
               )}
 
-              {/* Acciones segun estado */}
-              {o.estado !== 'cancelado' && (
-                <div className="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
-                  {o.estado === 'pendiente' && (
-                    <>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCambiarEstado('en_preparacion');
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors"
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                        Iniciar preparacion
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCambiarEstado('cancelado');
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 transition-colors"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        Cancelar
-                      </button>
-                    </>
-                  )}
-
-                  {(o.estado === 'en_preparacion' || o.estado === 'entregado_parcial') && (
-                    <>
-                      {!editandoEntrega && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onIniciarEntrega();
-                          }}
-                          className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 transition-colors"
-                        >
-                          <Truck className="h-3.5 w-3.5" />
-                          Registrar entrega parcial
-                        </button>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCambiarEstado('entregado');
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 transition-colors"
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Marcar entregado
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onFacturar();
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        Facturar
-                      </button>
-                    </>
-                  )}
-
-                  {o.estado === 'entregado' && comprobantesOrden.length === 0 && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onFacturar();
-                      }}
-                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      Facturar
-                    </button>
-                  )}
+              {/* Registrar entrega parcial -- necesita esta tabla de items para
+                  editar cantidades, por eso queda acá (el resto de las
+                  acciones de un click se movieron a la columna Acciones
+                  de la fila, ver OrdenRow más abajo). */}
+              {!editandoEntrega && (o.estado === 'terminado' || o.estado === 'entregado_parcial') && (
+                <div className="border-t border-gray-200 pt-4">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onIniciarEntrega();
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 transition-colors"
+                  >
+                    <Truck className="h-3.5 w-3.5" />
+                    Registrar entrega parcial
+                  </button>
                 </div>
               )}
 
