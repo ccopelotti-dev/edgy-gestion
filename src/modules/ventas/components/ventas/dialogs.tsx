@@ -1302,6 +1302,16 @@ function filaPresupuestoIncompleta(item: PresupuestoItemRow): boolean {
   return !item.descripcion.trim() || item.precioUnitario <= 0;
 }
 
+/** Una fila "vacía" es la fila manual en blanco que arranca el modal (o
+ * cualquier fila agregada con "+Agregar" que el operador todavía no tocó):
+ * sin descripción y sin vínculo a catálogo. Al elegir un producto desde el
+ * buscador, esa fila se reutiliza en vez de sumar una fila nueva y dejarla
+ * en blanco -- si no, esa fila vacía bloqueaba el guardado (mismo criterio
+ * que CotizacionDialog en Compras, ver filaCotizacionVacia). */
+function filaPresupuestoVacia(item: PresupuestoItemRow): boolean {
+  return !item.descripcion.trim() && !item.productoId;
+}
+
 export function PresupuestoDialog({
   open,
   onOpenChange,
@@ -1400,17 +1410,19 @@ export function PresupuestoDialog({
   }, [busquedaProducto, productosCatalogo]);
 
   const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogoPresupuesto) => {
-    setItems((prev) => [
-      ...prev,
-      {
-        key: generarId(),
-        descripcion: producto.nombre,
-        cantidad: 1,
-        precioUnitario: producto.precioVenta,
-        descuento: 0,
-        productoId: producto.id,
-      },
-    ]);
+    const nuevaLinea: PresupuestoItemRow = {
+      key: generarId(),
+      descripcion: producto.nombre,
+      cantidad: 1,
+      precioUnitario: producto.precioVenta,
+      descuento: 0,
+      productoId: producto.id,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaPresupuestoVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
     setBusquedaProducto('');
   }, []);
 
@@ -1626,16 +1638,17 @@ export function PresupuestoDialog({
                           </td>
                           <td className="px-2 py-1.5">
                             <input
-                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               type="number"
-                              min={1}
-                              value={item.cantidad}
+                              min={0}
+                              step={0.01}
+                              value={item.cantidad || ''}
                               onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
                             />
                           </td>
                           <td className="px-2 py-1.5">
                             <input
-                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none ${precioInvalido ? 'ring-1 ring-red-400 rounded' : ''}`}
+                              className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${precioInvalido ? 'ring-1 ring-red-400 rounded' : ''}`}
                               type="number"
                               min={0}
                               step={0.01}
@@ -1645,7 +1658,7 @@ export function PresupuestoDialog({
                           </td>
                           <td className="px-2 py-1.5">
                             <input
-                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
+                              className="w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               type="number"
                               min={0}
                               max={100}

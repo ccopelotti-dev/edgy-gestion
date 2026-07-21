@@ -619,7 +619,7 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
                             </div>
                           </td>
                           <td className="px-2 py-1.5">
-                            <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={1} value={item.cantidad} onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))} />
+                            <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" type="number" min={0} step={0.01} value={item.cantidad || ''} onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))} />
                           </td>
                           <td className="px-2 py-1.5">
                             <select
@@ -633,10 +633,10 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
                             </select>
                           </td>
                           <td className="px-2 py-1.5">
-                            <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} step={0.01} value={item.precioUnitario} onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))} />
+                            <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" type="number" min={0} step={0.01} value={item.precioUnitario} onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))} />
                           </td>
                           <td className="px-2 py-1.5">
-                            <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} max={100} value={item.descuento} onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))} />
+                            <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" type="number" min={0} max={100} value={item.descuento} onChange={(e) => updateItem(idx, 'descuento', Number(e.target.value))} />
                           </td>
                           <td className="px-3 py-1.5 text-right text-gray-700 font-medium">{formatARS(getSubtotal(item))}</td>
                           <td className="px-1 py-1.5">
