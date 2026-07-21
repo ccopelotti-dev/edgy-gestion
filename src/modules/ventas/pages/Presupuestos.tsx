@@ -10,11 +10,13 @@ import {
   ChevronDown,
   ChevronUp,
   Edit2,
+  Check,
   CheckCircle2,
   XCircle,
   Link2,
   Calendar,
   FileText,
+  Receipt,
   Download,
   Loader2,
   Mail,
@@ -34,7 +36,7 @@ import {
   Amount,
   EmptyState,
 } from '../components/ventas/display';
-import { PresupuestoDialog } from '../components/ventas/dialogs';
+import { PresupuestoDialog, ComprobanteDialog } from '../components/ventas/dialogs';
 import {
   formatDate,
   formatARS,
@@ -49,6 +51,10 @@ import type {
   EstadoPresupuesto,
   TipoOrden,
   Cliente,
+  TipoComprobante,
+  MedioPago,
+  ModoEmision,
+  ComprobanteItem,
 } from '../types';
 import {
   ESTADO_PRESUPUESTO_LABEL,
@@ -85,6 +91,13 @@ export default function Presupuestos() {
   // "Presupuesto" en vez de Factura/Recibo.
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+
+  // "Facturar directamente": convierte un presupuesto confirmado ('enviado')
+  // en un comprobante sin pasar por una Orden en el medio -- mismo criterio
+  // que "Facturar" desde Ordenes.tsx (ComprobanteDialog prefilleado), pero
+  // acá se precarga desde el Presupuesto en vez de la Orden.
+  const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
+  const [presupuestoParaFacturar, setPresupuestoParaFacturar] = useState<Presupuesto | null>(null);
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -161,6 +174,78 @@ export default function Presupuestos() {
       type: 'CONVERTIR_PRESUPUESTO_A_ORDEN',
       payload: { presupuestoId, tipoOrden },
     });
+  };
+
+  // Confirma un presupuesto en borrador (pasa a 'enviado') sin necesidad de
+  // mandarlo por email/WhatsApp -- desbloquea "Aprobar y crear orden" y
+  // "Facturar directamente". Reutiliza el mismo dispatch que ya usaba el
+  // envío automático (marcarEnviadoSiBorrador, ver abajo).
+  const handleConfirmar = (id: string) => {
+    dispatch({
+      type: 'CAMBIAR_ESTADO_PRESUPUESTO',
+      payload: { id, nuevoEstado: 'enviado' },
+    });
+  };
+
+  const handleFacturar = (pres: Presupuesto) => {
+    setPresupuestoParaFacturar(pres);
+    setComprobanteDialogOpen(true);
+  };
+
+  // Mismo criterio simplificado que Ordenes.tsx (handleSaveComprobante):
+  // arma el Comprobante directo desde los datos del diálogo, sin pasar por
+  // Orden. El presupuesto queda 'aprobado' (mismo estado final que si se
+  // hubiera convertido a orden) para reflejar que ya se resolvió.
+  const handleSaveComprobante = (data: {
+    tipo: TipoComprobante;
+    clienteId: string;
+    fecha: string;
+    medioPago: MedioPago;
+    modoEmision: ModoEmision;
+    items: Omit<ComprobanteItem, 'id'>[];
+    descuentoGeneral: number;
+  }) => {
+    const items: ComprobanteItem[] = data.items.map((i) => ({
+      ...i,
+      id: generarId(),
+    }));
+
+    const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
+    const montoIva = items.reduce((s, i) => s + i.montoIva, 0);
+    const totalBruto = subtotal + montoIva;
+    const total = totalBruto * (1 - data.descuentoGeneral / 100);
+
+    dispatch({
+      type: 'ADD_COMPROBANTE',
+      payload: {
+        id: generarId(),
+        tipo: data.tipo,
+        modoEmision: data.modoEmision,
+        clienteId: data.clienteId,
+        fecha: data.fecha,
+        items,
+        subtotal,
+        descuentoGeneral: data.descuentoGeneral,
+        montoIva,
+        total,
+        estado: 'emitido',
+        medioPago: data.medioPago,
+        montoCobrado: 0,
+        saldoPendiente: total,
+        createdAt: nowISO(),
+        updatedAt: nowISO(),
+      },
+    });
+
+    if (presupuestoParaFacturar) {
+      dispatch({
+        type: 'CAMBIAR_ESTADO_PRESUPUESTO',
+        payload: { id: presupuestoParaFacturar.id, nuevoEstado: 'aprobado' },
+      });
+    }
+
+    setComprobanteDialogOpen(false);
+    setPresupuestoParaFacturar(null);
   };
 
   const handleToggleExpand = (id: string) => {
@@ -321,7 +406,9 @@ export default function Presupuestos() {
                     onToggleExpand={() => handleToggleExpand(pres.id)}
                     onEditar={() => handleEditar(pres)}
                     onCancelar={() => handleCancelar(pres.id)}
+                    onConfirmar={() => handleConfirmar(pres.id)}
                     onAprobar={(tipo) => handleAprobar(pres.id, tipo)}
+                    onFacturar={() => handleFacturar(pres)}
                     onDescargarPdf={() => handleDescargarPdf(pres)}
                     generandoPdf={generandoPdfId === pres.id}
                     onEnviarEmail={() => handleEnviarEmail(pres, cliente)}
@@ -344,6 +431,7 @@ export default function Presupuestos() {
         clientes={clientes}
         presupuesto={editPresupuesto ?? undefined}
         validezDefault={config.validezPresupuestoDias}
+        onConfirmar={handleConfirmar}
         onSave={(data) => {
           const now = nowISO();
           const items: PresupuestoItem[] = data.items.map((it) => ({
@@ -401,6 +489,21 @@ export default function Presupuestos() {
           setEditPresupuesto(null);
         }}
       />
+
+      {/* Facturar directamente (sin pasar por Orden) */}
+      {comprobanteDialogOpen && presupuestoParaFacturar && (
+        <ComprobanteDialog
+          open={comprobanteDialogOpen}
+          onOpenChange={(open) => {
+            setComprobanteDialogOpen(open);
+            if (!open) setPresupuestoParaFacturar(null);
+          }}
+          clientes={clientes}
+          presupuesto={presupuestoParaFacturar}
+          onSave={handleSaveComprobante}
+          modoEmisionDefault={config.modoEmisionDefault}
+        />
+      )}
     </div>
   );
 }
@@ -416,7 +519,9 @@ interface PresupuestoRowProps {
   onToggleExpand: () => void;
   onEditar: () => void;
   onCancelar: () => void;
+  onConfirmar: () => void;
   onAprobar: (tipo: TipoOrden) => void;
+  onFacturar: () => void;
   onDescargarPdf: () => void;
   generandoPdf: boolean;
   onEnviarEmail: () => void;
@@ -432,7 +537,9 @@ function PresupuestoRow({
   onToggleExpand,
   onEditar,
   onCancelar,
+  onConfirmar,
   onAprobar,
+  onFacturar,
   onDescargarPdf,
   generandoPdf,
   onEnviarEmail,
@@ -493,6 +600,9 @@ function PresupuestoRow({
             </button>
             {p.estado === 'borrador' && (
               <>
+                <button onClick={onConfirmar} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Confirmar presupuesto">
+                  <Check className="h-3.5 w-3.5" />
+                </button>
                 <button onClick={onEditar} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Editar">
                   <Edit2 className="h-3.5 w-3.5" />
                 </button>
@@ -505,6 +615,9 @@ function PresupuestoRow({
               <>
                 <button onClick={() => onAprobar('pedido')} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Aprobar y crear orden">
                   <CheckCircle2 className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={onFacturar} className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg" title="Facturar directamente">
+                  <Receipt className="h-3.5 w-3.5" />
                 </button>
                 <button onClick={onCancelar} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Cancelar">
                   <XCircle className="h-3.5 w-3.5" />

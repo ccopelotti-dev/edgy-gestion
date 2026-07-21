@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2, Search, ShieldCheck, Tag } from 'lucide-react';
+import { X, Plus, Trash2, Search, ShieldCheck, Tag, Check } from 'lucide-react';
 
 import type {
   Cliente,
@@ -344,6 +344,12 @@ interface ComprobanteDialogProps {
    * ComprobanteCompraDialog.ordenCompra en Compras). Sin esto, el modal
    * arranca en blanco (alta manual, como siempre). */
   orden?: Orden;
+  /** Si se abre desde "Facturar directamente" en un Presupuesto ya
+   * confirmado (estado 'enviado'), precarga cliente + items desde ahí --
+   * mismo criterio que `orden` arriba, para el caso en que el operador
+   * quiere pasar de presupuesto a factura sin generar una Orden en el
+   * medio. Se ignora si `orden` también está presente. */
+  presupuesto?: Presupuesto;
   onSave: (data: {
     tipo: TipoComprobante;
     clienteId: string;
@@ -426,6 +432,7 @@ export function ComprobanteDialog({
   onOpenChange,
   clientes,
   orden,
+  presupuesto,
   onSave,
   modoEmisionDefault,
 }: ComprobanteDialogProps) {
@@ -480,12 +487,28 @@ export function ComprobanteDialog({
               }))
             : [newItemRow()],
         );
+      } else if (presupuesto) {
+        setClienteId(clientes.some((c) => c.id === presupuesto.clienteId) ? presupuesto.clienteId : '');
+        setDescuentoGeneral(presupuesto.descuentoGeneral);
+        setItems(
+          presupuesto.items.length
+            ? presupuesto.items.map((it) => ({
+                key: generarId(),
+                descripcion: it.descripcion,
+                cantidad: it.cantidad,
+                precioUnitario: it.precioUnitario,
+                descuento: it.descuento,
+                alicuotaIva: 21,
+                productoId: it.productoId || undefined,
+              }))
+            : [newItemRow()],
+        );
       } else {
         setClienteId('');
         setItems([newItemRow()]);
       }
     }
-  }, [open, modoEmisionDefault, orden, clientes]);
+  }, [open, modoEmisionDefault, orden, presupuesto, clientes]);
 
   useEffect(() => {
     if (!open || !clienteTenant?.id) return;
@@ -1264,6 +1287,12 @@ interface PresupuestoDialogProps {
     descuentoGeneral: number;
   }) => void;
   validezDefault: number;
+  /** Confirma el presupuesto (borrador -> enviado) sin salir del modal --
+   * mismo criterio que el botón "Confirmar" agregado en la columna
+   * Acciones del listado, para no obligar al operador a cerrar y volver a
+   * abrir para desbloquear "Aprobar y crear orden" / "Facturar". Solo se
+   * muestra editando un presupuesto existente en estado 'borrador'. */
+  onConfirmar?: (id: string) => void;
 }
 
 interface PresupuestoItemRow {
@@ -1319,6 +1348,7 @@ export function PresupuestoDialog({
   presupuesto,
   onSave,
   validezDefault,
+  onConfirmar,
 }: PresupuestoDialogProps) {
   const [clienteId, setClienteId] = useState('');
   const [fecha, setFecha] = useState(todayISO());
@@ -1714,11 +1744,28 @@ export function PresupuestoDialog({
           </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
-            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
-            <button className={btnPrimary} onClick={handleSave}>
-              Guardar
-            </button>
+          <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100">
+            {presupuesto && presupuesto.estado === 'borrador' && onConfirmar ? (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                onClick={() => {
+                  onConfirmar(presupuesto.id);
+                  onOpenChange(false);
+                }}
+                title="Confirma el presupuesto para poder aprobarlo y crear una orden, o facturarlo directamente"
+              >
+                <Check className="h-4 w-4" />
+                Confirmar presupuesto
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex justify-end gap-3">
+              <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+              <button className={btnPrimary} onClick={handleSave}>
+                Guardar
+              </button>
+            </div>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
