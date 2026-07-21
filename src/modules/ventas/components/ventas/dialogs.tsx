@@ -350,6 +350,17 @@ interface ComprobanteDialogProps {
    * quiere pasar de presupuesto a factura sin generar una Orden en el
    * medio. Se ignora si `orden` también está presente. */
   presupuesto?: Presupuesto;
+  /** "Facturar directamente" desde un Presupuesto (y "Facturar" desde una
+   * Orden) solo tiene sentido como Factura -- no tiene sentido ofrecer acá
+   * Nota de crédito/débito/Recibo, que son operaciones sobre un comprobante
+   * ya emitido, no una forma de facturar. Con esto en true se oculta el
+   * selector de Tipo (queda fijo en 'factura') y solo se deja elegir el
+   * modo de emisión (Interno -- se muestra como "Nota de entrega" hasta que
+   * se conecte ARCA -- o Electrónica). No hay todavía un selector de punto
+   * de venta o tiqueadora fiscal por comprobante: el punto de venta es un
+   * dato fijo de la configuración ARCA de la empresa (Configuración >
+   * Empresa), no algo que se elija acá. */
+  soloFactura?: boolean;
   onSave: (data: {
     tipo: TipoComprobante;
     clienteId: string;
@@ -433,6 +444,7 @@ export function ComprobanteDialog({
   clientes,
   orden,
   presupuesto,
+  soloFactura = false,
   onSave,
   modoEmisionDefault,
 }: ComprobanteDialogProps) {
@@ -722,19 +734,25 @@ export function ComprobanteDialog({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>Tipo</label>
-                <select
-                  className={selectClass}
-                  value={tipo}
-                  onChange={(e) => setTipo(e.target.value as TipoComprobante)}
-                >
-                  {(Object.keys(TIPO_COMPROBANTE_LABEL) as TipoComprobante[]).map(
-                    (val) => (
-                      <option key={val} value={val}>
-                        {labelTipoComprobante(val, modoEmision)}
-                      </option>
-                    ),
-                  )}
-                </select>
+                {soloFactura ? (
+                  <div className={`${selectClass} flex items-center bg-gray-50 text-gray-500`}>
+                    {labelTipoComprobante('factura', modoEmision)}
+                  </div>
+                ) : (
+                  <select
+                    className={selectClass}
+                    value={tipo}
+                    onChange={(e) => setTipo(e.target.value as TipoComprobante)}
+                  >
+                    {(Object.keys(TIPO_COMPROBANTE_LABEL) as TipoComprobante[]).map(
+                      (val) => (
+                        <option key={val} value={val}>
+                          {labelTipoComprobante(val, modoEmision)}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                )}
               </div>
               <div>
                 <label className={labelClass}>Cliente *</label>

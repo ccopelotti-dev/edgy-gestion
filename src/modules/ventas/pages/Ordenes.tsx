@@ -650,6 +650,7 @@ export default function Ordenes() {
           }}
           clientes={clientes}
           orden={ordenParaFacturar}
+          soloFactura
           onSave={handleSaveComprobante}
           modoEmisionDefault={config.modoEmisionDefault}
         />

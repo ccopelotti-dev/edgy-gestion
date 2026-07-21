@@ -500,6 +500,7 @@ export default function Presupuestos() {
           }}
           clientes={clientes}
           presupuesto={presupuestoParaFacturar}
+          soloFactura
           onSave={handleSaveComprobante}
           modoEmisionDefault={config.modoEmisionDefault}
         />
