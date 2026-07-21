@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Trash2, ShieldCheck, QrCode, Download, Loader2 } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  ShieldCheck,
+  QrCode,
+  Download,
+  Loader2,
+  Share2,
+  Copy,
+  Check,
+  ExternalLink,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -12,6 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { usePedidosDelivery, useDeliveryWhatsapp } from '../data/store'
@@ -67,6 +85,25 @@ export default function Index() {
   const [notas, setNotas] = useState('')
   const [items, setItems] = useState<ItemPedidoDelivery[]>([{ ...ITEM_VACIO }])
   const [busquedaProducto, setBusquedaProducto] = useState('')
+
+  // Fase 22c: en vez de reimplementar un catálogo propio, se comparte
+  // acá el link/QR del Catálogo Público ya existente (Menú QR --
+  // src/modules/menu-qr/pages/Index.tsx) para que el operador se lo
+  // pase al cliente que se comunicó por WhatsApp. Mismo patrón
+  // (publicUrl + qrserver.com) que esa página.
+  const [mostrarCatalogo, setMostrarCatalogo] = useState(false)
+  const [copiadoLink, setCopiadoLink] = useState(false)
+  const publicUrl = cliente?.slug ? `${window.location.origin}/menu/${cliente.slug}` : null
+  const qrUrl = publicUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(publicUrl)}`
+    : null
+
+  async function copiarLinkCatalogo() {
+    if (!publicUrl) return
+    await navigator.clipboard.writeText(publicUrl)
+    setCopiadoLink(true)
+    setTimeout(() => setCopiadoLink(false), 2000)
+  }
 
   // Fase 8 (cierre): ícono de descarga de PDF por fila, mismo criterio
   // que Ventas/Compras (Fase 17) -- un pedido de Delivery todavía no
@@ -191,11 +228,57 @@ export default function Index() {
             Menú QR también aparecen acá, marcados como "Desde Menú QR".
           </p>
         </div>
-        <Button onClick={() => setMostrarForm((v) => !v)}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          Nuevo pedido
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setMostrarCatalogo(true)}>
+            <Share2 className="mr-1.5 h-4 w-4" />
+            Compartir catálogo
+          </Button>
+          <Button onClick={() => setMostrarForm((v) => !v)}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            Nuevo pedido
+          </Button>
+        </div>
       </div>
+
+      <Dialog open={mostrarCatalogo} onOpenChange={setMostrarCatalogo}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Catálogo para el cliente</DialogTitle>
+            <DialogDescription>
+              Mandale este link (o el QR) al cliente que se comunicó -- arma su pedido solo desde
+              el Catálogo Público y aparece acá marcado como "Desde Menú QR".
+            </DialogDescription>
+          </DialogHeader>
+          {publicUrl && qrUrl ? (
+            <div className="flex flex-col items-center gap-4">
+              <img
+                src={qrUrl}
+                alt="Código QR del catálogo"
+                className="h-44 w-44 rounded-md border"
+              />
+              <div className="flex w-full items-center gap-2">
+                <code className="flex-1 truncate rounded-md border bg-gray-50 px-3 py-2 text-sm">
+                  {publicUrl}
+                </code>
+                <Button variant="outline" size="sm" onClick={copiarLinkCatalogo}>
+                  {copiadoLink ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+              <a href={publicUrl} target="_blank" rel="noreferrer" className="w-full">
+                <Button variant="outline" className="w-full">
+                  <ExternalLink className="mr-1.5 h-4 w-4" />
+                  Abrir catálogo
+                </Button>
+              </a>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              Todavía no tenés un identificador público configurado. Entrá a Menú QR para
+              activarlo -- de ahí sale el mismo link que se comparte acá.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {mostrarForm && (
         <Card>
