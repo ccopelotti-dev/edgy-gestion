@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Plus,
   Trash2,
@@ -11,6 +11,12 @@ import {
   Copy,
   Check,
   ExternalLink,
+  Play,
+  PackageCheck,
+  CheckCircle2,
+  XCircle,
+  MessageCircle,
+  ClipboardList,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -38,6 +44,8 @@ import type { ItemPedidoDelivery, PedidoDelivery } from '../types'
 import { useCatalogoDelivery, etiquetaVarianteDelivery, type ProductoCatalogoDelivery } from '../lib/catalogoDelivery'
 import { descargarPedidoPdf } from '../lib/pdfPedido'
 import { EstadoOrdenBadge } from '@/modules/ventas/components/ventas/display'
+import type { EstadoOrden } from '@/modules/ventas/types'
+import { armarLinkWhatsapp } from '@/lib/whatsapp'
 
 interface ClienteVentaLite {
   id: string
@@ -121,6 +129,13 @@ export default function Index() {
     } finally {
       setGenerandoPdfId(null)
     }
+  }
+
+  // Fase 22e: iconos rápidos de la columna Acciones -- avanzar el
+  // estado de un pedido sin tener que entrar al detalle ni saltar a
+  // Comandas. Ver CAMBIAR_ESTADO_PEDIDO en data/store.tsx.
+  function handleCambiarEstadoPedido(pedidoId: string, nuevoEstado: EstadoOrden) {
+    dispatch({ type: 'CAMBIAR_ESTADO_PEDIDO', payload: { pedidoId, nuevoEstado } })
   }
 
   useEffect(() => {
@@ -481,7 +496,7 @@ export default function Index() {
                 <th className="px-3 py-2">Dirección</th>
                 <th className="px-3 py-2 text-right">Total</th>
                 <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2" />
+                <th className="px-3 py-2 font-medium whitespace-nowrap">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -510,23 +525,13 @@ export default function Index() {
                     <td className="px-3 py-2">
                       <EstadoOrdenBadge estado={p.estado} tipo="pedido" />
                     </td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          e.preventDefault()
-                          handleDescargarPdf(p)
-                        }}
-                        disabled={generandoPdfId === p.id}
-                        title="Descargar PDF"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                      >
-                        {generandoPdfId === p.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4" />
-                        )}
-                      </button>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <PedidoAcciones
+                        pedido={p}
+                        onCambiarEstado={(estado) => handleCambiarEstadoPedido(p.id, estado)}
+                        onDescargarPdf={() => handleDescargarPdf(p)}
+                        generandoPdf={generandoPdfId === p.id}
+                      />
                     </td>
                   </tr>
                 ))
@@ -547,7 +552,7 @@ export default function Index() {
                   <th className="px-3 py-2">Fecha</th>
                   <th className="px-3 py-2 text-right">Total</th>
                   <th className="px-3 py-2">Estado</th>
-                  <th className="px-3 py-2" />
+                  <th className="px-3 py-2 font-medium whitespace-nowrap">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -569,23 +574,13 @@ export default function Index() {
                     <td className="px-3 py-2">
                       <EstadoOrdenBadge estado={p.estado} tipo="pedido" />
                     </td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          e.preventDefault()
-                          handleDescargarPdf(p)
-                        }}
-                        disabled={generandoPdfId === p.id}
-                        title="Descargar PDF"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                      >
-                        {generandoPdfId === p.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4" />
-                        )}
-                      </button>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <PedidoAcciones
+                        pedido={p}
+                        onCambiarEstado={(estado) => handleCambiarEstadoPedido(p.id, estado)}
+                        onDescargarPdf={() => handleDescargarPdf(p)}
+                        generandoPdf={generandoPdfId === p.id}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -594,6 +589,94 @@ export default function Index() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Columna Acciones ────────────────────────────────────────
+
+// Fase 22e: iconos rápidos por fila -- avanzar de estado sin entrar al
+// detalle, contactar por WhatsApp, saltar a Comandas (donde se
+// gestiona facturación/despacho) y descargar el PDF, que ya existía.
+// Mismo criterio visual que la columna Acciones de Comandas
+// (Ordenes.tsx): botones ícono con color propio por acción.
+function PedidoAcciones({
+  pedido,
+  onCambiarEstado,
+  onDescargarPdf,
+  generandoPdf,
+}: {
+  pedido: PedidoDelivery
+  onCambiarEstado: (estado: EstadoOrden) => void
+  onDescargarPdf: () => void
+  generandoPdf: boolean
+}) {
+  const navigate = useNavigate()
+
+  return (
+    <div className="flex items-center justify-center gap-0.5">
+      {pedido.estado === 'pendiente' && (
+        <>
+          <button
+            onClick={() => onCambiarEstado('en_preparacion')}
+            title="Iniciar preparación"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"
+          >
+            <Play className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => onCambiarEstado('cancelado')}
+            title="Cancelar pedido"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600"
+          >
+            <XCircle className="h-3.5 w-3.5" />
+          </button>
+        </>
+      )}
+      {pedido.estado === 'en_preparacion' && (
+        <button
+          onClick={() => onCambiarEstado('terminado')}
+          title="Marcar terminado"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-teal-50 hover:text-teal-600"
+        >
+          <PackageCheck className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {(pedido.estado === 'terminado' || pedido.estado === 'entregado_parcial') && (
+        <button
+          onClick={() => onCambiarEstado('entregado')}
+          title="Marcar entregado"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-emerald-50 hover:text-emerald-600"
+        >
+          <CheckCircle2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {pedido.telefono && (
+        <a
+          href={armarLinkWhatsapp(pedido.telefono, '')}
+          target="_blank"
+          rel="noreferrer"
+          title="Contactar por WhatsApp"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-green-50 hover:text-green-600"
+        >
+          <MessageCircle className="h-3.5 w-3.5" />
+        </a>
+      )}
+      <button
+        onClick={() => navigate('/m/ventas/ordenes')}
+        title="Ir a Comandas"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-sky-50 hover:text-sky-600"
+      >
+        <ClipboardList className="h-3.5 w-3.5" />
+      </button>
+      <button
+        onClick={onDescargarPdf}
+        disabled={generandoPdf}
+        title="Descargar PDF"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+      >
+        {generandoPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+      </button>
     </div>
   )
 }

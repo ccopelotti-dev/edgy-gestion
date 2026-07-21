@@ -24,6 +24,16 @@
 // deprecado, no se lee más (la columna sigue en la tabla por si hace
 // falta para otra cosa a futuro, pero no tiene efecto en la UI).
 //
+// Fase 22e: para que el operador de WhatsApp no tenga que saltar a
+// Comandas por cada cambio de estado (iniciar preparación, terminado,
+// entregado), se suma acá `CAMBIAR_ESTADO_PEDIDO` -- misma idea que
+// `CANCELAR_PEDIDO`: actualiza `ordenes_venta.estado` directo por
+// Supabase (no pasa por el context/reducer de Ventas, que ni siquiera
+// está montado en este módulo -- ver `VentasProvider` en
+// `ventas/index.tsx`, aislado del de acá). Comandas sigue siendo dueña
+// de la lógica de facturación/despacho -- esto solo evita la vuelta
+// para el 90% de los pedidos que solo necesitan avanzar de estado.
+//
 // Los pedidos generados desde el Catálogo Público (src/pages/
 // MenuPublico.tsx) se insertan directo vía la función SQL
 // crear_orden_venta_publica -- no pasan por este reducer/dispatch en
@@ -78,6 +88,7 @@ type Action =
       }
     }
   | { type: 'CANCELAR_PEDIDO'; payload: { pedidoId: string } }
+  | { type: 'CAMBIAR_ESTADO_PEDIDO'; payload: { pedidoId: string; nuevoEstado: EstadoOrden } }
   | { type: 'SET_STATE'; payload: DeliveryWhatsappState }
 
 function reducer(state: DeliveryWhatsappState, action: Action): DeliveryWhatsappState {
@@ -111,6 +122,14 @@ function reducer(state: DeliveryWhatsappState, action: Action): DeliveryWhatsapp
         ...state,
         pedidos: state.pedidos.map((p) =>
           p.id === action.payload.pedidoId ? { ...p, estado: 'cancelado' as const } : p,
+        ),
+      }
+
+    case 'CAMBIAR_ESTADO_PEDIDO':
+      return {
+        ...state,
+        pedidos: state.pedidos.map((p) =>
+          p.id === action.payload.pedidoId ? { ...p, estado: action.payload.nuevoEstado } : p,
         ),
       }
 
@@ -218,6 +237,18 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
         .update({ estado: 'cancelado' })
         .eq('id', action.payload.pedidoId)
         .then(logErr('cancelación de pedido'))
+      return
+    }
+    case 'CAMBIAR_ESTADO_PEDIDO': {
+      const p = nextState.pedidos.find((x) => x.id === action.payload.pedidoId)
+      if (!p) return
+      const patch: Record<string, unknown> = { estado: action.payload.nuevoEstado }
+      if (action.payload.nuevoEstado === 'entregado') patch.fecha_completada = new Date().toISOString()
+      supabase
+        .from('ordenes_venta')
+        .update(patch)
+        .eq('id', p.ordenVentaId)
+        .then(logErr('cambio de estado del pedido'))
       return
     }
     default:
