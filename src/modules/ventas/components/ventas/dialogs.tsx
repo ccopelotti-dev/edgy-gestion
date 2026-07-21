@@ -33,6 +33,8 @@ import {
   labelTipoComprobante,
   MEDIO_PAGO_LABEL,
   PROVEEDOR_LOGISTICA_LABEL,
+  CONSUMIDOR_FINAL_ID,
+  clienteConsumidorFinal,
 } from '../../types';
 
 import { formatARS, todayISO } from '../../lib/format';
@@ -484,10 +486,17 @@ export function ComprobanteDialog({
       setIntentoGuardar(false);
       setBusquedaProducto('');
       if (orden) {
-        // Si el cliente de la orden no tiene un Cliente formal vinculado
-        // (pedido de invitado/canal externo), se deja en blanco para que
-        // el operador lo complete a mano -- ver contactoNombre/Telefono.
-        setClienteId(clientes.some((c) => c.id === orden.clienteId) ? orden.clienteId : '');
+        // Fase 22f: si el cliente de la orden no tiene un Cliente formal
+        // vinculado (pedido de invitado/canal externo -- Ventas Online,
+        // Menú QR), se prefillea "Consumidor Final" en vez de dejarlo en
+        // blanco -- mismo patrón ya usado en PuntoDeVenta.tsx y
+        // cerrarComandaVenta.ts -- para no bloquear el Guardar. El
+        // nombre/dirección/teléfono reales de contacto se muestran aparte
+        // (ver bloque debajo del selector, con orden.contactoNombre/
+        // contactoTelefono/direccionEntrega).
+        setClienteId(
+          clientes.some((c) => c.id === orden.clienteId) ? orden.clienteId : CONSUMIDOR_FINAL_ID,
+        );
         setItems(
           orden.items.length
             ? orden.items.map((it) => ({
@@ -767,6 +776,11 @@ export function ComprobanteDialog({
                   }}
                 >
                   <option value="">Seleccionar...</option>
+                  {/* Fase 22f: al facturar desde una Orden sin Cliente
+                      formal vinculado, se ofrece "Consumidor Final" --
+                      mismo cliente virtual (no persiste en Supabase) que
+                      ya usa PuntoDeVenta.tsx. */}
+                  {orden && <option value={CONSUMIDOR_FINAL_ID}>{clienteConsumidorFinal.nombre}</option>}
                   {clientes.map((c) => (
                     <option key={c.id} value={c.id}>{c.nombre}</option>
                   ))}
@@ -774,6 +788,37 @@ export function ComprobanteDialog({
                 {errors.clienteId && <p className="text-xs text-red-600 mt-1">{errors.clienteId}</p>}
               </div>
             </div>
+
+            {/* Fase 22f: datos de contacto de la comanda -- útiles para
+                confirmar a quién y adónde se factura/entrega, sobre todo
+                cuando no hay Cliente formal vinculado (arriba queda
+                "Consumidor Final"). No se persisten en el comprobante en
+                sí (Comprobante no tiene estos campos), es solo para
+                referencia del operador en este momento. */}
+            {orden && (orden.contactoNombre || orden.contactoTelefono || orden.direccionEntrega) && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Datos de la comanda
+                </h4>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-700">
+                  {orden.contactoNombre && (
+                    <span>
+                      Cliente: <span className="font-medium">{orden.contactoNombre}</span>
+                    </span>
+                  )}
+                  {orden.direccionEntrega && (
+                    <span>
+                      Dirección: <span className="font-medium">{orden.direccionEntrega}</span>
+                    </span>
+                  )}
+                  {orden.contactoTelefono && (
+                    <span>
+                      Teléfono: <span className="font-medium">{orden.contactoTelefono}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-3">
               <div>
