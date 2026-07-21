@@ -30,7 +30,7 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   'mesas-salon': Armchair,
   'comandas-cocina': ChefHat,
   'menu-qr': QrCode,
-  'delivery-whatsapp': Truck,
+  'ventas-online': Truck,
   'caja-turno': Banknote,
   viandas: Soup,
   configuracion: Settings,

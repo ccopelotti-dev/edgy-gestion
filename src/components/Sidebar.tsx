@@ -30,7 +30,7 @@ const ORDEN_PRINCIPALES = [
   'mesas-salon',
   'comandas-cocina',
   'menu-qr',
-  'delivery-whatsapp',
+  'ventas-online',
   'caja-turno',
   'reportes',
   'contable',

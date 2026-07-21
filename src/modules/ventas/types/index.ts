@@ -154,7 +154,7 @@ export interface Orden {
   notas?: string;
 
   // Trazabilidad de origen (verticales y canales externos)
-  origenModulo?: string;          // 'delivery-whatsapp', 'mesas-salon', etc.
+  origenModulo?: string;          // 'ventas-online', 'mesas-salon', etc.
   origenId?: string;              // ID en el módulo de origen
   origenCanal?: string;           // 'mercadolibre', 'tiendanube', etc.
   origenExternoId?: string;       // ID en la plataforma externa

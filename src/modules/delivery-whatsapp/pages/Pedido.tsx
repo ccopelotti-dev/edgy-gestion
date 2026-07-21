@@ -53,7 +53,7 @@ export default function Pedido() {
     return (
       <div className="flex flex-col items-center gap-3 py-12 text-center">
         <p className="text-muted-foreground">No se encontró el pedido.</p>
-        <Button variant="outline" onClick={() => navigate('/m/delivery-whatsapp')}>
+        <Button variant="outline" onClick={() => navigate('/m/ventas-online')}>
           <ArrowLeft className="mr-1.5 h-4 w-4" />
           Volver
         </Button>
@@ -98,7 +98,7 @@ export default function Pedido() {
     if (!pedido) return
     if (!window.confirm('¿Cancelar este pedido?')) return
     dispatch({ type: 'CANCELAR_PEDIDO', payload: { pedidoId: pedido.id } })
-    navigate('/m/delivery-whatsapp')
+    navigate('/m/ventas-online')
   }
 
   const activo = pedido.estado === 'pendiente' || pedido.estado === 'en_camino'
@@ -107,9 +107,9 @@ export default function Pedido() {
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between">
         <div>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/m/delivery-whatsapp')} className="mb-1 -ml-2">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/m/ventas-online')} className="mb-1 -ml-2">
             <ArrowLeft className="mr-1.5 h-4 w-4" />
-            Delivery
+            Ventas Online
           </Button>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             {pedido.clienteNombre}

@@ -1,5 +1,5 @@
 // ============================================================
-// Módulo Delivery por WhatsApp — Catálogo de productos
+// Módulo Ventas Online (antes "Delivery por WhatsApp") — Catálogo de productos
 // Edgy Gestión · Fase 6d del refactor de Productos
 //
 // Mismo criterio que cargarCatalogo() en Ventas/PuntoDeVenta.tsx

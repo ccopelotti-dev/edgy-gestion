@@ -80,7 +80,7 @@ export default function Index() {
     try {
       await descargarPedidoPdf(cliente, pedido)
     } catch (err) {
-      console.error('Delivery WhatsApp · error generando el PDF del pedido:', err)
+      console.error('Ventas Online · error generando el PDF del pedido:', err)
     } finally {
       setGenerandoPdfId(null)
     }
@@ -180,7 +180,7 @@ export default function Index() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Delivery por WhatsApp</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Ventas Online</h1>
           <p className="text-muted-foreground text-sm">
             Cargá acá los pedidos que te llegan por WhatsApp para hacer el seguimiento de entrega y
             que se reflejen en Ventas y Tesorería. Los pedidos que el cliente arma solo desde el

@@ -1,5 +1,5 @@
 // ============================================================
-// Módulo Delivery por WhatsApp — descarga de PDF del pedido
+// Módulo Ventas Online (antes "Delivery por WhatsApp") — descarga de PDF del pedido
 // Edgy Gestión · Fase 8 (cierre)
 //
 // Mismo motor compartido (src/lib/comprobantes-pdf) y mismo criterio
@@ -29,7 +29,7 @@ function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
   }
 }
 
-/** Descarga el PDF de un pedido de Delivery por WhatsApp -- incluye
+/** Descarga el PDF de un pedido de Ventas Online -- incluye
  * los que llegaron solos desde el Menú QR (`origen === 'menu_qr'`).
  * `numero` puede faltar en un pedido recién creado a mano que todavía
  * no se releyó de Supabase -- en ese caso el número queda en 0 hasta

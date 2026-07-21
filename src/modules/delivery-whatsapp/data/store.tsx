@@ -1,5 +1,5 @@
 // ============================================================
-// Módulo Delivery por WhatsApp — State Management
+// Módulo Ventas Online (antes "Delivery por WhatsApp") — State Management
 // Edgy Gestión · Context + useReducer + Supabase
 //
 // Retrofit (post Fase 8b/8c): las Fases 8a-8c se construyeron sobre
@@ -158,7 +158,7 @@ function ordenVentaToRow(p: PedidoDelivery, clienteId: string, numero: number) {
     descuento_general: 0,
     total: p.total,
     notas: p.notas ?? null,
-    origen_modulo: 'delivery-whatsapp',
+    origen_modulo: 'ventas-online',
     origen_canal: 'operador',
   }
 }
@@ -189,7 +189,7 @@ async function proximoNumeroOrden(clienteId: string): Promise<number> {
 }
 
 function logErr(label: string) {
-  return ({ error }: { error: unknown }) => error && console.error(`Delivery WhatsApp · error en ${label}:`, error)
+  return ({ error }: { error: unknown }) => error && console.error(`Ventas Online · error en ${label}:`, error)
 }
 
 function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, clienteId: string) {
@@ -207,14 +207,14 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
           .from('ordenes_venta')
           .insert(ordenVentaToRow(p, clienteId, numero))
         if (errOrden) {
-          console.error('Delivery WhatsApp · error en alta de orden_venta:', errOrden)
+          console.error('Ventas Online · error en alta de orden_venta:', errOrden)
           return
         }
         if (p.items.length) {
           const { error: errItems } = await supabase
             .from('orden_venta_items')
             .insert(p.items.map((i) => itemToRow(i, p.ordenVentaId)))
-          if (errItems) console.error('Delivery WhatsApp · error en ítems de la orden:', errItems)
+          if (errItems) console.error('Ventas Online · error en ítems de la orden:', errItems)
         }
         const { error: errExt } = await supabase.from('pedidos_delivery').insert({
           id: p.id,
@@ -223,7 +223,7 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
           direccion: p.direccion,
           modalidad: 'delivery',
         })
-        if (errExt) console.error('Delivery WhatsApp · error en alta de extensión logística:', errExt)
+        if (errExt) console.error('Ventas Online · error en alta de extensión logística:', errExt)
       })()
       return
     }

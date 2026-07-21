@@ -1,4 +1,4 @@
-// Módulo Delivery por WhatsApp — tipos.
+// Módulo Ventas Online (antes "Delivery por WhatsApp") — tipos.
 //
 // Scope acordado: "Registro manual del pedido" -- el operador recibe
 // el pedido por WhatsApp fuera del sistema y lo carga acá a mano. No

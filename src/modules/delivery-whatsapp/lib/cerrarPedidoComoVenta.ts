@@ -1,10 +1,10 @@
 // ============================================================
 // Entrega de pedido de delivery -> Venta real
-// Edgy Gestión · Delivery por WhatsApp
+// Edgy Gestión · Ventas Online (antes "Delivery por WhatsApp")
 //
 // Al marcar un pedido como entregado (cobro confirmado) se genera el
 // Comprobante real en Ventas (tipo 'factura', origenModulo:
-// 'delivery-whatsapp', origenId: pedido.id) y se refleja el cobro en
+// 'ventas-online', origenId: pedido.id) y se refleja el cobro en
 // Tesorería vía registrarMovimientoTesoreria -- mismo patrón que
 // cerrarComandaVenta.ts en comandas-cocina. Se escribe directo contra
 // Supabase, sin pasar por VentasProvider ni TesoreriaProvider
@@ -161,18 +161,18 @@ export async function cerrarPedidoComoVenta(
     saldo_pendiente: 0,
     afip: null,
     notas: null,
-    origen_modulo: 'delivery-whatsapp',
+    origen_modulo: 'ventas-online',
     origen_id: pedido.id,
   })
 
   if (errComprobante) {
-    console.error('Delivery WhatsApp · error creando el comprobante de Ventas al entregar el pedido:', errComprobante)
+    console.error('Ventas Online · error creando el comprobante de Ventas al entregar el pedido:', errComprobante)
     return null
   }
 
   const { error: errItems } = await supabase.from('comprobante_venta_items').insert(items)
   if (errItems) {
-    console.error('Delivery WhatsApp · error cargando los ítems del comprobante al entregar el pedido:', errItems)
+    console.error('Ventas Online · error cargando los ítems del comprobante al entregar el pedido:', errItems)
   }
 
   await registrarMovimientoTesoreria({

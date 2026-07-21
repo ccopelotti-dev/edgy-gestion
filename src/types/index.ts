@@ -114,7 +114,7 @@ export interface PersonalEdgy {
 // Catálogo sugerido por tipo de negocio — preselección en el Paso 3 del wizard.
 // No reemplaza la tabla `modulos`, es solo el mapeo de sugerencia inicial.
 export const MODULOS_SUGERIDOS: Record<TipoNegocio, string[]> = {
-  gastronomico: ['mesas-salon', 'comandas-cocina', 'menu-qr', 'delivery-whatsapp', 'caja-turno'],
+  gastronomico: ['mesas-salon', 'comandas-cocina', 'menu-qr', 'ventas-online', 'caja-turno'],
   comercio: ['productos-stock', 'ventas', 'compras'],
   logistica: ['rutas', 'rendicion', 'gps'],
   produccion: ['produccion-servicios', 'productos-stock'],

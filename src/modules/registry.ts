@@ -20,6 +20,9 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   'comandas-cocina': lazy(() => import('./comandas-cocina')),
   'caja-turno': lazy(() => import('./caja-turno')),
   'menu-qr': lazy(() => import('./menu-qr')),
-  'delivery-whatsapp': lazy(() => import('./delivery-whatsapp')),
+  // Antes 'delivery-whatsapp' (Fase 22): mismo módulo, renombrado a
+  // "Ventas Online" porque dejó de ser exclusivo de WhatsApp -- ver
+  // migración 0062_rename_delivery_whatsapp_a_ventas_online.sql.
+  'ventas-online': lazy(() => import('./delivery-whatsapp')),
   'viandas': lazy(() => import('./viandas')),
 }

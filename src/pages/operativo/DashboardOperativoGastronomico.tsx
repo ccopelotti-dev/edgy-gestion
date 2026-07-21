@@ -15,13 +15,13 @@ import { useResumenOperativoGastronomico } from '@/hooks/useResumenOperativoGast
 // un módulo para el que no tiene permiso, RLS ya lo bloquea del lado
 // de los datos. No se duplica esa lógica acá.
 
-const ORDEN_OPERATIVO = ['mesas-salon', 'comandas-cocina', 'caja-turno', 'delivery-whatsapp', 'viandas', 'menu-qr']
+const ORDEN_OPERATIVO = ['mesas-salon', 'comandas-cocina', 'caja-turno', 'ventas-online', 'viandas', 'menu-qr']
 
 const ETIQUETA_POR_SLUG: Record<string, string> = {
   'mesas-salon': 'Mesas y Salón',
   'comandas-cocina': 'Comandas y cocina',
   'caja-turno': 'Caja por turno',
-  'delivery-whatsapp': 'Delivery WhatsApp',
+  'ventas-online': 'Ventas Online',
   viandas: 'Viandas',
   'menu-qr': 'Menú QR',
 }
@@ -30,7 +30,7 @@ const ICONO_POR_SLUG: Record<string, LucideIcon> = {
   'mesas-salon': Armchair,
   'comandas-cocina': ChefHat,
   'caja-turno': Banknote,
-  'delivery-whatsapp': Truck,
+  'ventas-online': Truck,
   viandas: Soup,
   'menu-qr': QrCode,
 }
