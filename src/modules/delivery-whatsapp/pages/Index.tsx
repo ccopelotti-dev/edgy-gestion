@@ -16,10 +16,10 @@ import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { usePedidosDelivery, useDeliveryWhatsapp } from '../data/store'
 import { formatARS, formatFecha } from '../lib/format'
-import { ESTADO_PEDIDO_DELIVERY_LABEL } from '../types'
 import type { ItemPedidoDelivery, PedidoDelivery } from '../types'
 import { useCatalogoDelivery, etiquetaVarianteDelivery, type ProductoCatalogoDelivery } from '../lib/catalogoDelivery'
 import { descargarPedidoPdf } from '../lib/pdfPedido'
+import { EstadoOrdenBadge } from '@/modules/ventas/components/ventas/display'
 
 interface ClienteVentaLite {
   id: string
@@ -172,8 +172,12 @@ export default function Index() {
     limpiarForm()
   }
 
+  // Fase 22b: el estado ya es el de Comandas (ordenes_venta.estado) --
+  // "en curso" es todo lo que no llegó a un estado terminal (entregado
+  // o cancelado), sin importar en qué paso de la preparación/despacho
+  // esté.
   const pedidosOrdenados = [...pedidos].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const activos = pedidosOrdenados.filter((p) => p.estado === 'pendiente' || p.estado === 'en_camino')
+  const activos = pedidosOrdenados.filter((p) => p.estado !== 'entregado' && p.estado !== 'cancelado')
   const finalizados = pedidosOrdenados.filter((p) => p.estado === 'entregado' || p.estado === 'cancelado')
 
   return (
@@ -421,15 +425,7 @@ export default function Index() {
                     <td className="px-3 py-2">{p.direccion}</td>
                     <td className="px-3 py-2 text-right">{formatARS(p.total)}</td>
                     <td className="px-3 py-2">
-                      <span
-                        className={
-                          p.estado === 'en_camino'
-                            ? 'rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800'
-                            : 'rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800'
-                        }
-                      >
-                        {ESTADO_PEDIDO_DELIVERY_LABEL[p.estado]}
-                      </span>
+                      <EstadoOrdenBadge estado={p.estado} tipo="pedido" />
                     </td>
                     <td className="px-3 py-2 text-center">
                       <button
@@ -488,15 +484,7 @@ export default function Index() {
                     <td className="px-3 py-2">{formatFecha(p.fecha)}</td>
                     <td className="px-3 py-2 text-right">{formatARS(p.total)}</td>
                     <td className="px-3 py-2">
-                      <span
-                        className={
-                          p.estado === 'entregado'
-                            ? 'rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800'
-                            : 'rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'
-                        }
-                      >
-                        {ESTADO_PEDIDO_DELIVERY_LABEL[p.estado]}
-                      </span>
+                      <EstadoOrdenBadge estado={p.estado} tipo="pedido" />
                     </td>
                     <td className="px-3 py-2 text-center">
                       <button

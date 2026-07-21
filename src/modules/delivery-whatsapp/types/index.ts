@@ -1,8 +1,10 @@
 // Módulo Ventas Online (antes "Delivery por WhatsApp") — tipos.
 //
-// Scope acordado: "Registro manual del pedido" -- el operador recibe
-// el pedido por WhatsApp fuera del sistema y lo carga acá a mano. No
-// hay integración técnica con la API de WhatsApp.
+// Scope acordado: capta el pedido (cliente + ítems) y lo empuja a
+// `ordenes_venta` como 'pendiente' -- de ahí en más, todo el ciclo
+// (preparación, terminado, facturar, entregado, despacho/"en camino")
+// lo maneja Comandas (Ordenes.tsx), no este módulo. No hay integración
+// técnica con la API de WhatsApp.
 //
 // Fase 7b (Menú QR con acción comercial): un pedido también puede
 // llegar solo, generado por el cliente final desde el menú público
@@ -15,12 +17,18 @@
 // por `orden_venta_id`. `ordenVentaId` es el único campo nuevo en el
 // tipo de dominio: Index.tsx y Pedido.tsx no lo necesitan, solo lo usa
 // store.tsx para saber a qué `ordenes_venta` hay que escribirle cuando
-// cambia el medio de pago, el comprobante o el estado general. El
-// resto de los campos (cliente, ítems, total, etc.) siguen viniendo
-// desde `ordenes_venta` como siempre, así que el resto del módulo no
-// nota la diferencia.
+// cambia el comprobante. El resto de los campos (cliente, ítems,
+// total, etc.) siguen viniendo desde `ordenes_venta` como siempre.
+//
+// Fase 22b: se retira el ciclo propio del módulo (marcar en camino,
+// entregar y cobrar con su propio descuento de stock/activación de
+// garantía) -- todo eso lo hace Comandas sobre la misma orden. Por
+// eso `estado` pasa a ser directamente el de `ordenes_venta`
+// (EstadoOrden), no un vocabulario propio: es el mismo dato, leído en
+// el mismo lugar donde se gestiona.
 
-export type EstadoPedidoDelivery = 'pendiente' | 'en_camino' | 'entregado' | 'cancelado'
+import type { EstadoOrden } from '@/modules/ventas/types'
+
 export type OrigenPedidoDelivery = 'operador' | 'menu_qr'
 
 export interface ItemPedidoDelivery {
@@ -30,8 +38,8 @@ export interface ItemPedidoDelivery {
   /** Vínculo permanente al catálogo real (productos-stock) -- opcional:
    * si se deja sin vincular, el ítem sigue siendo texto libre como
    * siempre (comportamiento default sin cambios). Vinculado, permite
-   * descontar stock y activar garantía automáticamente al marcar el
-   * pedido como "Entregado" -- Fase 6d del refactor de Productos,
+   * descontar stock y activar garantía automáticamente cuando la orden
+   * se factura desde Comandas -- Fase 6d del refactor de Productos,
    * mismo criterio que el selector de catálogo de Ventas (Fase 6c). */
   productoId?: string
   varianteId?: string
@@ -58,7 +66,9 @@ export interface PedidoDelivery {
   items: ItemPedidoDelivery[]
   total: number
   medioPago?: string
-  estado: EstadoPedidoDelivery
+  /** Fase 22b: el estado real de la orden en Comandas (`ordenes_venta.
+   * estado`) -- ya no un vocabulario propio de este módulo. */
+  estado: EstadoOrden
   comprobanteId?: string
   notas?: string
   fecha: string
@@ -70,11 +80,4 @@ export interface PedidoDelivery {
 
 export interface DeliveryWhatsappState {
   pedidos: PedidoDelivery[]
-}
-
-export const ESTADO_PEDIDO_DELIVERY_LABEL: Record<EstadoPedidoDelivery, string> = {
-  pendiente: 'Pendiente',
-  en_camino: 'En camino',
-  entregado: 'Entregado',
-  cancelado: 'Cancelado',
 }

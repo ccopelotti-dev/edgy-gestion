@@ -10,13 +10,19 @@
 // numero, tipo='pedido', cliente_venta_id opcional + contacto_nombre/
 // contacto_telefono para pedidos sin cliente registrado, estado,
 // notas) + `orden_venta_items` (ítems normalizados, no jsonb) +
-// `pedidos_delivery` como extensión logística liviana (estado de
-// reparto, dirección, modalidad retiro/delivery). El comprobante de
-// venta se sigue generando en cerrarPedidoComoVenta.ts (sin cambios
-// de fondo, solo ahora vincula `orden_id`).
+// `pedidos_delivery` como extensión logística liviana (dirección,
+// modalidad retiro/delivery).
 //
-// Index.tsx y Pedido.tsx no cambian ni una línea -- este archivo sigue
-// devolviendo exactamente la misma forma de `PedidoDelivery`.
+// Fase 22b: este módulo dejó de tener su propio ciclo (marcar en
+// camino, entregar y cobrar) -- solo alta del pedido (CREAR_PEDIDO) y
+// cancelación (CANCELAR_PEDIDO) previa a que arranque en Comandas.
+// `cerrarPedidoComoVenta.ts`/`validarStockPedidoDelivery` se eliminaron:
+// Comandas ya factura con descuento de stock/activación de garantía
+// (ver `efectosCatalogoFacturar.ts` en el módulo Ventas). El `estado`
+// que devuelve este store es directamente el de `ordenes_venta`
+// (ver fetchDeliveryState) -- `pedidos_delivery.estado` quedó
+// deprecado, no se lee más (la columna sigue en la tabla por si hace
+// falta para otra cosa a futuro, pero no tiene efecto en la UI).
 //
 // Los pedidos generados desde el Catálogo Público (src/pages/
 // MenuPublico.tsx) se insertan directo vía la función SQL
@@ -46,9 +52,9 @@ import type {
   DeliveryWhatsappState,
   PedidoDelivery,
   ItemPedidoDelivery,
-  EstadoPedidoDelivery,
   OrigenPedidoDelivery,
 } from '../types'
+import type { EstadoOrden } from '@/modules/ventas/types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
@@ -70,11 +76,6 @@ type Action =
         items: ItemPedidoDelivery[]
         notas?: string
       }
-    }
-  | { type: 'MARCAR_EN_CAMINO'; payload: { pedidoId: string } }
-  | {
-      type: 'MARCAR_ENTREGADO'
-      payload: { pedidoId: string; medioPago: string; comprobanteId: string | null }
     }
   | { type: 'CANCELAR_PEDIDO'; payload: { pedidoId: string } }
   | { type: 'SET_STATE'; payload: DeliveryWhatsappState }
@@ -104,29 +105,6 @@ function reducer(state: DeliveryWhatsappState, action: Action): DeliveryWhatsapp
       }
       return { ...state, pedidos: [...state.pedidos, nuevo] }
     }
-
-    case 'MARCAR_EN_CAMINO':
-      return {
-        ...state,
-        pedidos: state.pedidos.map((p) =>
-          p.id === action.payload.pedidoId ? { ...p, estado: 'en_camino' as const } : p,
-        ),
-      }
-
-    case 'MARCAR_ENTREGADO':
-      return {
-        ...state,
-        pedidos: state.pedidos.map((p) =>
-          p.id === action.payload.pedidoId
-            ? {
-                ...p,
-                estado: 'entregado' as const,
-                medioPago: action.payload.medioPago,
-                comprobanteId: action.payload.comprobanteId ?? undefined,
-              }
-            : p,
-        ),
-      }
 
     case 'CANCELAR_PEDIDO':
       return {
@@ -227,45 +205,6 @@ function syncToSupabase(action: Action, nextState: DeliveryWhatsappState, client
       })()
       return
     }
-    case 'MARCAR_EN_CAMINO': {
-      supabase
-        .from('pedidos_delivery')
-        .update({ estado: 'en_camino' })
-        .eq('id', action.payload.pedidoId)
-        .then(logErr('marcar en camino'))
-      return
-    }
-    case 'MARCAR_ENTREGADO': {
-      const p = nextState.pedidos.find((x) => x.id === action.payload.pedidoId)
-      if (!p) return
-      supabase
-        .from('ordenes_venta')
-        .update({ estado: 'entregado', fecha_completada: todayISO() })
-        .eq('id', p.ordenVentaId)
-        .then(logErr('cierre de la orden de venta'))
-      // Marca los ítems como entregados en su totalidad -- mismo
-      // criterio que "Marcar entregado" en Ordenes.tsx (Ventas).
-      supabase
-        .from('orden_venta_items')
-        .select('id, cantidad')
-        .eq('orden_id', p.ordenVentaId)
-        .then(({ data, error }) => {
-          if (error || !data) return
-          for (const i of data) {
-            supabase
-              .from('orden_venta_items')
-              .update({ cantidad_entregada: i.cantidad })
-              .eq('id', i.id)
-              .then(logErr('marcar ítem entregado'))
-          }
-        })
-      supabase
-        .from('pedidos_delivery')
-        .update({ estado: 'entregado' })
-        .eq('id', action.payload.pedidoId)
-        .then(logErr('marcar entregado'))
-      return
-    }
     case 'CANCELAR_PEDIDO': {
       const p = nextState.pedidos.find((x) => x.id === action.payload.pedidoId)
       if (!p) return
@@ -331,7 +270,10 @@ async function fetchDeliveryState(): Promise<DeliveryWhatsappState> {
       })),
       total: Number(ov.total),
       medioPago: comprobante?.medioPago ?? undefined,
-      estado: r.estado as EstadoPedidoDelivery,
+      // Fase 22b: el estado real es el de `ordenes_venta` -- Comandas
+      // es quien lo gestiona (preparación, terminado, facturar,
+      // entregado); `pedidos_delivery.estado` quedó deprecado.
+      estado: ov.estado as EstadoOrden,
       comprobanteId: comprobante?.id,
       notas: ov.notas ?? undefined,
       fecha: ov.fecha,

@@ -1,42 +1,23 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Truck, CheckCircle2, AlertTriangle, ShieldCheck, QrCode } from 'lucide-react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, ClipboardList, ShieldCheck, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Label } from '@/components/ui/label'
 import { useClienteActual } from '@/hooks/useClienteActual'
-import { MEDIO_PAGO_LABEL, type MedioPago } from '@/modules/ventas/types'
+import { EstadoOrdenBadge } from '@/modules/ventas/components/ventas/display'
 import { usePedidoDelivery, useDeliveryWhatsapp } from '../data/store'
 import { formatARS, formatFecha } from '../lib/format'
-import { ESTADO_PEDIDO_DELIVERY_LABEL } from '../types'
-import {
-  cerrarPedidoComoVenta,
-  validarStockPedidoDelivery,
-  type ErrorStockDelivery,
-} from '../lib/cerrarPedidoComoVenta'
 import { useCatalogoDelivery } from '../lib/catalogoDelivery'
 
-// Detalle de un pedido: marcar en camino, entregar (cobrando -- acá
-// se genera la Venta real) y cancelar. Mismo criterio de reutilizar
-// el flujo de Ventas/Tesorería que ya usamos en Viandas y en el cierre
-// de comandas -- no se inventa un circuito de facturación nuevo.
-//
-// Fase 6d del refactor de Productos: si algún ítem del pedido está
-// vinculado a un producto real del catálogo (cargado en Index.tsx), al
-// entregar se valida stock (bloqueante, mismo criterio que Ventas 6c)
-// y se descuenta stock + activa garantía (mismo criterio que Ventas 6b)
-// automáticamente.
+// Detalle de un pedido: solo lectura + cancelar (mientras todavía no
+// arrancó en Comandas). Fase 22b: el resto del ciclo -- iniciar
+// preparación, terminado, facturar (con descuento de stock/activación
+// de garantía si hay ítems vinculados al catálogo), entregado y
+// despacho -- se gestiona desde Comandas (Ordenes.tsx) sobre esta
+// misma orden, no acá. Este módulo solo capta el pedido y lo empuja a
+// `ordenes_venta` como 'pendiente'.
 //
 // Fase 7b: si el pedido llegó solo desde el Menú QR (origen ===
-// 'menu_qr'), se muestra la etiqueta acá también -- el resto del
-// circuito (marcar en camino, entregar y cobrar) es idéntico.
+// 'menu_qr'), se muestra la etiqueta acá también.
 export default function Pedido() {
   const { pedidoId } = useParams<{ pedidoId: string }>()
   const navigate = useNavigate()
@@ -44,10 +25,6 @@ export default function Pedido() {
   const { dispatch } = useDeliveryWhatsapp()
   const pedido = usePedidoDelivery(pedidoId ?? '')
   const { porId: catalogoPorId } = useCatalogoDelivery(cliente?.id, cliente?.lista_precio_delivery_id)
-
-  const [medioPago, setMedioPago] = useState<MedioPago>('efectivo')
-  const [entregando, setEntregando] = useState(false)
-  const [erroresStock, setErroresStock] = useState<ErrorStockDelivery[] | null>(null)
 
   if (!pedido) {
     return (
@@ -61,39 +38,6 @@ export default function Pedido() {
     )
   }
 
-  function marcarEnCamino() {
-    if (!pedido) return
-    dispatch({ type: 'MARCAR_EN_CAMINO', payload: { pedidoId: pedido.id } })
-  }
-
-  async function marcarEntregado() {
-    if (!pedido || !cliente?.id) return
-    setEntregando(true)
-    setErroresStock(null)
-
-    const itemsCatalogo = pedido.items.filter((i) => i.productoId)
-    if (itemsCatalogo.length > 0) {
-      const errores = await validarStockPedidoDelivery(pedido)
-      if (errores.length > 0) {
-        setErroresStock(errores)
-        setEntregando(false)
-        return
-      }
-    }
-
-    const comprobanteId = await cerrarPedidoComoVenta(pedido, cliente.id, medioPago, catalogoPorId)
-    if (!comprobanteId) {
-      window.alert('No se pudo registrar la venta. Revisá la consola e intentá de nuevo.')
-      setEntregando(false)
-      return
-    }
-    dispatch({
-      type: 'MARCAR_ENTREGADO',
-      payload: { pedidoId: pedido.id, medioPago, comprobanteId },
-    })
-    setEntregando(false)
-  }
-
   function cancelarPedido() {
     if (!pedido) return
     if (!window.confirm('¿Cancelar este pedido?')) return
@@ -101,7 +45,10 @@ export default function Pedido() {
     navigate('/m/ventas-online')
   }
 
-  const activo = pedido.estado === 'pendiente' || pedido.estado === 'en_camino'
+  // Cancelar solo tiene sentido antes de que arranque en Comandas --
+  // mismo criterio que el botón Cancelar de Ordenes.tsx (gateado a
+  // 'pendiente').
+  const puedeCancelar = pedido.estado === 'pendiente'
 
   return (
     <div className="flex flex-col gap-6">
@@ -126,47 +73,10 @@ export default function Pedido() {
           </p>
         </div>
         <div className="text-right">
-          <span
-            className={
-              pedido.estado === 'entregado'
-                ? 'rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800'
-                : pedido.estado === 'en_camino'
-                  ? 'rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800'
-                  : pedido.estado === 'cancelado'
-                    ? 'rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600'
-                    : 'rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-800'
-            }
-          >
-            {ESTADO_PEDIDO_DELIVERY_LABEL[pedido.estado]}
-          </span>
+          <EstadoOrdenBadge estado={pedido.estado} tipo="pedido" />
           <p className="text-muted-foreground mt-1 text-xs">{formatFecha(pedido.fecha)}</p>
         </div>
       </div>
-
-      {/* Bloqueo por stock insuficiente -- Fase 6d, mismo criterio que
-          Ventas (Fase 6c): un faltante de stock es un desvío operativo
-          humano, no un error del sistema, y bloquea la entrega hasta
-          que se corrija el stock a mano en Productos. */}
-      {erroresStock && erroresStock.length > 0 && (
-        <div className="rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3">
-          <div className="flex items-center gap-2 text-sm font-bold text-red-800">
-            <AlertTriangle className="h-5 w-5" />
-            No se pudo entregar: stock insuficiente
-          </div>
-          <ul className="mt-2 space-y-1 text-sm text-red-800">
-            {erroresStock.map((e, i) => (
-              <li key={i}>
-                <span className="font-semibold">{e.nombre}</span>: pedido {e.solicitado}, disponible{' '}
-                {e.disponible}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs font-medium text-red-700">
-            Esto refleja un desvío en el control de stock, no un error del sistema. Corregí el
-            stock manualmente en Productos antes de volver a intentar entregar.
-          </p>
-        </div>
-      )}
 
       <Card>
         <CardContent className="flex flex-col gap-2 py-4">
@@ -195,44 +105,26 @@ export default function Pedido() {
         </CardContent>
       </Card>
 
-      {activo && (
-        <Card>
-          <CardContent className="flex flex-col gap-4 py-4">
-            {pedido.estado === 'pendiente' && (
-              <Button onClick={marcarEnCamino} variant="outline">
-                <Truck className="mr-1.5 h-4 w-4" />
-                Marcar en camino
-              </Button>
-            )}
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="medio-pago">Medio de pago (al entregar)</Label>
-              <Select value={medioPago} onValueChange={(v) => setMedioPago(v as MedioPago)}>
-                <SelectTrigger id="medio-pago">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(MEDIO_PAGO_LABEL) as MedioPago[])
-                    .filter((mp) => mp !== 'cuenta_corriente')
-                    .map((mp) => (
-                      <SelectItem key={mp} value={mp}>
-                        {MEDIO_PAGO_LABEL[mp]}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={marcarEntregado} disabled={entregando}>
-              <CheckCircle2 className="mr-1.5 h-4 w-4" />
-              {entregando ? 'Registrando…' : `Entregar y cobrar ${formatARS(pedido.total)}`}
-            </Button>
-
-            <Button variant="outline" className="text-red-600" onClick={cancelarPedido}>
+      {/* Fase 22b: el ciclo (preparación, facturar, entregado, despacho)
+          se gestiona desde Comandas -- acá solo queda la opción de
+          cancelar mientras el pedido todavía no arrancó. */}
+      <Card>
+        <CardContent className="flex flex-col gap-3 py-4">
+          <p className="text-muted-foreground flex items-center gap-2 text-sm">
+            <ClipboardList className="h-4 w-4" />
+            Este pedido ya es una comanda -- gestioná preparación, facturación y despacho desde
+            Comandas.
+          </p>
+          <Button variant="outline" onClick={() => navigate('/m/ventas/ordenes')} className="w-fit">
+            Ir a Comandas
+          </Button>
+          {puedeCancelar && (
+            <Button variant="outline" className="w-fit text-red-600" onClick={cancelarPedido}>
               Cancelar pedido
             </Button>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

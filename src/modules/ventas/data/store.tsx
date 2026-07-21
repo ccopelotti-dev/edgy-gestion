@@ -907,6 +907,7 @@ async function fetchVentasState(): Promise<VentasState> {
     compItemsRes,
     cobrosRes,
     impRes,
+    pedidosDeliveryRes,
   ] = await Promise.all([
     supabase.from('categorias_cliente_venta').select('*').order('created_at'),
     supabase.from('clientes_venta').select('*').order('created_at'),
@@ -918,6 +919,10 @@ async function fetchVentasState(): Promise<VentasState> {
     supabase.from('comprobante_venta_items').select('*'),
     supabase.from('cobros').select('*').order('numero'),
     supabase.from('cobro_imputaciones').select('*'),
+    // Fase 22b: dirección de entrega de los pedidos de Ventas Online
+    // (antes Delivery por WhatsApp) -- para mostrarla acá en Comandas,
+    // donde se gestiona todo el ciclo incluido el despacho.
+    supabase.from('pedidos_delivery').select('orden_venta_id, direccion'),
   ]);
 
   const categorias: CategoriaCliente[] = (categoriasRes.data ?? []).map((r: any) => ({
@@ -994,6 +999,11 @@ async function fetchVentasState(): Promise<VentasState> {
     comprobanteIdsPorOrden.set(r.orden_id, arr);
   }
 
+  const direccionPorOrden = new Map<string, string>();
+  for (const r of (pedidosDeliveryRes.data ?? []) as any[]) {
+    if (r.orden_venta_id && r.direccion) direccionPorOrden.set(r.orden_venta_id, r.direccion);
+  }
+
   const ordenes: Orden[] = (ordenesRes.data ?? []).map((r: any) => ({
     id: r.id,
     numero: r.numero,
@@ -1020,6 +1030,7 @@ async function fetchVentasState(): Promise<VentasState> {
     numeroSeguimiento: r.numero_seguimiento ?? undefined,
     urlSeguimiento: r.url_seguimiento ?? undefined,
     fechaDespacho: r.fecha_despacho ?? undefined,
+    direccionEntrega: direccionPorOrden.get(r.id) ?? undefined,
     comprobanteIds: comprobanteIdsPorOrden.get(r.id) ?? [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,

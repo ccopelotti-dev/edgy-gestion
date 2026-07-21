@@ -192,6 +192,16 @@ export interface Orden {
   urlSeguimiento?: string;
   fechaDespacho?: string;
 
+  /**
+   * Dirección de entrega (Fase 22b) -- vive en `pedidos_delivery.direccion`,
+   * no en `ordenes_venta` (una orden de producción/servicio no tiene
+   * dirección). Solo se completa para órdenes con `origenModulo ===
+   * 'ventas-online'`. Se muestra acá para no tener que ir al módulo
+   * Ventas Online a verla -- todo el ciclo (incluido el despacho) se
+   * gestiona desde Comandas.
+   */
+  direccionEntrega?: string;
+
   comprobanteIds: string[];       // comprobantes generados
   createdAt: string;
   updatedAt: string;

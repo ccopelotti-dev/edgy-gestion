@@ -25,6 +25,7 @@ import {
 
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { descargarPresupuestoPdf } from '../lib/pdfComprobantes';
+import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import {
   usePresupuestos,
   useClientes,
@@ -71,7 +72,7 @@ const PREFIJO_PRESUPUESTO = 'PRE';
 export default function Presupuestos() {
   const todosPresupuestos = usePresupuestos();
   const clientes = useClientes();
-  const { ordenes, config } = useVentas();
+  const { ordenes, config, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
 
   // ── Filtros ───────────────────────────────────────────────
@@ -214,6 +215,10 @@ export default function Presupuestos() {
     const montoIva = items.reduce((s, i) => s + i.montoIva, 0);
     const totalBruto = subtotal + montoIva;
     const total = totalBruto * (1 - data.descuentoGeneral / 100);
+    // Capturado ANTES del dispatch: ADD_COMPROBANTE incrementa el contador,
+    // así que este es el número que le va a tocar a este comprobante en
+    // particular (mismo criterio que Comprobantes.tsx/PuntoDeVenta.tsx).
+    const numeroAsignado = nextNumeroComprobante[data.tipo];
 
     dispatch({
       type: 'ADD_COMPROBANTE',
@@ -236,6 +241,25 @@ export default function Presupuestos() {
         updatedAt: nowISO(),
       },
     });
+
+    // Fase 22b: cierre de un gap pre-existente -- "Facturar directamente"
+    // desde acá nunca había descontado stock ni activado garantía para
+    // líneas vinculadas al catálogo (a diferencia de Comprobantes.tsx/
+    // PuntoDeVenta.tsx). Fire-and-forget, mismo criterio que el resto de
+    // los side-effects de Ventas: el comprobante ya se generó igual. Un
+    // Presupuesto siempre tiene un Cliente real vinculado (no hay
+    // contacto suelto como en Ordenes/Ventas Online).
+    if (data.tipo === 'factura' && empresaActual?.id) {
+      const clienteReal = clientes.find((c) => c.id === data.clienteId);
+      aplicarEfectosCatalogoAlFacturar(
+        items,
+        empresaActual.id,
+        numeroAsignado,
+        data.fecha,
+        clienteReal?.nombre ?? '',
+        clienteReal?.telefono ?? '',
+      );
+    }
 
     if (presupuestoParaFacturar) {
       dispatch({

@@ -28,6 +28,7 @@ import {
   useVentas,
   useVentasDispatch,
 } from '../data/store';
+import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { terminologiaOrdenVenta } from '@/lib/terminologia';
 import {
@@ -72,14 +73,14 @@ import {
 export default function Ordenes() {
   const todasOrdenes = useOrdenes();
   const clientes = useClientes();
-  const { comprobantes, config } = useVentas();
+  const { comprobantes, config, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
 
   // Fase 8e (cierre de 8d): el motor de ordenes_venta es el mismo para
   // cualquier rubro -- lo único que cambia es cómo se llama en
   // pantalla. Con Kit Gastronómico activo (comandas-cocina) esta
   // pantalla pasa a hablar de "Comanda(s)" en vez de "Orden(es)".
-  const { modulosActivos } = useClienteActual();
+  const { cliente: clienteTenant, modulosActivos } = useClienteActual();
   const term = terminologiaOrdenVenta(modulosActivos);
   const singularMin = term.singular.charAt(0).toLowerCase() + term.singular.slice(1);
   const pluralMin = term.plural.charAt(0).toLowerCase() + term.plural.slice(1);
@@ -283,6 +284,10 @@ export default function Ordenes() {
     const montoIva = items.reduce((s, i) => s + i.montoIva, 0);
     const totalBruto = subtotal + montoIva;
     const total = totalBruto * (1 - data.descuentoGeneral / 100);
+    // Capturado ANTES del dispatch: ADD_COMPROBANTE incrementa el contador,
+    // así que este es el número que le va a tocar a este comprobante en
+    // particular (mismo criterio que Comprobantes.tsx/PuntoDeVenta.tsx).
+    const numeroAsignado = nextNumeroComprobante[data.tipo];
 
     dispatch({
       type: 'ADD_COMPROBANTE',
@@ -306,6 +311,25 @@ export default function Ordenes() {
         updatedAt: nowISO(),
       },
     });
+
+    // Fase 22b: cierre de un gap pre-existente -- "Facturar" desde acá
+    // nunca había descontado stock ni activado garantía para líneas
+    // vinculadas al catálogo (a diferencia de Comprobantes.tsx/
+    // PuntoDeVenta.tsx). Fire-and-forget, mismo criterio que el resto de
+    // los side-effects de Ventas: el comprobante ya se generó igual.
+    if (data.tipo === 'factura' && clienteTenant?.id) {
+      const clienteReal = clientes.find((c) => c.id === data.clienteId);
+      const contactoNombre = clienteReal?.nombre ?? ordenParaFacturar?.contactoNombre ?? '';
+      const contactoTelefono = clienteReal?.telefono ?? ordenParaFacturar?.contactoTelefono ?? '';
+      aplicarEfectosCatalogoAlFacturar(
+        items,
+        clienteTenant.id,
+        numeroAsignado,
+        data.fecha,
+        contactoNombre,
+        contactoTelefono,
+      );
+    }
 
     setComprobanteDialogOpen(false);
     setOrdenParaFacturar(null);
@@ -985,7 +1009,7 @@ function OrdenRow({
               )}
 
               {/* Origen */}
-              {(o.origenModulo || o.origenCanal) && (
+              {(o.origenModulo || o.origenCanal || o.direccionEntrega) && (
                 <div className="rounded-lg border border-gray-200 bg-white p-3">
                   <h4 className="mb-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
                     Origen
@@ -999,6 +1023,14 @@ function OrdenRow({
                     {o.origenCanal && (
                       <span>
                         Canal: <span className="font-medium">{o.origenCanal}</span>
+                      </span>
+                    )}
+                    {/* Fase 22b: dirección de entrega (Ventas Online) --
+                        se gestiona el ciclo completo, despacho incluido,
+                        desde acá, así que conviene tenerla a la vista. */}
+                    {o.direccionEntrega && (
+                      <span>
+                        Dirección: <span className="font-medium">{o.direccionEntrega}</span>
                       </span>
                     )}
                     {o.origenExternoId && (
