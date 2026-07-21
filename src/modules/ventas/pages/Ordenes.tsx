@@ -18,6 +18,7 @@ import {
   Link2,
   Truck,
   Send,
+  MessageCircle,
   ClipboardList,
   X,
 } from 'lucide-react';
@@ -29,6 +30,7 @@ import {
   useVentasDispatch,
 } from '../data/store';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { terminologiaOrdenVenta } from '@/lib/terminologia';
 import {
@@ -343,23 +345,66 @@ export default function Ordenes() {
     setDespachoDialogOpen(true);
   };
 
+  // Fase 22d: aviso de "pedido en camino" por WhatsApp -- se arma acá
+  // (una sola vez) porque lo dispara tanto handleConfirmarDespacho
+  // (automático, al confirmar el despacho) como el botón "Reenviar"
+  // del panel expandido (por si el operador cerró la ventana de
+  // WhatsApp sin mandar el mensaje, o necesita reenviarlo). Teléfono:
+  // cliente formal si la orden está vinculada a uno, si no el contacto
+  // suelto de la orden (mismo criterio de resolución que
+  // handleSaveComprobante, más arriba, para el gap de Facturar).
+  const notificarEnCamino = (
+    orden: Orden,
+    proveedorLogistica: ProveedorLogistica,
+    numeroSeguimiento?: string,
+    urlSeguimiento?: string,
+  ) => {
+    const clienteReal = clientes.find((c) => c.id === orden.clienteId);
+    const telefono = clienteReal?.telefono ?? orden.contactoTelefono;
+    if (!telefono) return;
+
+    const nombre = clienteReal?.nombre ?? orden.contactoNombre ?? '';
+    const numeroOrden = formatNumero(PREFIJO_ORDEN[orden.tipo], orden.numero);
+    const proveedorTexto = PROVEEDOR_LOGISTICA_LABEL[proveedorLogistica];
+    const partes = [
+      `Hola${nombre ? ` ${nombre}` : ''}! Tu pedido ${numeroOrden} está en camino${
+        proveedorTexto ? ` (${proveedorTexto})` : ''
+      }.`,
+    ];
+    if (numeroSeguimiento) partes.push(`Número de seguimiento: ${numeroSeguimiento}.`);
+    if (urlSeguimiento) partes.push(`Podés seguirlo acá: ${urlSeguimiento}`);
+    window.open(armarLinkWhatsapp(telefono, partes.join(' ')), '_blank');
+  };
+
   const handleConfirmarDespacho = (data: {
     proveedorLogistica: ProveedorLogistica;
     numeroSeguimiento: string;
     urlSeguimiento: string;
   }) => {
     if (!ordenParaDespachar) return;
+    const orden = ordenParaDespachar;
     dispatch({
       type: 'ACTUALIZAR_LOGISTICA_ORDEN',
       payload: {
-        id: ordenParaDespachar.id,
+        id: orden.id,
         estadoLogistica: 'en_camino',
         proveedorLogistica: data.proveedorLogistica,
         numeroSeguimiento: data.numeroSeguimiento || undefined,
         urlSeguimiento: data.urlSeguimiento || undefined,
       },
     });
+
+    // El mismo click de "Marcar en camino" ya le abre al operador,
+    // si hay a quién avisarle, la ventana de WhatsApp con el aviso +
+    // nº de seguimiento ya redactado -- solo falta confirmar el envío.
+    notificarEnCamino(orden, data.proveedorLogistica, data.numeroSeguimiento, data.urlSeguimiento);
+
     setOrdenParaDespachar(null);
+  };
+
+  const handleReenviarWhatsapp = (orden: Orden) => {
+    if (!orden.proveedorLogistica) return;
+    notificarEnCamino(orden, orden.proveedorLogistica, orden.numeroSeguimiento, orden.urlSeguimiento);
   };
 
   const handleMarcarEntregadoLogistica = (id: string) => {
@@ -704,6 +749,7 @@ export default function Ordenes() {
                     onFacturar={() => handleFacturar(orden)}
                     onMarcarEnCamino={() => handleAbrirDespacho(orden)}
                     onMarcarEntregadoLogistica={() => handleMarcarEntregadoLogistica(orden.id)}
+                    onReenviarWhatsapp={() => handleReenviarWhatsapp(orden)}
                   />
                 );
               })}
@@ -760,6 +806,7 @@ interface OrdenRowProps {
   onFacturar: () => void;
   onMarcarEnCamino: () => void;
   onMarcarEntregadoLogistica: () => void;
+  onReenviarWhatsapp: () => void;
 }
 
 function OrdenRow({
@@ -779,6 +826,7 @@ function OrdenRow({
   onFacturar,
   onMarcarEnCamino,
   onMarcarEntregadoLogistica,
+  onReenviarWhatsapp,
 }: OrdenRowProps) {
   const o = orden;
   const prefijo = PREFIJO_ORDEN[o.tipo];
@@ -1085,6 +1133,24 @@ function OrdenRow({
                       <span className="text-gray-500">Despachado: {formatDate(o.fechaDespacho)}</span>
                     )}
                   </div>
+                  {/* Fase 22d: reenviar el aviso de WhatsApp -- por si el
+                      operador cerró la ventana sin mandarlo al confirmar
+                      el despacho, o necesita reenviarlo. No hace nada si
+                      la orden no tiene teléfono de contacto (mismo
+                      criterio silencioso que el resto de los envíos de
+                      WhatsApp del sistema). */}
+                  {o.estadoLogistica === 'en_camino' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onReenviarWhatsapp();
+                      }}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 transition-colors"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      Reenviar aviso por WhatsApp
+                    </button>
+                  )}
                 </div>
               )}
 
