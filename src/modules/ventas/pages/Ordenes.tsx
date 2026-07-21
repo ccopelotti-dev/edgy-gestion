@@ -17,6 +17,7 @@ import {
   FileText,
   Link2,
   Truck,
+  Send,
   ClipboardList,
   X,
 } from 'lucide-react';
@@ -36,7 +37,7 @@ import {
   Amount,
   EmptyState,
 } from '../components/ventas/display';
-import { ComprobanteDialog } from '../components/ventas/dialogs';
+import { ComprobanteDialog, DespachoDialog } from '../components/ventas/dialogs';
 import {
   formatDate,
   formatARS,
@@ -52,6 +53,7 @@ import type {
   OrdenItem,
   TipoOrden,
   EstadoOrden,
+  ProveedorLogistica,
   TipoComprobante,
   ModoEmision,
   MedioPago,
@@ -60,6 +62,7 @@ import type {
 import {
   TIPO_ORDEN_LABEL_CORTO,
   ESTADO_ORDEN_LABEL,
+  PROVEEDOR_LOGISTICA_LABEL,
   calcularSubtotalItem,
   generarId,
 } from '../types';
@@ -95,6 +98,10 @@ export default function Ordenes() {
   const [showNuevaOrden, setShowNuevaOrden] = useState(false);
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
   const [ordenParaFacturar, setOrdenParaFacturar] = useState<Orden | null>(null);
+
+  // Fase 21: despacho/logística -- ver DespachoDialog en dialogs.tsx
+  const [despachoDialogOpen, setDespachoDialogOpen] = useState(false);
+  const [ordenParaDespachar, setOrdenParaDespachar] = useState<Orden | null>(null);
 
   // ── Entrega parcial inline ────────────────────────────────
 
@@ -302,6 +309,40 @@ export default function Ordenes() {
 
     setComprobanteDialogOpen(false);
     setOrdenParaFacturar(null);
+  };
+
+  // Fase 21: despacho/logística -- disponible una vez facturada (ver
+  // comprobantesOrden.length > 0 en OrdenRow), independiente del estado
+  // principal de la orden.
+  const handleAbrirDespacho = (orden: Orden) => {
+    setOrdenParaDespachar(orden);
+    setDespachoDialogOpen(true);
+  };
+
+  const handleConfirmarDespacho = (data: {
+    proveedorLogistica: ProveedorLogistica;
+    numeroSeguimiento: string;
+    urlSeguimiento: string;
+  }) => {
+    if (!ordenParaDespachar) return;
+    dispatch({
+      type: 'ACTUALIZAR_LOGISTICA_ORDEN',
+      payload: {
+        id: ordenParaDespachar.id,
+        estadoLogistica: 'en_camino',
+        proveedorLogistica: data.proveedorLogistica,
+        numeroSeguimiento: data.numeroSeguimiento || undefined,
+        urlSeguimiento: data.urlSeguimiento || undefined,
+      },
+    });
+    setOrdenParaDespachar(null);
+  };
+
+  const handleMarcarEntregadoLogistica = (id: string) => {
+    dispatch({
+      type: 'ACTUALIZAR_LOGISTICA_ORDEN',
+      payload: { id, estadoLogistica: 'entregado' },
+    });
   };
 
   // ── Render ────────────────────────────────────────────────
@@ -637,6 +678,8 @@ export default function Ordenes() {
                       setEntregaCantidades((prev) => ({ ...prev, [itemId]: cant }))
                     }
                     onFacturar={() => handleFacturar(orden)}
+                    onMarcarEnCamino={() => handleAbrirDespacho(orden)}
+                    onMarcarEntregadoLogistica={() => handleMarcarEntregadoLogistica(orden.id)}
                   />
                 );
               })}
@@ -644,6 +687,16 @@ export default function Ordenes() {
           </table>
         </div>
       )}
+
+      {/* Despacho/logística dialog */}
+      <DespachoDialog
+        open={despachoDialogOpen}
+        onOpenChange={(open) => {
+          setDespachoDialogOpen(open);
+          if (!open) setOrdenParaDespachar(null);
+        }}
+        onConfirmar={handleConfirmarDespacho}
+      />
 
       {/* Comprobante dialog */}
       {comprobanteDialogOpen && ordenParaFacturar && (
@@ -681,6 +734,8 @@ interface OrdenRowProps {
   onGuardarEntrega: () => void;
   onUpdateEntregaCantidad: (itemId: string, cantidad: number) => void;
   onFacturar: () => void;
+  onMarcarEnCamino: () => void;
+  onMarcarEntregadoLogistica: () => void;
 }
 
 function OrdenRow({
@@ -698,6 +753,8 @@ function OrdenRow({
   onGuardarEntrega,
   onUpdateEntregaCantidad,
   onFacturar,
+  onMarcarEnCamino,
+  onMarcarEntregadoLogistica,
 }: OrdenRowProps) {
   const o = orden;
   const prefijo = PREFIJO_ORDEN[o.tipo];
@@ -781,6 +838,33 @@ function OrdenRow({
               >
                 <FileText className="h-3.5 w-3.5" />
               </button>
+            )}
+            {/* Fase 21: despacho/logística -- disponible una vez facturada,
+                independiente del estado principal de la orden. */}
+            {comprobantesOrden.length > 0 &&
+              (!o.estadoLogistica || o.estadoLogistica === 'sin_despacho') && (
+                <button
+                  onClick={onMarcarEnCamino}
+                  className="p-1.5 text-gray-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg"
+                  title="Marcar en camino"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              )}
+            {o.estadoLogistica === 'en_camino' && (
+              <button
+                onClick={onMarcarEntregadoLogistica}
+                className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"
+                title={`Marcar entregado (envío${o.proveedorLogistica ? ` · ${PROVEEDOR_LOGISTICA_LABEL[o.proveedorLogistica]}` : ''})`}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {o.estadoLogistica === 'entregado' && (
+              <span className="text-xs text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full whitespace-nowrap">
+                <Truck className="h-3 w-3 inline mr-1" />
+                {o.proveedorLogistica ? PROVEEDOR_LOGISTICA_LABEL[o.proveedorLogistica] : 'Entregado'}
+              </span>
             )}
           </div>
         </td>
@@ -921,6 +1005,52 @@ function OrdenRow({
                       <span>
                         ID externo: <span className="font-mono text-xs">{o.origenExternoId}</span>
                       </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Despacho/logística (Fase 21) */}
+              {o.estadoLogistica && o.estadoLogistica !== 'sin_despacho' && (
+                <div className="rounded-lg border border-gray-200 bg-white p-3">
+                  <h4 className="mb-1 flex items-center gap-1.5 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                    <Truck className="h-3.5 w-3.5" />
+                    Despacho
+                  </h4>
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+                    <span
+                      className={
+                        o.estadoLogistica === 'entregado'
+                          ? 'rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700'
+                          : 'rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700'
+                      }
+                    >
+                      {o.estadoLogistica === 'entregado' ? 'Entregado' : 'En camino'}
+                    </span>
+                    {o.proveedorLogistica && (
+                      <span>
+                        Transportista:{' '}
+                        <span className="font-medium">{PROVEEDOR_LOGISTICA_LABEL[o.proveedorLogistica]}</span>
+                      </span>
+                    )}
+                    {o.numeroSeguimiento && (
+                      <span>
+                        Seguimiento: <span className="font-mono text-xs">{o.numeroSeguimiento}</span>
+                      </span>
+                    )}
+                    {o.urlSeguimiento && (
+                      <a
+                        href={o.urlSeguimiento}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-indigo-600 underline hover:text-indigo-800"
+                      >
+                        Ver seguimiento
+                      </a>
+                    )}
+                    {o.fechaDespacho && (
+                      <span className="text-gray-500">Despachado: {formatDate(o.fechaDespacho)}</span>
                     )}
                   </div>
                 </div>

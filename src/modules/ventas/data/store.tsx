@@ -34,6 +34,8 @@ import type {
   Cobro,
   TipoOrden,
   EstadoOrden,
+  EstadoLogistica,
+  ProveedorLogistica,
   EstadoPresupuesto,
   EstadoComprobante,
   TipoComprobante,
@@ -68,6 +70,18 @@ type VentasAction =
   | { type: 'ADD_ORDEN'; payload: Omit<Orden, 'numero'> }
   | { type: 'UPDATE_ORDEN'; payload: Orden }
   | { type: 'CAMBIAR_ESTADO_ORDEN'; payload: { id: string; nuevoEstado: EstadoOrden } }
+  // Fase 21: despacho/logística -- capa de envío ortogonal al `estado`
+  // principal (ver comentario en Orden.estadoLogistica, types/index.ts).
+  | {
+      type: 'ACTUALIZAR_LOGISTICA_ORDEN';
+      payload: {
+        id: string;
+        estadoLogistica: EstadoLogistica;
+        proveedorLogistica?: ProveedorLogistica;
+        numeroSeguimiento?: string;
+        urlSeguimiento?: string;
+      };
+    }
   | { type: 'REGISTRAR_ENTREGA_PARCIAL'; payload: { ordenId: string; items: { id: string; cantidadEntregada: number }[] } }
   | { type: 'ADD_COMPROBANTE'; payload: Omit<Comprobante, 'numero'> }
   | { type: 'ANULAR_COMPROBANTE'; payload: { id: string } }
@@ -215,6 +229,25 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
                 ...o,
                 estado: action.payload.nuevoEstado,
                 fechaCompletada: action.payload.nuevoEstado === 'entregado' ? now : o.fechaCompletada,
+                updatedAt: now,
+              }
+            : o,
+        ),
+      };
+
+    case 'ACTUALIZAR_LOGISTICA_ORDEN':
+      return {
+        ...state,
+        ordenes: state.ordenes.map((o) =>
+          o.id === action.payload.id
+            ? {
+                ...o,
+                estadoLogistica: action.payload.estadoLogistica,
+                proveedorLogistica: action.payload.proveedorLogistica ?? o.proveedorLogistica,
+                numeroSeguimiento: action.payload.numeroSeguimiento ?? o.numeroSeguimiento,
+                urlSeguimiento: action.payload.urlSeguimiento ?? o.urlSeguimiento,
+                fechaDespacho:
+                  action.payload.estadoLogistica === 'en_camino' ? now : o.fechaDespacho,
                 updatedAt: now,
               }
             : o,
@@ -679,6 +712,24 @@ function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId:
       return;
     }
 
+    case 'ACTUALIZAR_LOGISTICA_ORDEN': {
+      const o = nextState.ordenes.find((x) => x.id === action.payload.id);
+      if (o) {
+        supabase
+          .from('ordenes_venta')
+          .update({
+            estado_logistica: o.estadoLogistica ?? 'sin_despacho',
+            proveedor_logistica: o.proveedorLogistica ?? null,
+            numero_seguimiento: o.numeroSeguimiento ?? null,
+            url_seguimiento: o.urlSeguimiento ?? null,
+            fecha_despacho: o.fechaDespacho ? o.fechaDespacho.slice(0, 10) : null,
+          })
+          .eq('id', o.id)
+          .then(logErr('actualización de logística de orden'));
+      }
+      return;
+    }
+
     case 'REGISTRAR_ENTREGA_PARCIAL': {
       const o = nextState.ordenes.find((x) => x.id === action.payload.ordenId);
       if (!o) return;
@@ -964,6 +1015,11 @@ async function fetchVentasState(): Promise<VentasState> {
     origenExternoId: r.origen_externo_id ?? undefined,
     contactoNombre: r.contacto_nombre ?? undefined,
     contactoTelefono: r.contacto_telefono ?? undefined,
+    estadoLogistica: (r.estado_logistica ?? 'sin_despacho') as EstadoLogistica,
+    proveedorLogistica: (r.proveedor_logistica ?? undefined) as ProveedorLogistica | undefined,
+    numeroSeguimiento: r.numero_seguimiento ?? undefined,
+    urlSeguimiento: r.url_seguimiento ?? undefined,
+    fechaDespacho: r.fecha_despacho ?? undefined,
     comprobanteIds: comprobanteIdsPorOrden.get(r.id) ?? [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,

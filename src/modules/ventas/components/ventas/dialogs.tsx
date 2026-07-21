@@ -20,6 +20,7 @@ import type {
   PresupuestoItem,
   ImputacionCobro,
   Orden,
+  ProveedorLogistica,
 } from '../../types';
 
 import {
@@ -31,6 +32,7 @@ import {
   TIPO_COMPROBANTE_LABEL,
   labelTipoComprobante,
   MEDIO_PAGO_LABEL,
+  PROVEEDOR_LOGISTICA_LABEL,
 } from '../../types';
 
 import { formatARS, todayISO } from '../../lib/format';
@@ -1784,6 +1786,109 @@ export function PresupuestoDialog({
                 Guardar
               </button>
             </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── 5. DespachoDialog ───────────────────────────────────────
+//
+// Fase 21 (Etapa 1): captura los datos de despacho al marcar una Orden
+// "En camino" -- transportista + número de seguimiento/pedido + link
+// opcional. Sin integración real todavía (ver comentario en
+// Orden.estadoLogistica, types/index.ts): son campos de carga manual,
+// pensados para que una futura Etapa 2 (webhook/API por proveedor) los
+// actualice de la misma forma.
+
+interface DespachoDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirmar: (data: {
+    proveedorLogistica: ProveedorLogistica;
+    numeroSeguimiento: string;
+    urlSeguimiento: string;
+  }) => void;
+}
+
+export function DespachoDialog({ open, onOpenChange, onConfirmar }: DespachoDialogProps) {
+  const [proveedor, setProveedor] = useState<ProveedorLogistica>('propio');
+  const [numeroSeguimiento, setNumeroSeguimiento] = useState('');
+  const [urlSeguimiento, setUrlSeguimiento] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setProveedor('propio');
+      setNumeroSeguimiento('');
+      setUrlSeguimiento('');
+    }
+  }, [open]);
+
+  const handleConfirmar = () => {
+    onConfirmar({
+      proveedorLogistica: proveedor,
+      numeroSeguimiento: numeroSeguimiento.trim(),
+      urlSeguimiento: urlSeguimiento.trim(),
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">
+              Marcar en camino
+            </Dialog.Title>
+            <Dialog.Close className={btnIcon}>
+              <X className="w-5 h-5" />
+            </Dialog.Close>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>Transportista</label>
+              <select
+                className={selectClass}
+                value={proveedor}
+                onChange={(e) => setProveedor(e.target.value as ProveedorLogistica)}
+              >
+                {(Object.keys(PROVEEDOR_LOGISTICA_LABEL) as ProveedorLogistica[]).map((p) => (
+                  <option key={p} value={p}>
+                    {PROVEEDOR_LOGISTICA_LABEL[p]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>Número de seguimiento / pedido</label>
+              <input
+                className={inputClass}
+                value={numeroSeguimiento}
+                onChange={(e) => setNumeroSeguimiento(e.target.value)}
+                placeholder="Nº de pedido en Rappi/PedidosYa, guía de un correo, etc. (opcional)"
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Link de seguimiento (opcional)</label>
+              <input
+                className={inputClass}
+                type="url"
+                value={urlSeguimiento}
+                onChange={(e) => setUrlSeguimiento(e.target.value)}
+                placeholder="https://..."
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleConfirmar}>
+              Marcar en camino
+            </button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

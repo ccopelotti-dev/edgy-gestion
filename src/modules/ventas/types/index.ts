@@ -170,10 +170,43 @@ export interface Orden {
   contactoNombre?: string;
   contactoTelefono?: string;
 
+  /**
+   * Despacho/logística (Fase 21) -- capa de envío ORTOGONAL al ciclo de
+   * vida principal (`estado`): no toda Orden se despacha (una comanda de
+   * salón servida en mesa o un service no tienen "en camino"), así que
+   * esto vive aparte en vez de sumarse como un paso más de EstadoOrden.
+   * El operador la completa a mano, normalmente después de facturar
+   * (`comprobanteIds.length > 0`), pero nada lo obliga.
+   *
+   * Etapa 1 (esta fase): carga manual, sin integración real todavía --
+   * `proveedorLogistica` es solo una etiqueta, y `numeroSeguimiento`/
+   * `urlSeguimiento` son el número de pedido en la app de delivery (ej.
+   * Rappi/PedidosYa) o la guía de un correo, tipeados por el operador.
+   * El modelo queda listo para que una futura Etapa 2 (webhook/API por
+   * proveedor) actualice estos mismos campos en vez de depender de
+   * carga manual, sin cambiar nada de lo que ya lee la UI.
+   */
+  estadoLogistica?: EstadoLogistica;
+  proveedorLogistica?: ProveedorLogistica;
+  numeroSeguimiento?: string;
+  urlSeguimiento?: string;
+  fechaDespacho?: string;
+
   comprobanteIds: string[];       // comprobantes generados
   createdAt: string;
   updatedAt: string;
 }
+
+export type EstadoLogistica = 'sin_despacho' | 'en_camino' | 'entregado';
+
+export type ProveedorLogistica =
+  | 'propio'
+  | 'rappi'
+  | 'pedidosya'
+  | 'andreani'
+  | 'correo_argentino'
+  | 'oca'
+  | 'otro';
 
 // Labels por tipo de orden
 export const TIPO_ORDEN_LABEL: Record<TipoOrden, string> = {
@@ -365,6 +398,22 @@ export function labelEstadoOrden(estado: EstadoOrden, tipo: TipoOrden): string {
   }
   return ESTADO_ORDEN_LABEL[estado];
 }
+
+export const ESTADO_LOGISTICA_LABEL: Record<EstadoLogistica, string> = {
+  sin_despacho: 'Sin despacho',
+  en_camino: 'En camino',
+  entregado: 'Entregado',
+};
+
+export const PROVEEDOR_LOGISTICA_LABEL: Record<ProveedorLogistica, string> = {
+  propio: 'Delivery propio',
+  rappi: 'Rappi',
+  pedidosya: 'PedidosYa',
+  andreani: 'Andreani',
+  correo_argentino: 'Correo Argentino',
+  oca: 'OCA',
+  otro: 'Otro',
+};
 
 export const ESTADO_COMPROBANTE_LABEL: Record<EstadoComprobante, string> = {
   emitido: 'Emitido',
