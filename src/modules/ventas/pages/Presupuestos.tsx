@@ -9,7 +9,6 @@ import {
   Plus,
   ChevronDown,
   ChevronUp,
-  Send,
   Edit2,
   CheckCircle2,
   XCircle,
@@ -18,6 +17,8 @@ import {
   FileText,
   Download,
   Loader2,
+  Mail,
+  MessageCircle,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -47,6 +48,7 @@ import type {
   PresupuestoItem,
   EstadoPresupuesto,
   TipoOrden,
+  Cliente,
 } from '../types';
 import {
   ESTADO_PRESUPUESTO_LABEL,
@@ -176,6 +178,49 @@ export default function Presupuestos() {
     }
   };
 
+  // Envío por email / WhatsApp al cliente -- mismo criterio que Cotizaciones
+  // (Compras): todavía no hay un motor de envío real, así que se arma un
+  // link mailto:/wa.me con asunto y texto ya redactados a partir de los
+  // datos del presupuesto, y se abre el cliente de correo o WhatsApp Web
+  // del propio usuario. Un borrador enviado por cualquiera de las dos vías
+  // pasa automáticamente a estado 'enviado'.
+  const armarTextoPresupuesto = (pres: Presupuesto) => {
+    const numero = formatNumero(PREFIJO_PRESUPUESTO, pres.numero);
+    const lineas = pres.items.map((it) => `- ${it.descripcion} · cant. ${it.cantidad}`);
+    return {
+      asunto: `Presupuesto ${numero}`,
+      cuerpo:
+        `Hola${clienteNombre(pres.clienteId) !== 'Desconocido' ? ` ${clienteNombre(pres.clienteId)}` : ''},\n\n` +
+        `Le enviamos el presupuesto ${numero} (válido ${pres.validezDias} días desde el ${formatDate(pres.fecha)}):\n\n` +
+        `${lineas.join('\n')}\n\n` +
+        `Total: ${formatARS(pres.total)}\n\n` +
+        `${pres.condiciones ? `Condiciones: ${pres.condiciones}\n\n` : ''}` +
+        `${pres.notas ? `Notas: ${pres.notas}\n\n` : ''}` +
+        `Quedamos a disposición.\nSaludos.`,
+    };
+  };
+
+  const marcarEnviadoSiBorrador = (pres: Presupuesto) => {
+    if (pres.estado === 'borrador') handleEnviar(pres.id);
+  };
+
+  const handleEnviarEmail = (pres: Presupuesto, cliente?: Cliente) => {
+    if (!cliente?.email) return;
+    const { asunto, cuerpo } = armarTextoPresupuesto(pres);
+    const url = `mailto:${cliente.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+    window.open(url, '_blank');
+    marcarEnviadoSiBorrador(pres);
+  };
+
+  const handleEnviarWhatsapp = (pres: Presupuesto, cliente?: Cliente) => {
+    if (!cliente?.telefono) return;
+    const telefono = cliente.telefono.replace(/\D/g, '');
+    const { cuerpo } = armarTextoPresupuesto(pres);
+    const url = `https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`;
+    window.open(url, '_blank');
+    marcarEnviadoSiBorrador(pres);
+  };
+
   // ── Render ────────────────────────────────────────────────
 
   return (
@@ -258,27 +303,32 @@ export default function Presupuestos() {
                 <th className="px-4 py-3 font-medium">Validez</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 w-10" />
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
                 <th className="px-4 py-3 w-10" />
               </tr>
             </thead>
             <tbody>
-              {presupuestosFiltrados.map((pres) => (
-                <PresupuestoRow
-                  key={pres.id}
-                  presupuesto={pres}
-                  isExpanded={expandedId === pres.id}
-                  clienteNombre={clienteNombre(pres.clienteId)}
-                  ordenNumero={pres.ordenId ? ordenNumero(pres.ordenId) : null}
-                  onToggleExpand={() => handleToggleExpand(pres.id)}
-                  onEnviar={() => handleEnviar(pres.id)}
-                  onEditar={() => handleEditar(pres)}
-                  onCancelar={() => handleCancelar(pres.id)}
-                  onAprobar={(tipo) => handleAprobar(pres.id, tipo)}
-                  onDescargarPdf={() => handleDescargarPdf(pres)}
-                  generandoPdf={generandoPdfId === pres.id}
-                />
-              ))}
+              {presupuestosFiltrados.map((pres) => {
+                const cliente = clientes.find((c) => c.id === pres.clienteId);
+                return (
+                  <PresupuestoRow
+                    key={pres.id}
+                    presupuesto={pres}
+                    isExpanded={expandedId === pres.id}
+                    clienteNombre={clienteNombre(pres.clienteId)}
+                    cliente={cliente}
+                    ordenNumero={pres.ordenId ? ordenNumero(pres.ordenId) : null}
+                    onToggleExpand={() => handleToggleExpand(pres.id)}
+                    onEditar={() => handleEditar(pres)}
+                    onCancelar={() => handleCancelar(pres.id)}
+                    onAprobar={(tipo) => handleAprobar(pres.id, tipo)}
+                    onDescargarPdf={() => handleDescargarPdf(pres)}
+                    generandoPdf={generandoPdfId === pres.id}
+                    onEnviarEmail={() => handleEnviarEmail(pres, cliente)}
+                    onEnviarWhatsapp={() => handleEnviarWhatsapp(pres, cliente)}
+                  />
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -361,31 +411,34 @@ interface PresupuestoRowProps {
   presupuesto: Presupuesto;
   isExpanded: boolean;
   clienteNombre: string;
+  cliente?: Cliente;
   ordenNumero: string | null;
   onToggleExpand: () => void;
-  onEnviar: () => void;
   onEditar: () => void;
   onCancelar: () => void;
   onAprobar: (tipo: TipoOrden) => void;
   onDescargarPdf: () => void;
   generandoPdf: boolean;
+  onEnviarEmail: () => void;
+  onEnviarWhatsapp: () => void;
 }
 
 function PresupuestoRow({
   presupuesto,
   isExpanded,
   clienteNombre,
+  cliente,
   ordenNumero,
   onToggleExpand,
-  onEnviar,
   onEditar,
   onCancelar,
   onAprobar,
   onDescargarPdf,
   generandoPdf,
+  onEnviarEmail,
+  onEnviarWhatsapp,
 }: PresupuestoRowProps) {
   const p = presupuesto;
-  const esReadOnly = p.estado === 'vencido' || p.estado === 'cancelado' || p.estado === 'aprobado';
 
   return (
     <>
@@ -408,22 +461,62 @@ function PresupuestoRow({
         <td className="px-4 py-3">
           <EstadoPresupuestoBadge estado={p.estado} />
         </td>
-        <td className="px-4 py-3 text-center">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDescargarPdf();
-            }}
-            disabled={generandoPdf}
-            title="Descargar PDF"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-          >
-            {generandoPdf ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
+        <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onDescargarPdf}
+              disabled={generandoPdf}
+              title="Descargar PDF"
+              className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+            >
+              {generandoPdf ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+            </button>
+            <button
+              onClick={onEnviarEmail}
+              disabled={!cliente?.email}
+              title={cliente?.email ? `Enviar por email a ${cliente.email}` : 'El cliente no tiene email cargado'}
+              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+            >
+              <Mail className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={onEnviarWhatsapp}
+              disabled={!cliente?.telefono}
+              title={cliente?.telefono ? `Enviar por WhatsApp a ${cliente.telefono}` : 'El cliente no tiene teléfono cargado'}
+              className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+            </button>
+            {p.estado === 'borrador' && (
+              <>
+                <button onClick={onEditar} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Editar">
+                  <Edit2 className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={onCancelar} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Cancelar">
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </>
             )}
-          </button>
+            {p.estado === 'enviado' && (
+              <>
+                <button onClick={() => onAprobar('pedido')} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Aprobar y crear orden">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={onCancelar} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Cancelar">
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            {p.estado === 'aprobado' && ordenNumero && (
+              <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full whitespace-nowrap">
+                <Link2 className="h-3 w-3 inline mr-1" />{ordenNumero}
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-4 py-3 text-center">
           {isExpanded ? (
@@ -541,71 +634,6 @@ function PresupuestoRow({
                 <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm text-indigo-800">
                   <Link2 className="h-4 w-4" />
                   Orden generada: <span className="font-mono font-medium">{ordenNumero}</span>
-                </div>
-              )}
-
-              {/* Acciones según estado */}
-              {!esReadOnly && (
-                <div className="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
-                  {p.estado === 'borrador' && (
-                    <>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEnviar();
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
-                      >
-                        <Send className="h-3.5 w-3.5" />
-                        Enviar
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditar();
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                      >
-                        <Edit2 className="h-3.5 w-3.5" />
-                        Editar
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCancelar();
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 transition-colors"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        Cancelar
-                      </button>
-                    </>
-                  )}
-
-                  {p.estado === 'enviado' && (
-                    <>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAprobar('pedido');
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 transition-colors"
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Aprobar y crear orden
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCancelar();
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 transition-colors"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        Cancelar
-                      </button>
-                    </>
-                  )}
                 </div>
               )}
             </div>
