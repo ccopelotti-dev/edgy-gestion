@@ -33,7 +33,30 @@ export interface EntregaVianda {
   planId: string
   fecha: string
   cantidad: number
-  menuDelDia?: string
+  /**
+   * Producto real del catálogo (rubro "Viandas") -- Fase 24b. Reemplaza al
+   * antiguo `menuDelDia` de texto libre: ahora cada entrega es una línea de
+   * catálogo real, así se puede descontar stock/insumos y facturar en cta.
+   * cte. como cualquier otra venta. `productoNombre` se resuelve con un
+   * join a `productos` en el fetch (no vive en la tabla entregas_vianda).
+   */
+  productoId: string
+  productoNombre?: string
+  /**
+   * Prorrateo del abono (Fase 24b, decisión explícita del cliente): cada
+   * entrega se factura a `precioAbono / cantidadPeriodo` del plan, NO al
+   * precio de catálogo del producto -- es una foto tomada al momento de
+   * generar la entrega (si `precioAbono` cambia después, las entregas ya
+   * generadas no se recalculan).
+   */
+  precioUnitario: number
+  /** Orden en `ordenes_venta` (tipo 'pedido', origenModulo 'viandas')
+   * generada para esta entrega -- dispara el ciclo normal de Comandas
+   * (Ordenes.tsx) hasta facturarse en cta. cte. */
+  ordenId: string
+  /** Se completa recién cuando la Orden pasa a 'entregado' y se factura
+   * automáticamente (ver handleCambiarEstado en ventas/pages/Ordenes.tsx). */
+  comprobanteId?: string
   createdAt: string
 }
 

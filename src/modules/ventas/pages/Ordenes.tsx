@@ -259,6 +259,87 @@ export default function Ordenes() {
 
   const handleCambiarEstado = (id: string, nuevoEstado: EstadoOrden) => {
     dispatch({ type: 'CAMBIAR_ESTADO_ORDEN', payload: { id, nuevoEstado } });
+
+    // Fase 24c (Viandas): cada entrega se factura sola en cta. cte. al
+    // llegar a 'entregado' -- retiro en mostrador o entrega a domicilio ya
+    // hecha -- sin pasar por el dialog de "Facturar": el precio ya viene
+    // resuelto (prorrateo del abono) desde que se generó la Orden en
+    // Viandas ("Generar entregas de hoy" / registro manual en Plan.tsx).
+    if (nuevoEstado === 'entregado') {
+      const orden = todasOrdenes.find((o) => o.id === id);
+      if (orden && orden.origenModulo === 'viandas' && orden.comprobanteIds.length === 0) {
+        facturarOrdenViandaAutomatico(orden);
+      }
+    }
+  };
+
+  const facturarOrdenViandaAutomatico = (orden: Orden) => {
+    const items: ComprobanteItem[] = orden.items.map((i) => ({
+      id: generarId(),
+      productoId: i.productoId,
+      descripcion: i.descripcion,
+      cantidad: i.cantidad,
+      precioUnitario: i.precioUnitario,
+      descuento: i.descuento,
+      alicuotaIva: 0,
+      subtotal: i.subtotal,
+      montoIva: 0,
+    }));
+    const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
+    const fecha = todayISO();
+    const comprobanteId = generarId();
+    // Capturado ANTES del dispatch, mismo criterio que en
+    // handleSaveComprobante: ADD_COMPROBANTE incrementa el contador.
+    const numeroAsignado = nextNumeroComprobante.factura;
+
+    dispatch({
+      type: 'ADD_COMPROBANTE',
+      payload: {
+        id: comprobanteId,
+        tipo: 'factura',
+        modoEmision: 'interno',
+        clienteId: orden.clienteId,
+        ordenId: orden.id,
+        fecha,
+        items,
+        subtotal,
+        descuentoGeneral: 0,
+        montoIva: 0,
+        total: subtotal,
+        estado: 'emitido',
+        medioPago: 'cuenta_corriente',
+        montoCobrado: 0,
+        saldoPendiente: subtotal,
+        origenModulo: 'viandas',
+        createdAt: nowISO(),
+        updatedAt: nowISO(),
+      },
+    });
+
+    if (clienteTenant?.id) {
+      const clienteReal = clientes.find((c) => c.id === orden.clienteId);
+      aplicarEfectosCatalogoAlFacturar(
+        items,
+        clienteTenant.id,
+        numeroAsignado,
+        fecha,
+        clienteReal?.nombre ?? orden.contactoNombre ?? '',
+        clienteReal?.telefono ?? orden.contactoTelefono ?? '',
+      );
+    }
+
+    // Escritura de vuelta hacia Viandas -- no hay dispatch cross-módulo
+    // (ese store no está montado acá, mismo caso que el resto de los
+    // helpers cross-módulo de esta fase): deja constancia de qué
+    // comprobante facturó esta entrega, para que Plan.tsx la muestre
+    // como "Facturada" en vez de "Pendiente".
+    supabase
+      .from('entregas_vianda')
+      .update({ comprobante_id: comprobanteId })
+      .eq('orden_id', orden.id)
+      .then(({ error }: { error: unknown }) => {
+        if (error) console.error('Viandas · error marcando la entrega como facturada:', error);
+      });
   };
 
   const handleIniciarEntregaParcial = (orden: Orden) => {

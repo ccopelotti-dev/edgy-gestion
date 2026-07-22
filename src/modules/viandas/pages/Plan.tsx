@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,11 @@ import { usePlanVianda, useEntregasDePlan, useViandas } from '../data/store'
 import { formatARS, formatFecha, daysUntil, todayISO } from '../lib/format'
 import { PERIODO_VIANDA_LABEL, ESTADO_PLAN_VIANDA_LABEL } from '../types'
 import { cobrarAbonoVianda } from '../lib/cobrarAbonoVianda'
+import {
+  obtenerProductosVianda,
+  crearOrdenParaEntregaVianda,
+  type ProductoViandaCandidato,
+} from '../lib/generarEntregaVianda'
 
 // Detalle de un plan: registrar entregas, cobrar el abono y cancelar.
 // El cobro reutiliza el flujo de Cobro de Ventas (ver
@@ -34,9 +39,16 @@ export default function Plan() {
 
   const [fechaEntrega, setFechaEntrega] = useState(todayISO())
   const [cantidadEntrega, setCantidadEntrega] = useState(1)
-  const [menuDelDia, setMenuDelDia] = useState('')
+  const [productoId, setProductoId] = useState('')
+  const [productos, setProductos] = useState<ProductoViandaCandidato[]>([])
+  const [generando, setGenerando] = useState(false)
   const [medioPago, setMedioPago] = useState<MedioPago>('efectivo')
   const [cobrando, setCobrando] = useState(false)
+
+  useEffect(() => {
+    if (!cliente?.id) return
+    obtenerProductosVianda(cliente.id).then(setProductos)
+  }, [cliente?.id])
 
   if (!plan) {
     return (
@@ -53,19 +65,39 @@ export default function Plan() {
   const dias = daysUntil(plan.fechaVencimiento)
   const vencido = plan.estado === 'activo' && dias < 0
 
-  function agregarEntrega() {
-    if (!plan || cantidadEntrega <= 0) return
+  async function agregarEntrega() {
+    if (!plan || !cliente?.id || cantidadEntrega <= 0 || !productoId) return
+    const producto = productos.find((p) => p.id === productoId)
+    if (!producto) return
+
+    setGenerando(true)
+    const resultado = await crearOrdenParaEntregaVianda(
+      cliente.id,
+      plan,
+      producto,
+      fechaEntrega,
+      cantidadEntrega,
+    )
+    setGenerando(false)
+
+    if (!resultado) {
+      window.alert('No se pudo generar la orden de la entrega. Revisá la consola e intentá de nuevo.')
+      return
+    }
+
     dispatch({
       type: 'AGREGAR_ENTREGA',
       payload: {
         planId: plan.id,
         fecha: fechaEntrega,
         cantidad: cantidadEntrega,
-        menuDelDia: menuDelDia || undefined,
+        productoId: producto.id,
+        productoNombre: producto.nombre,
+        precioUnitario: resultado.precioUnitario,
+        ordenId: resultado.ordenId,
       },
     })
     setCantidadEntrega(1)
-    setMenuDelDia('')
   }
 
   async function cobrarAbono() {
@@ -143,19 +175,31 @@ export default function Plan() {
                   />
                 </div>
                 <div className="flex flex-1 flex-col gap-1.5">
-                  <Label htmlFor="menu-dia">Menú del día (opcional)</Label>
-                  <Input
-                    id="menu-dia"
-                    value={menuDelDia}
-                    onChange={(e) => setMenuDelDia(e.target.value)}
-                    placeholder="milanesa con puré..."
-                  />
+                  <Label htmlFor="producto-entrega">Producto</Label>
+                  <Select value={productoId} onValueChange={setProductoId}>
+                    <SelectTrigger id="producto-entrega">
+                      <SelectValue placeholder="Elegir producto..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {productos.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Button onClick={agregarEntrega}>
+                <Button onClick={agregarEntrega} disabled={generando || !productoId}>
                   <Plus className="mr-1.5 h-4 w-4" />
-                  Agregar
+                  {generando ? 'Generando…' : 'Agregar'}
                 </Button>
               </div>
+              {productos.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No hay productos en el rubro "Viandas" todavía -- creálos desde Productos y
+                  Stock antes de registrar entregas.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -193,13 +237,15 @@ export default function Plan() {
             <tr>
               <th className="px-3 py-2">Fecha</th>
               <th className="px-3 py-2 text-right">Cantidad</th>
-              <th className="px-3 py-2">Menú del día</th>
+              <th className="px-3 py-2">Producto</th>
+              <th className="px-3 py-2 text-right">Precio</th>
+              <th className="px-3 py-2">Facturación</th>
             </tr>
           </thead>
           <tbody>
             {entregas.length === 0 ? (
               <tr>
-                <td colSpan={3} className="text-muted-foreground px-3 py-6 text-center">
+                <td colSpan={5} className="text-muted-foreground px-3 py-6 text-center">
                   Todavía no hay entregas registradas.
                 </td>
               </tr>
@@ -208,7 +254,15 @@ export default function Plan() {
                 <tr key={e.id} className="border-t">
                   <td className="px-3 py-2">{formatFecha(e.fecha)}</td>
                   <td className="px-3 py-2 text-right">{e.cantidad}</td>
-                  <td className="px-3 py-2">{e.menuDelDia ?? '—'}</td>
+                  <td className="px-3 py-2">{e.productoNombre ?? '—'}</td>
+                  <td className="px-3 py-2 text-right">{formatARS(e.precioUnitario * e.cantidad)}</td>
+                  <td className="px-3 py-2">
+                    {e.comprobanteId ? (
+                      <span className="text-green-700">Facturada</span>
+                    ) : (
+                      <span className="text-muted-foreground">Pendiente</span>
+                    )}
+                  </td>
                 </tr>
               ))
             )}

@@ -44,7 +44,15 @@ type Action =
   | { type: 'CANCELAR_PLAN'; payload: { planId: string } }
   | {
       type: 'AGREGAR_ENTREGA'
-      payload: { planId: string; fecha: string; cantidad: number; menuDelDia?: string }
+      payload: {
+        planId: string
+        fecha: string
+        cantidad: number
+        productoId: string
+        productoNombre?: string
+        precioUnitario: number
+        ordenId: string
+      }
     }
   | { type: 'SET_STATE'; payload: ViandasState }
 
@@ -84,7 +92,10 @@ function reducer(state: ViandasState, action: Action): ViandasState {
         planId: action.payload.planId,
         fecha: action.payload.fecha,
         cantidad: action.payload.cantidad,
-        menuDelDia: action.payload.menuDelDia,
+        productoId: action.payload.productoId,
+        productoNombre: action.payload.productoNombre,
+        precioUnitario: action.payload.precioUnitario,
+        ordenId: action.payload.ordenId,
         createdAt: todayISO(),
       }
       return { ...state, entregas: [...state.entregas, nueva] }
@@ -118,7 +129,10 @@ function entregaToRow(e: EntregaVianda) {
     plan_id: e.planId,
     fecha: e.fecha,
     cantidad: e.cantidad,
-    menu_del_dia: e.menuDelDia ?? null,
+    producto_id: e.productoId,
+    precio_unitario: e.precioUnitario,
+    orden_id: e.ordenId,
+    comprobante_id: e.comprobanteId ?? null,
   }
 }
 
@@ -157,7 +171,10 @@ async function fetchViandasState(): Promise<ViandasState> {
       .from('planes_vianda')
       .select('*, clientes_venta(nombre)')
       .order('created_at', { ascending: false }),
-    supabase.from('entregas_vianda').select('*').order('fecha', { ascending: false }),
+    supabase
+      .from('entregas_vianda')
+      .select('*, productos(nombre)')
+      .order('fecha', { ascending: false }),
   ])
 
   const planes: PlanVianda[] = (planesRes.data ?? []).map((r: any) => ({
@@ -179,7 +196,11 @@ async function fetchViandasState(): Promise<ViandasState> {
     planId: r.plan_id,
     fecha: r.fecha,
     cantidad: Number(r.cantidad),
-    menuDelDia: r.menu_del_dia ?? undefined,
+    productoId: r.producto_id ?? '',
+    productoNombre: r.productos?.nombre ?? undefined,
+    precioUnitario: Number(r.precio_unitario ?? 0),
+    ordenId: r.orden_id ?? '',
+    comprobanteId: r.comprobante_id ?? undefined,
     createdAt: r.created_at,
   }))
 
@@ -238,6 +259,11 @@ export function usePlanesVianda(): PlanVianda[] {
 export function usePlanVianda(planId: string): PlanVianda | undefined {
   const { state } = useViandas()
   return useMemo(() => state.planes.find((p) => p.id === planId), [state.planes, planId])
+}
+
+export function useEntregas(): EntregaVianda[] {
+  const { state } = useViandas()
+  return state.entregas
 }
 
 export function useEntregasDePlan(planId: string): EntregaVianda[] {

@@ -744,6 +744,7 @@ function productoToRow(p: Producto, clienteId: string) {
     proveedor_id: p.proveedorId || null,
     tipo: p.tipo,
     plantilla_garantia_id: p.plantillaGarantiaId || null,
+    dias_disponibles: p.diasDisponibles && p.diasDisponibles.length ? p.diasDisponibles : null,
   }
 }
 
@@ -1486,6 +1487,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     tipo: (r.tipo as Producto['tipo']) ?? 'unico',
     variantes: variantesByProducto.get(r.id) ?? [],
     plantillaGarantiaId: r.plantilla_garantia_id ?? undefined,
+    diasDisponibles: r.dias_disponibles ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 

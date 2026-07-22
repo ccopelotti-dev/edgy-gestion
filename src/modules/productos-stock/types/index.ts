@@ -302,11 +302,42 @@ export interface Producto {
    * seteado, hereda la plantilla del rubro (Rubro.plantillaGarantiaId), si
    * el rubro tiene una asignada. */
   plantillaGarantiaId?: string
+  /**
+   * Días de la semana en que el producto se produce/está disponible
+   * (Fase 24a). Valores 0-6 siguiendo la convención de `Date.getDay()`
+   * (0 = domingo ... 6 = sábado) para poder comparar directo contra
+   * "hoy" sin traducir. `undefined` o `[]` = disponible todos los días
+   * (default, no afecta a ningún producto existente).
+   *
+   * Pensado originalmente para Viandas (un menú que solo se elabora
+   * ciertos días) pero es un campo genérico de Producto -- cualquier
+   * artículo con disponibilidad acotada por día puede usarlo. Se
+   * respeta en el Catálogo Público/Menú QR (`menu_publico()`, ver
+   * migración 0064) -- los canales internos (Punto de Venta, Comandas,
+   * Nuevo comprobante) NO lo filtran a propósito: el personal sabe qué
+   * hay disponible hoy, la restricción es para que un cliente
+   * autoservido no pida algo que no se está haciendo ese día.
+   */
+  diasDisponibles?: number[]
   createdAt: string
 }
 
 /** Cantidad máxima de fotos permitidas por producto en la galería. */
 export const MAX_IMAGENES_PRODUCTO = 6
+
+/** Labels y orden de los días de la semana, mismo índice que `Date.getDay()`
+ * (0 = domingo). Usado por el selector de "Días disponibles" de Producto. */
+export const DIA_SEMANA_LABEL: Record<number, string> = {
+  0: 'Domingo',
+  1: 'Lunes',
+  2: 'Martes',
+  3: 'Miércoles',
+  4: 'Jueves',
+  5: 'Viernes',
+  6: 'Sábado',
+}
+
+export const DIAS_SEMANA_ORDEN = [1, 2, 3, 4, 5, 6, 0]
 
 // ─── Insumo ─────────────────────────────────────────────────────────────────────
 

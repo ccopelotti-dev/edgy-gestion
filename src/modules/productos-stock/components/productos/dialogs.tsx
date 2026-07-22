@@ -35,7 +35,14 @@ import type {
   UnidadMedida,
   MotivoAjuste,
 } from '../../types'
-import { ALICUOTAS_IVA, UNIDADES, MOTIVOS_AJUSTE, MAX_IMAGENES_PRODUCTO } from '../../types'
+import {
+  ALICUOTAS_IVA,
+  UNIDADES,
+  MOTIVOS_AJUSTE,
+  MAX_IMAGENES_PRODUCTO,
+  DIA_SEMANA_LABEL,
+  DIAS_SEMANA_ORDEN,
+} from '../../types'
 
 // ─── Shared input class ───────────────────────────────────────────────────────
 
@@ -91,6 +98,7 @@ const emptyProducto: ProductoFormData = {
   tipo: 'unico',
   variantes: [],
   plantillaGarantiaId: undefined,
+  diasDisponibles: undefined,
 }
 
 export function ProductoDialog({
@@ -219,6 +227,19 @@ export function ProductoDialog({
     setForm((f) => ({ ...f, tipo, variantes: tipo === 'unico' ? [] : f.variantes }))
   }
 
+  // ── Días disponibles (Fase 24a) ──────────────────────────────────────────
+  // Sin selección = disponible todos los días (default, ver comentario en
+  // types/index.ts). Toggle simple: agrega/quita el día del array.
+  function handleToggleDia(dia: number) {
+    setForm((f) => {
+      const actual = f.diasDisponibles ?? []
+      const nuevo = actual.includes(dia)
+        ? actual.filter((d) => d !== dia)
+        : [...actual, dia]
+      return { ...f, diasDisponibles: nuevo }
+    })
+  }
+
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return
     setErrorImagen('')
@@ -302,6 +323,7 @@ export function ProductoDialog({
       marcaId: form.marcaId || undefined,
       proveedorId: form.proveedorId || undefined,
       plantillaGarantiaId: form.plantillaGarantiaId || undefined,
+      diasDisponibles: form.diasDisponibles && form.diasDisponibles.length ? form.diasDisponibles : undefined,
       variantes:
         form.tipo === 'con_variantes'
           ? form.variantes.map((v) => ({
@@ -835,6 +857,31 @@ export function ProductoDialog({
               />
               Disponible
             </label>
+          </div>
+
+          {/* Días disponibles (Fase 24a) -- pensado para productos con
+              disponibilidad acotada por día (ej. viandas), pero sirve para
+              cualquier producto. Sin marcar ninguno = todos los días. */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Días disponibles</label>
+            <div className="flex flex-wrap gap-3">
+              {DIAS_SEMANA_ORDEN.map((dia) => (
+                <label key={dia} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={(form.diasDisponibles ?? []).includes(dia)}
+                    onChange={() => handleToggleDia(dia)}
+                    className="rounded border-input"
+                  />
+                  {DIA_SEMANA_LABEL[dia]}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Sin marcar ninguno, el producto está disponible todos los días. Esto solo se
+              respeta en el Catálogo Público/Menú QR -- el personal siempre puede vender el
+              producto desde Punto de Venta, Comandas, etc.
+            </p>
           </div>
         </div>
 
