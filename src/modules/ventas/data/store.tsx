@@ -1031,6 +1031,12 @@ async function fetchVentasState(): Promise<VentasState> {
     urlSeguimiento: r.url_seguimiento ?? undefined,
     fechaDespacho: r.fecha_despacho ?? undefined,
     direccionEntrega: direccionPorOrden.get(r.id) ?? undefined,
+    // Fase 23a: pago adelantado online (Fase 12) -- columnas ya
+    // existentes en `ordenes_venta`, Ventas simplemente no las leía.
+    pagoProveedor: r.pago_proveedor ?? undefined,
+    pagoEstado: r.pago_estado ?? undefined,
+    pagoMonto: r.pago_monto != null ? Number(r.pago_monto) : undefined,
+    pagoPaymentId: r.pago_payment_id ?? undefined,
     comprobanteIds: comprobanteIdsPorOrden.get(r.id) ?? [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,

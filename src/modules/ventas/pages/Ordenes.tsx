@@ -290,11 +290,12 @@ export default function Ordenes() {
     // así que este es el número que le va a tocar a este comprobante en
     // particular (mismo criterio que Comprobantes.tsx/PuntoDeVenta.tsx).
     const numeroAsignado = nextNumeroComprobante[data.tipo];
+    const comprobanteId = generarId();
 
     dispatch({
       type: 'ADD_COMPROBANTE',
       payload: {
-        id: generarId(),
+        id: comprobanteId,
         tipo: data.tipo,
         modoEmision: data.modoEmision,
         clienteId: data.clienteId,
@@ -331,6 +332,32 @@ export default function Ordenes() {
         contactoNombre,
         contactoTelefono,
       );
+    }
+
+    // Fase 23a: si esta orden ya se cobró por adelantado con Mercado Pago
+    // (Fase 12 -- el cliente pagó desde el Catálogo Público antes de que
+    // existiera factura), se genera acá mismo un Cobro imputado 100% a la
+    // factura recién creada, reusando el motor de Cobro/Recibo ya
+    // existente (Cobranzas.tsx) -- así el dinero que ya entró no queda
+    // como saldo pendiente en la factura, y el Recibo queda disponible
+    // desde los mismos lugares donde ya se descargan (Cobranzas/Clientes).
+    if (data.tipo === 'factura' && ordenParaFacturar?.pagoEstado === 'aprobado' && ordenParaFacturar.pagoMonto) {
+      const montoAImputar = Math.min(ordenParaFacturar.pagoMonto, total);
+      dispatch({
+        type: 'ADD_COBRO',
+        payload: {
+          id: generarId(),
+          clienteId: data.clienteId,
+          fecha: data.fecha,
+          monto: montoAImputar,
+          medioPago: 'mercadopago',
+          imputaciones: [{ comprobanteId, montoImputado: montoAImputar }],
+          notas: ordenParaFacturar.pagoPaymentId
+            ? `Cobro automático -- pago adelantado por Mercado Pago (ID ${ordenParaFacturar.pagoPaymentId}).`
+            : 'Cobro automático -- pago adelantado por Mercado Pago.',
+          createdAt: nowISO(),
+        },
+      });
     }
 
     setComprobanteDialogOpen(false);

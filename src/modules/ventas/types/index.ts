@@ -202,6 +202,22 @@ export interface Orden {
    */
   direccionEntrega?: string;
 
+  /**
+   * Pago adelantado online (Fase 12) -- columnas `pago_*` de
+   * `ordenes_venta`, cargadas por `crear-preferencia-pago`/`mp-webhook`
+   * (Netlify functions) cuando el cliente paga desde el Catálogo
+   * Público antes de que exista ninguna factura. Fase 23a: al facturar
+   * esta orden, si `pagoEstado === 'aprobado'`, se genera automático un
+   * Cobro imputado 100% a la factura recién creada (ver
+   * `handleSaveComprobante` en Ordenes.tsx/Presupuestos.tsx) -- el
+   * dinero que ya entró por Mercado Pago no queda "perdido" como saldo
+   * pendiente en la factura.
+   */
+  pagoProveedor?: string;
+  pagoEstado?: 'pendiente' | 'aprobado' | 'rechazado' | 'en_proceso';
+  pagoMonto?: number;
+  pagoPaymentId?: string;
+
   comprobanteIds: string[];       // comprobantes generados
   createdAt: string;
   updatedAt: string;
