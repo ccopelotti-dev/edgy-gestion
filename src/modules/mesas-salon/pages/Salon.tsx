@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutGrid, Map as MapIcon, AlertTriangle, BellRing, Check } from 'lucide-react'
+import { LayoutGrid, Map as MapIcon, Flame, AlertTriangle, BellRing, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,16 @@ import {
   marcarLlamadoAtendido,
   type LlamadoMozo,
 } from '../lib/llamadosMozo'
+import {
+  calcularIntensidadPorMesa,
+  bucketIntensidad,
+  formatValorCalor,
+  COLOR_INTENSIDAD,
+  METRICA_CALOR_LABEL,
+  RANGO_CALOR_LABEL,
+  type MetricaCalor,
+  type RangoCalor,
+} from '../lib/heatmap'
 import type { EstadoMesa } from '../types'
 
 const ORIGEN_LLAMADO_LABEL: Record<LlamadoMozo['origen'], string> = {
@@ -50,11 +60,40 @@ export default function Salon() {
   const sectoresConMesas = useSectoresConMesas()
   const resumen = useResumenEstados()
   const { turno, cargando: cargandoTurno } = useTurnoActivo()
-  const [vista, setVista] = useState<'grilla' | 'plano'>('grilla')
+  const [vista, setVista] = useState<'grilla' | 'plano' | 'calor'>('grilla')
 
   const [nombreSector, setNombreSector] = useState('Salón principal')
   const [cantidadMesas, setCantidadMesas] = useState(8)
   const [sillasPorMesa, setSillasPorMesa] = useState(4)
+
+  // Fase 16.2: mapa de calor -- ver ../lib/heatmap.ts. Selector con las 3
+  // métricas (rotación/facturación/tiempo de ocupación) + selector de
+  // rango, según lo pedido: no una sola vista fija.
+  const [metricaCalor, setMetricaCalor] = useState<MetricaCalor>('rotacion')
+  const [rangoCalor, setRangoCalor] = useState<RangoCalor>('7d')
+  const [desdeCustom, setDesdeCustom] = useState('')
+  const [hastaCustom, setHastaCustom] = useState('')
+  const [valoresCalor, setValoresCalor] = useState<Map<string, number>>(new Map())
+  const [cargandoCalor, setCargandoCalor] = useState(false)
+
+  useEffect(() => {
+    if (vista !== 'calor' || !cliente?.id) return
+    if (rangoCalor === 'custom' && (!desdeCustom || !hastaCustom)) return
+    let activo = true
+    setCargandoCalor(true)
+    calcularIntensidadPorMesa(cliente.id, metricaCalor, rangoCalor, desdeCustom, hastaCustom)
+      .then((valores) => {
+        if (activo) setValoresCalor(valores)
+      })
+      .finally(() => {
+        if (activo) setCargandoCalor(false)
+      })
+    return () => {
+      activo = false
+    }
+  }, [vista, cliente?.id, metricaCalor, rangoCalor, desdeCustom, hastaCustom])
+
+  const maximoCalor = useMemo(() => Math.max(0, ...Array.from(valoresCalor.values())), [valoresCalor])
 
   // Fase 13c: llamados a mozo en tiempo real -- ver ../lib/llamadosMozo.ts.
   const [llamados, setLlamados] = useState<LlamadoMozo[]>([])
@@ -182,8 +221,75 @@ export default function Salon() {
               <MapIcon className="mr-1.5 h-4 w-4" />
               Plano
             </Button>
+            <Button
+              variant={vista === 'calor' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setVista('calor')}
+            >
+              <Flame className="mr-1.5 h-4 w-4" />
+              Calor
+            </Button>
           </div>
         </div>
+      )}
+
+      {/* Fase 16.2: controles del mapa de calor -- métrica + rango, ver
+          ../lib/heatmap.ts. Solo se muestran en la vista "Calor". */}
+      {vista === 'calor' && totalMesas > 0 && (
+        <Card>
+          <CardContent className="flex flex-wrap items-end gap-3 py-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="metrica-calor">Métrica</Label>
+              <select
+                id="metrica-calor"
+                value={metricaCalor}
+                onChange={(e) => setMetricaCalor(e.target.value as MetricaCalor)}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              >
+                {(Object.keys(METRICA_CALOR_LABEL) as MetricaCalor[]).map((m) => (
+                  <option key={m} value={m}>{METRICA_CALOR_LABEL[m]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="rango-calor">Rango</Label>
+              <select
+                id="rango-calor"
+                value={rangoCalor}
+                onChange={(e) => setRangoCalor(e.target.value as RangoCalor)}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              >
+                {(Object.keys(RANGO_CALOR_LABEL) as RangoCalor[]).map((r) => (
+                  <option key={r} value={r}>{RANGO_CALOR_LABEL[r]}</option>
+                ))}
+              </select>
+            </div>
+            {rangoCalor === 'custom' && (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="desde-calor">Desde</Label>
+                  <Input id="desde-calor" type="date" value={desdeCustom} onChange={(e) => setDesdeCustom(e.target.value)} className="h-9" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="hasta-calor">Hasta</Label>
+                  <Input id="hasta-calor" type="date" value={hastaCustom} onChange={(e) => setHastaCustom(e.target.value)} className="h-9" />
+                </div>
+              </>
+            )}
+            {cargandoCalor && <span className="text-muted-foreground text-xs">Calculando...</span>}
+            {!cargandoCalor && valoresCalor.size === 0 && (
+              <span className="text-muted-foreground text-xs">Sin comandas en este rango todavía.</span>
+            )}
+
+            <div className="flex w-full items-center gap-1.5 pt-1">
+              <span className="text-muted-foreground text-xs">Menos</span>
+              {COLOR_INTENSIDAD.map((color, i) => (
+                <span key={i} className={cn('h-3 w-6 rounded', color.split(' ')[0])} />
+              ))}
+              <span className="text-muted-foreground text-xs">Más</span>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {totalMesas === 0 ? (
@@ -236,7 +342,31 @@ export default function Salon() {
                   {mesas.filter((m) => m.estado === 'ocupada').length}/{mesas.length} ocupadas
                 </span>
               </div>
-              {vista === 'grilla' ? (
+              {vista === 'calor' ? (
+                <div className="flex flex-wrap gap-3">
+                  {mesas.map((mesa) => {
+                    const valor = valoresCalor.get(mesa.id) ?? 0
+                    const bucket = bucketIntensidad(valor, maximoCalor)
+                    return (
+                      <button
+                        key={mesa.id}
+                        onClick={() => abrirMesa(mesa.id)}
+                        disabled={soloLectura}
+                        title={`Mesa ${mesa.numero} · ${formatValorCalor(valor, metricaCalor)}`}
+                        className={cn(
+                          'flex h-16 w-16 flex-col items-center justify-center rounded-lg font-semibold shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                          COLOR_INTENSIDAD[bucket],
+                        )}
+                      >
+                        <span className="text-lg">{mesa.numero}</span>
+                        <span className="text-[9px] font-normal opacity-90 leading-tight text-center px-0.5">
+                          {formatValorCalor(valor, metricaCalor)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : vista === 'grilla' ? (
                 <div className="flex flex-wrap gap-3">
                   {mesas.map((mesa) => (
                     <button
