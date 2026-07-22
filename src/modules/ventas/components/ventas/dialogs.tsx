@@ -1989,3 +1989,120 @@ export function DespachoDialog({ open, onOpenChange, empleados, onConfirmar }: D
     </Dialog.Root>
   );
 }
+
+// ─── 6. RendicionDialog ──────────────────────────────────────
+//
+// Fase 23c: cierra la rendición de un cadete -- confirma qué pedidos
+// "cobra contra entrega" (ver Fase 23b) efectivamente liquida, cuánto
+// efectivo entregó, y compara contra lo esperado (suma de las facturas
+// seleccionadas). No hace falta un modelo nuevo: al confirmar, la
+// pantalla (Rendicion.tsx) genera un ADD_COBRO en efectivo por cada
+// factura -- el mismo motor de Cobro/Imputación que ya usan Cobranzas y
+// Fase 23a -- así que la factura pasa a "Cobrado" y el pedido deja de
+// aparecer solo en la lista de pendientes (mismo criterio de
+// cero-modelo-nuevo de Fase 23a).
+
+interface RendicionOrdenRow {
+  ordenId: string;
+  numeroOrden: number;
+  clienteNombre: string;
+  numeroComprobante: number;
+  saldoPendiente: number;
+}
+
+interface RendicionDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  cadeteNombre: string;
+  ordenes: RendicionOrdenRow[];
+  onConfirmar: (data: { montoDeclarado: number; notas?: string }) => void;
+}
+
+export function RendicionDialog({ open, onOpenChange, cadeteNombre, ordenes, onConfirmar }: RendicionDialogProps) {
+  const [montoDeclarado, setMontoDeclarado] = useState(0);
+  const [notas, setNotas] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setMontoDeclarado(0);
+      setNotas('');
+    }
+  }, [open]);
+
+  const montoEsperado = ordenes.reduce((s, o) => s + o.saldoPendiente, 0);
+  const diferencia = Math.round((montoDeclarado - montoEsperado) * 100) / 100;
+
+  const handleConfirmar = () => {
+    onConfirmar({ montoDeclarado, notas: notas.trim() || undefined });
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">
+              Rendición de {cadeteNombre}
+            </Dialog.Title>
+            <Dialog.Close className={btnIcon}>
+              <X className="w-5 h-5" />
+            </Dialog.Close>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border border-gray-200 divide-y max-h-48 overflow-y-auto">
+              {ordenes.map((o) => (
+                <div key={o.ordenId} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span className="text-gray-600">
+                    Pedido #{o.numeroOrden} — {o.clienteNombre}
+                  </span>
+                  <span className="font-medium text-gray-900">{formatARS(o.saldoPendiente)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between px-3 py-2 text-sm font-semibold bg-gray-50">
+                <span>Total esperado</span>
+                <span>{formatARS(montoEsperado)}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Efectivo entregado por el cadete *</label>
+              <input
+                className={inputClass}
+                type="number"
+                min={0}
+                step={0.01}
+                value={montoDeclarado}
+                onChange={(e) => setMontoDeclarado(Number(e.target.value))}
+              />
+              {Math.abs(diferencia) > 0.01 && (
+                <p className={`text-xs mt-1 ${diferencia < 0 ? 'text-red-600' : 'text-amber-600'}`}>
+                  Diferencia: {diferencia > 0 ? '+' : ''}
+                  {formatARS(diferencia)} {diferencia < 0 ? '(falta efectivo)' : '(sobra efectivo)'}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className={labelClass}>Notas (opcional)</label>
+              <input
+                className={inputClass}
+                value={notas}
+                onChange={(e) => setNotas(e.target.value)}
+                placeholder="Observaciones sobre la rendición..."
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleConfirmar} disabled={ordenes.length === 0}>
+              Confirmar rendición
+            </button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}

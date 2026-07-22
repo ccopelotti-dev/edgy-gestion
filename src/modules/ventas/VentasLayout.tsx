@@ -7,7 +7,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Users, ShoppingCart, FileText,
-  ClipboardList, Receipt, Banknote,
+  ClipboardList, Receipt, Banknote, Bike,
 } from 'lucide-react';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { terminologiaOrdenVenta } from '@/lib/terminologia';
@@ -41,6 +41,11 @@ export default function VentasLayout() {
     { to: `${BASE}/ordenes`,          label: term.plural,      icon: ClipboardList },
     { to: `${BASE}/comprobantes`,     label: 'Comprobantes',   icon: Receipt },
     { to: `${BASE}/cobranzas`,        label: 'Cobranzas',      icon: Banknote },
+    // Fase 23c: rendición de cadete -- solo tiene contenido cuando hay
+    // pedidos con reparto propio marcados "cobra contra entrega" (Fase
+    // 23b), pero se deja siempre visible (igual que el resto de tabs) en
+    // vez de condicionarla, para no complicar el layout con lógica extra.
+    { to: `${BASE}/rendicion`,        label: 'Rendición',      icon: Bike },
   ];
 
   return (
