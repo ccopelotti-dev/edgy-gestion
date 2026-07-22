@@ -3,7 +3,7 @@
 // Edgy Gestion · Listado, creacion inline y gestion de ordenes
 // ============================================================
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Search,
   Plus,
@@ -31,6 +31,7 @@ import {
 } from '../data/store';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { terminologiaOrdenVenta } from '@/lib/terminologia';
 import {
@@ -105,6 +106,22 @@ export default function Ordenes() {
   // Fase 21: despacho/logística -- ver DespachoDialog en dialogs.tsx
   const [despachoDialogOpen, setDespachoDialogOpen] = useState(false);
   const [ordenParaDespachar, setOrdenParaDespachar] = useState<Orden | null>(null);
+
+  // Fase 23b: empleados del tenant, para el selector de "Cadete" del
+  // DespachoDialog cuando el reparto es propio.
+  const [empleados, setEmpleados] = useState<{ id: string; nombre: string }[]>([]);
+  useEffect(() => {
+    if (!clienteTenant?.id) return;
+    supabase
+      .from('usuarios_cliente')
+      .select('id, nombre, email')
+      .eq('cliente_id', clienteTenant.id)
+      .then(({ data }) => {
+        setEmpleados(
+          (data ?? []).map((u: any) => ({ id: u.id, nombre: u.nombre ?? u.email ?? 'Sin nombre' })),
+        );
+      });
+  }, [clienteTenant?.id]);
 
   // ── Entrega parcial inline ────────────────────────────────
 
@@ -407,6 +424,9 @@ export default function Ordenes() {
     proveedorLogistica: ProveedorLogistica;
     numeroSeguimiento: string;
     urlSeguimiento: string;
+    cadeteId?: string;
+    cadeteNombre?: string;
+    cobraContraEntrega: boolean;
   }) => {
     if (!ordenParaDespachar) return;
     const orden = ordenParaDespachar;
@@ -418,6 +438,9 @@ export default function Ordenes() {
         proveedorLogistica: data.proveedorLogistica,
         numeroSeguimiento: data.numeroSeguimiento || undefined,
         urlSeguimiento: data.urlSeguimiento || undefined,
+        cadeteId: data.cadeteId,
+        cadeteNombre: data.cadeteNombre,
+        cobraContraEntrega: data.cobraContraEntrega,
       },
     });
 
@@ -792,6 +815,7 @@ export default function Ordenes() {
           setDespachoDialogOpen(open);
           if (!open) setOrdenParaDespachar(null);
         }}
+        empleados={empleados}
         onConfirmar={handleConfirmarDespacho}
       />
 
@@ -1158,6 +1182,17 @@ function OrdenRow({
                     )}
                     {o.fechaDespacho && (
                       <span className="text-gray-500">Despachado: {formatDate(o.fechaDespacho)}</span>
+                    )}
+                    {/* Fase 23b: cadete + cobro contra entrega */}
+                    {o.cadeteNombre && (
+                      <span>
+                        Cadete: <span className="font-medium">{o.cadeteNombre}</span>
+                      </span>
+                    )}
+                    {o.cobraContraEntrega && (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        Cobra contra entrega -- pendiente de rendición
+                      </span>
                     )}
                   </div>
                   {/* Fase 22d: reenviar el aviso de WhatsApp -- por si el

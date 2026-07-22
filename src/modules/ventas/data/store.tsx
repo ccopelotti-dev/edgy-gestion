@@ -80,6 +80,11 @@ type VentasAction =
         proveedorLogistica?: ProveedorLogistica;
         numeroSeguimiento?: string;
         urlSeguimiento?: string;
+        // Fase 23b: cadete asignado (reparto propio) + si ese pedido
+        // cobra contra entrega (pendiente de rendición, Fase 23c).
+        cadeteId?: string;
+        cadeteNombre?: string;
+        cobraContraEntrega?: boolean;
       };
     }
   | { type: 'REGISTRAR_ENTREGA_PARCIAL'; payload: { ordenId: string; items: { id: string; cantidadEntregada: number }[] } }
@@ -246,6 +251,9 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
                 proveedorLogistica: action.payload.proveedorLogistica ?? o.proveedorLogistica,
                 numeroSeguimiento: action.payload.numeroSeguimiento ?? o.numeroSeguimiento,
                 urlSeguimiento: action.payload.urlSeguimiento ?? o.urlSeguimiento,
+                cadeteId: action.payload.cadeteId ?? o.cadeteId,
+                cadeteNombre: action.payload.cadeteNombre ?? o.cadeteNombre,
+                cobraContraEntrega: action.payload.cobraContraEntrega ?? o.cobraContraEntrega,
                 fechaDespacho:
                   action.payload.estadoLogistica === 'en_camino' ? now : o.fechaDespacho,
                 updatedAt: now,
@@ -722,6 +730,8 @@ function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId:
             proveedor_logistica: o.proveedorLogistica ?? null,
             numero_seguimiento: o.numeroSeguimiento ?? null,
             url_seguimiento: o.urlSeguimiento ?? null,
+            cadete_id: o.cadeteId ?? null,
+            cobra_contra_entrega: o.cobraContraEntrega ?? false,
             fecha_despacho: o.fechaDespacho ? o.fechaDespacho.slice(0, 10) : null,
           })
           .eq('id', o.id)
@@ -913,7 +923,13 @@ async function fetchVentasState(): Promise<VentasState> {
     supabase.from('clientes_venta').select('*').order('created_at'),
     supabase.from('presupuestos').select('*').order('numero'),
     supabase.from('presupuesto_items').select('*'),
-    supabase.from('ordenes_venta').select('*').order('numero'),
+    // Fase 23b: se trae el nombre del cadete asignado (join directo,
+    // mismo criterio que `turnos_caja` en Caja por turno) para no tener
+    // que resolverlo con una consulta aparte en cada pantalla.
+    supabase
+      .from('ordenes_venta')
+      .select('*, cadete:usuarios_cliente!ordenes_venta_cadete_id_fkey(nombre,email)')
+      .order('numero'),
     supabase.from('orden_venta_items').select('*'),
     supabase.from('comprobantes_venta').select('*').order('numero'),
     supabase.from('comprobante_venta_items').select('*'),
@@ -1029,6 +1045,9 @@ async function fetchVentasState(): Promise<VentasState> {
     proveedorLogistica: (r.proveedor_logistica ?? undefined) as ProveedorLogistica | undefined,
     numeroSeguimiento: r.numero_seguimiento ?? undefined,
     urlSeguimiento: r.url_seguimiento ?? undefined,
+    cadeteId: r.cadete_id ?? undefined,
+    cadeteNombre: r.cadete?.nombre ?? r.cadete?.email ?? undefined,
+    cobraContraEntrega: r.cobra_contra_entrega ?? false,
     fechaDespacho: r.fecha_despacho ?? undefined,
     direccionEntrega: direccionPorOrden.get(r.id) ?? undefined,
     // Fase 23a: pago adelantado online (Fase 12) -- columnas ya

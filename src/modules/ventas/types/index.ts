@@ -193,6 +193,21 @@ export interface Orden {
   fechaDespacho?: string;
 
   /**
+   * Cadete y cobro contra entrega (Fase 23b) -- solo tiene sentido
+   * cuando `proveedorLogistica === 'propio'` (un tercero como Rappi/
+   * PedidosYa no necesita que Edgy Gestión sepa quién entregó ni
+   * rendir su efectivo). `cadeteId` referencia una fila de
+   * `usuarios_cliente` del mismo tenant; `cadeteNombre` es solo para
+   * mostrar (se resuelve una vez, no hace falta ir a buscarlo de
+   * nuevo). `cobraContraEntrega` marca que ese pedido queda pendiente
+   * de "rendición" (Fase 23c) -- el cadete cobra en efectivo al
+   * entregar y después liquida ese dinero contra la factura.
+   */
+  cadeteId?: string;
+  cadeteNombre?: string;
+  cobraContraEntrega?: boolean;
+
+  /**
    * Dirección de entrega (Fase 22b) -- vive en `pedidos_delivery.direccion`,
    * no en `ordenes_venta` (una orden de producción/servicio no tiene
    * dirección). Solo se completa para órdenes con `origenModulo ===

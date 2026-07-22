@@ -1850,23 +1850,36 @@ export function PresupuestoDialog({
 interface DespachoDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Fase 23b: empleados del tenant para elegir a quién asignarle el
+   * reparto -- solo se ofrece cuando el transportista es "propio" (un
+   * tercero como Rappi/PedidosYa no lo necesita). No hay filtro por rol
+   * (`rol` es texto libre desde 0003_consolidado_v2_a_v8.sql), se listan
+   * todos los empleados del cliente. */
+  empleados: { id: string; nombre: string }[];
   onConfirmar: (data: {
     proveedorLogistica: ProveedorLogistica;
     numeroSeguimiento: string;
     urlSeguimiento: string;
+    cadeteId?: string;
+    cadeteNombre?: string;
+    cobraContraEntrega: boolean;
   }) => void;
 }
 
-export function DespachoDialog({ open, onOpenChange, onConfirmar }: DespachoDialogProps) {
+export function DespachoDialog({ open, onOpenChange, empleados, onConfirmar }: DespachoDialogProps) {
   const [proveedor, setProveedor] = useState<ProveedorLogistica>('propio');
   const [numeroSeguimiento, setNumeroSeguimiento] = useState('');
   const [urlSeguimiento, setUrlSeguimiento] = useState('');
+  const [cadeteId, setCadeteId] = useState('');
+  const [cobraContraEntrega, setCobraContraEntrega] = useState(false);
 
   useEffect(() => {
     if (open) {
       setProveedor('propio');
       setNumeroSeguimiento('');
       setUrlSeguimiento('');
+      setCadeteId('');
+      setCobraContraEntrega(false);
     }
   }, [open]);
 
@@ -1875,6 +1888,12 @@ export function DespachoDialog({ open, onOpenChange, onConfirmar }: DespachoDial
       proveedorLogistica: proveedor,
       numeroSeguimiento: numeroSeguimiento.trim(),
       urlSeguimiento: urlSeguimiento.trim(),
+      cadeteId: proveedor === 'propio' && cadeteId ? cadeteId : undefined,
+      cadeteNombre:
+        proveedor === 'propio' && cadeteId
+          ? empleados.find((e) => e.id === cadeteId)?.nombre
+          : undefined,
+      cobraContraEntrega: proveedor === 'propio' && cobraContraEntrega,
     });
     onOpenChange(false);
   };
@@ -1927,6 +1946,36 @@ export function DespachoDialog({ open, onOpenChange, onConfirmar }: DespachoDial
                 placeholder="https://..."
               />
             </div>
+
+            {/* Fase 23b: cadete + cobro contra entrega -- solo aplica a
+                reparto propio. Un tercero (Rappi/PedidosYa) cobra por su
+                cuenta, Edgy Gestión no necesita rendir ese efectivo. */}
+            {proveedor === 'propio' && (
+              <>
+                <div>
+                  <label className={labelClass}>Cadete (opcional)</label>
+                  <select
+                    className={selectClass}
+                    value={cadeteId}
+                    onChange={(e) => setCadeteId(e.target.value)}
+                  >
+                    <option value="">Sin asignar</option>
+                    {empleados.map((e) => (
+                      <option key={e.id} value={e.id}>{e.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={cobraContraEntrega}
+                    onChange={(e) => setCobraContraEntrega(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  Cobra contra entrega (queda pendiente de rendición)
+                </label>
+              </>
+            )}
           </div>
 
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
