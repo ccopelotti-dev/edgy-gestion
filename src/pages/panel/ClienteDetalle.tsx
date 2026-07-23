@@ -8,6 +8,7 @@ import { Paso2Admin, type DatosAdmin } from '@/pages/onboarding/Paso2Admin'
 import { Paso4Permisos, type ResultadoEquipo } from '@/pages/onboarding/Paso4Permisos'
 import { guardarAdmin, guardarEquipo } from '@/lib/altaEquipo'
 import type { Cliente, Modulo, UsuarioCliente } from '@/types'
+import { TIPO_NEGOCIO_LABEL } from '@/types'
 
 interface FilaClienteModulo {
   id: string
@@ -157,7 +158,7 @@ export function ClienteDetalle() {
           ← Clientes
         </Link>
         <h1 className="mt-2 text-lg font-medium text-gray-900">{cliente.nombre}</h1>
-        <p className="text-sm capitalize text-gray-500">{cliente.tipo_negocio}</p>
+        <p className="text-sm text-gray-500">{TIPO_NEGOCIO_LABEL[cliente.tipo_negocio] ?? cliente.tipo_negocio}</p>
       </div>
 
       <Card className="grid grid-cols-1 gap-4 sm:grid-cols-2">

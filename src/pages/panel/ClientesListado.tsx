@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import type { Cliente } from '@/types'
+import { TIPO_NEGOCIO_LABEL } from '@/types'
 
 export function ClientesListado() {
   const [clientes, setClientes] = useState<Cliente[]>([])
@@ -55,7 +56,7 @@ export function ClientesListado() {
               )}
               <div>
                 <p className="text-sm font-medium text-gray-900">{cliente.nombre}</p>
-                <p className="text-sm capitalize text-gray-500">{cliente.tipo_negocio}</p>
+                <p className="text-sm text-gray-500">{TIPO_NEGOCIO_LABEL[cliente.tipo_negocio] ?? cliente.tipo_negocio}</p>
               </div>
             </Card>
           </Link>

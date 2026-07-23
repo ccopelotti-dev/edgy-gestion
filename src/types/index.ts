@@ -1,10 +1,29 @@
+// Fase 15: el pack gastronómico se subdividió en dos variantes -- un
+// bar/restorán con mesas y salón (todos los módulos, incluida la
+// gestión de mesas) versus una rotisería/delivery sin salón (mismo
+// núcleo de Ventas/Productos/Tesorería, pero sin mesas-salon ni
+// comandas-cocina -- esta última exige mesaId por diseño, ver comentario
+// en comandas-cocina/types). Antes existía un solo valor 'gastronomico'
+// -- los clientes ya cargados con ese valor se migran a
+// 'gastronomico_con_salon' (ver migración 0066).
 export type TipoNegocio =
-  | 'gastronomico'
+  | 'gastronomico_con_salon'
+  | 'gastronomico_sin_salon'
   | 'comercio'
   | 'logistica'
   | 'produccion'
   | 'servicios'
   | 'agro'
+
+export const TIPO_NEGOCIO_LABEL: Record<TipoNegocio, string> = {
+  gastronomico_con_salon: 'Gastronómico con salón',
+  gastronomico_sin_salon: 'Gastronómico sin salón',
+  comercio: 'Comercio',
+  logistica: 'Logística y transporte',
+  produccion: 'Producción',
+  servicios: 'Servicios',
+  agro: 'Agro',
+}
 
 export type EstadoCliente = 'pendiente' | 'activo'
 
@@ -114,7 +133,13 @@ export interface PersonalEdgy {
 // Catálogo sugerido por tipo de negocio — preselección en el Paso 3 del wizard.
 // No reemplaza la tabla `modulos`, es solo el mapeo de sugerencia inicial.
 export const MODULOS_SUGERIDOS: Record<TipoNegocio, string[]> = {
-  gastronomico: ['mesas-salon', 'comandas-cocina', 'menu-qr', 'ventas-online', 'caja-turno'],
+  gastronomico_con_salon: ['mesas-salon', 'comandas-cocina', 'menu-qr', 'ventas-online', 'caja-turno', 'viandas'],
+  // Sin salón (rotisería/delivery): mismos módulos de venta/catálogo/caja,
+  // pero sin mesas-salon ni comandas-cocina -- esta última exige mesaId
+  // por diseño (Comanda.mesaId no es opcional), así que el ciclo de
+  // cocina/entrega corre por ordenes_venta (Ventas Online) en vez de
+  // Comandas.
+  gastronomico_sin_salon: ['menu-qr', 'ventas-online', 'caja-turno', 'viandas'],
   comercio: ['productos-stock', 'ventas', 'compras'],
   logistica: ['rutas', 'rendicion', 'gps'],
   produccion: ['produccion-servicios', 'productos-stock'],
@@ -125,7 +150,9 @@ export const MODULOS_SUGERIDOS: Record<TipoNegocio, string[]> = {
 // Roles sugeridos por tipo de negocio — semilla para el Paso 4 del wizard.
 // "Dueño" no aparece acá porque se crea siempre, aparte, con es_admin=true.
 export const ROLES_SUGERIDOS: Record<TipoNegocio, string[]> = {
-  gastronomico: ['Encargado', 'Mozo', 'Cocina', 'Cajero', 'Delivery'],
+  gastronomico_con_salon: ['Encargado', 'Mozo', 'Cocina', 'Cajero', 'Delivery'],
+  // Sin "Mozo" -- no hay mesas que atender sin salón.
+  gastronomico_sin_salon: ['Encargado', 'Cocina', 'Cajero', 'Delivery'],
   comercio: ['Encargado', 'Vendedor', 'Cajero'],
   logistica: ['Encargado', 'Chofer'],
   produccion: ['Encargado', 'Operario'],

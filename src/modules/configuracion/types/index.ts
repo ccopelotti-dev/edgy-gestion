@@ -13,8 +13,12 @@ export type CategoriaImpositiva =
 
 export type Personeria = 'fisica' | 'juridica'
 
+// Fase 15: mismo split que src/types/index.ts (única fuente real es la
+// columna clientes.tipo_negocio -- este tipo es una copia local para no
+// importar del módulo Ventas/onboarding acá, ver comentario del archivo).
 export type TipoNegocio =
-  | 'gastronomico'
+  | 'gastronomico_con_salon'
+  | 'gastronomico_sin_salon'
   | 'comercio'
   | 'logistica'
   | 'produccion'
@@ -88,7 +92,8 @@ export const PERSONERIAS: { value: Personeria; label: string }[] = [
 ]
 
 export const TIPOS_NEGOCIO_LABEL: Record<TipoNegocio, string> = {
-  gastronomico: 'Gastronómico',
+  gastronomico_con_salon: 'Gastronómico con salón',
+  gastronomico_sin_salon: 'Gastronómico sin salón',
   comercio: 'Comercio',
   logistica: 'Logística',
   produccion: 'Producción',

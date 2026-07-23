@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MODULOS_SUGERIDOS } from '@/types'
 import type { Modulo, TipoNegocio } from '@/types'
+import { colorDeKit, labelDeVertical } from '@/modules/kits'
 
 interface Paso3Props {
   tipoNegocio: TipoNegocio
@@ -60,6 +61,34 @@ export function Paso3Modulos({
     return <p className="text-sm text-gray-400">Cargando módulos disponibles...</p>
   }
 
+  // Fase 25c: agrupar por vertical (Núcleo primero, después cada kit con
+  // su color -- mismo criterio visual que Sidebar.tsx y ModulosListado.tsx)
+  // en vez de una lista plana. Deja la base lista para cuando Fase 15
+  // subdivida 'gastronomico' en variantes con/sin salón: cada variante
+  // aparecería acá como su propia sección.
+  const grupos = new Map<string, Modulo[]>()
+  for (const m of modulos) {
+    const lista = grupos.get(m.vertical) ?? []
+    lista.push(m)
+    grupos.set(m.vertical, lista)
+  }
+  const ordenGrupos = Array.from(grupos.keys()).sort((a, b) => {
+    if (a === 'core') return -1
+    if (b === 'core') return 1
+    return a.localeCompare(b)
+  })
+
+  function toggleSeccion(idsDeLaSeccion: string[], activar: boolean) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev)
+      for (const id of idsDeLaSeccion) {
+        if (activar) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
@@ -69,18 +98,49 @@ export function Paso3Modulos({
         </p>
       </div>
 
-      <div className="space-y-2">
-        {modulos.map((modulo) => (
-          <Card key={modulo.id} className="flex items-center justify-between p-4">
-            <div>
-              <p className="text-sm font-medium text-gray-900">{modulo.nombre}</p>
-              {modulo.descripcion && (
-                <p className="text-sm text-gray-500">{modulo.descripcion}</p>
-              )}
+      <div className="space-y-6">
+        {ordenGrupos.map((vertical) => {
+          const esNucleo = vertical === 'core'
+          const color = esNucleo ? null : colorDeKit(vertical)
+          const idsDeLaSeccion = (grupos.get(vertical) ?? []).map((m) => m.id)
+          const todosActivos = idsDeLaSeccion.every((id) => seleccionados.has(id))
+
+          return (
+            <div key={vertical}>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {color && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />}
+                  <h3 className="text-sm font-semibold text-gray-700">{labelDeVertical(vertical)}</h3>
+                </div>
+                {!esNucleo && (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-brand-500 hover:underline"
+                    onClick={() => toggleSeccion(idsDeLaSeccion, !todosActivos)}
+                  >
+                    {todosActivos ? 'Desactivar todo' : 'Activar todo el kit'}
+                  </button>
+                )}
+              </div>
+              <div
+                className="space-y-2 rounded-xl"
+                style={color ? { backgroundColor: `${color}0D`, padding: '0.75rem', boxShadow: `inset 0 0 0 1px ${color}33` } : undefined}
+              >
+                {(grupos.get(vertical) ?? []).map((modulo) => (
+                  <Card key={modulo.id} className="flex items-center justify-between p-4">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{modulo.nombre}</p>
+                      {modulo.descripcion && (
+                        <p className="text-sm text-gray-500">{modulo.descripcion}</p>
+                      )}
+                    </div>
+                    <Switch checked={seleccionados.has(modulo.id)} onChange={() => toggle(modulo.id)} />
+                  </Card>
+                ))}
+              </div>
             </div>
-            <Switch checked={seleccionados.has(modulo.id)} onChange={() => toggle(modulo.id)} />
-          </Card>
-        ))}
+          )
+        })}
       </div>
 
       <Button

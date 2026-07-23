@@ -5,7 +5,8 @@ import { generarSlug, slugValido, urlCliente } from '@/lib/slug'
 import type { TipoNegocio } from '@/types'
 
 const TIPOS_NEGOCIO: { value: TipoNegocio; label: string }[] = [
-  { value: 'gastronomico', label: 'Gastronómico (bar, restorán, café)' },
+  { value: 'gastronomico_con_salon', label: 'Gastronómico con salón (bar, restorán, café)' },
+  { value: 'gastronomico_sin_salon', label: 'Gastronómico sin salón (rotisería, delivery)' },
   { value: 'comercio', label: 'Comercio' },
   { value: 'logistica', label: 'Logística y transporte' },
   { value: 'produccion', label: 'Producción' },

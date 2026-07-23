@@ -24,7 +24,13 @@ export function DashboardHome() {
   }
 
   if (rolActual?.vista === 'operativo') {
-    return cliente?.tipo_negocio === 'gastronomico' ? (
+    // Fase 15: cualquiera de las dos variantes del kit gastronómico
+    // (con o sin salón) usa el mismo dashboard operativo -- sus propias
+    // tarjetas (mesas, cocina) ya muestran 0 sin romper nada si el
+    // cliente no tiene mesas-salon/comandas-cocina activos.
+    const esGastronomico =
+      cliente?.tipo_negocio === 'gastronomico_con_salon' || cliente?.tipo_negocio === 'gastronomico_sin_salon'
+    return esGastronomico ? (
       <DashboardOperativoGastronomico modulosActivos={modulosActivos} />
     ) : (
       <DashboardOperativoGenerico modulosActivos={modulosActivos} />
