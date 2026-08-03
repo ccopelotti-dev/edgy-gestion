@@ -1,0 +1,5 @@
+node_modules/
+dist-installer/
+electron.zip
+install_log.txt
+config.json

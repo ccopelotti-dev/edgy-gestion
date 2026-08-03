@@ -1,9 +1,17 @@
 # Edgy Gestión · App de escritorio (Fase 14)
 
-Wrapper de Electron que carga la web app real (`https://edgysistemas.tech/`,
-la misma que se ve en el navegador) dentro de una ventana nativa de
-Windows, y agrega un puente para imprimir comprobantes en una impresora
-USB local sin diálogo de por medio.
+Wrapper de Electron que carga la web app real de Edgy Gestión (la misma
+que se ve en el navegador, en el subdominio de cada negocio, ej.
+`la-charcuteria-express.edgysistemas.tech`) dentro de una ventana nativa
+de Windows, y agrega un puente para imprimir comprobantes en una
+impresora USB local sin diálogo de por medio.
+
+Como cada cliente tiene su propio subdominio (no hay login genérico en
+`edgysistemas.tech` -- ese dominio raíz es la landing de marketing, un
+sitio aparte), la primera vez que se abre la app en una PC pregunta el
+subdominio del negocio (`onboarding.html`) y lo guarda en un
+`config.json` local -- así el mismo instalador sirve para cualquier
+cliente.
 
 Es un proyecto Node **aparte** del resto del repo (tiene su propio
 `package.json`, con Electron y electron-builder como dependencias) --

@@ -14,6 +14,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   esElectron: true,
+  guardarNegocio: (slug) => ipcRenderer.invoke('guardar-negocio', slug),
   imprimir: (pdfBytes, nombreArchivo) => ipcRenderer.invoke('imprimir-pdf', pdfBytes, nombreArchivo),
   listarImpresoras: () => ipcRenderer.invoke('listar-impresoras'),
   obtenerImpresoraPredeterminada: () => ipcRenderer.invoke('obtener-impresora-predeterminada'),

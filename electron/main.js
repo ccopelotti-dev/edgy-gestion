@@ -29,11 +29,22 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
-// URL por defecto de la web app -- se puede pisar sin recompilar nada
-// editando config.json (ver rutaConfig()) o con la variable de entorno
-// EDGY_URL, por si algún día hace falta apuntar a otro ambiente
-// (staging, etc.).
-const URL_DEFAULT = 'https://edgysistemas.tech/';
+// Edgy Gestión es multi-tenant: cada negocio tiene su propio subdominio
+// (ej. https://la-charcuteria-express.edgysistemas.tech/ingresar) -- no
+// existe una URL de login genérica (el dominio raíz edgysistemas.tech es
+// OTRO sitio, la landing de marketing, no la app). Por eso la primera vez
+// que se abre esta app en una PC se pregunta el subdominio del negocio
+// (ver onboarding.html) y se guarda en config.json -- así el mismo
+// instalador sirve para cualquier cliente, sin tocar código por cada uno.
+// `config.url` es un escape hatch manual (pisa todo lo demás) para casos
+// raros -- editar a mano el config.json si hiciera falta apuntar a otro
+// lado sin pasar por el subdominio.
+function urlDelNegocio(config) {
+  if (config.url) return config.url;
+  if (process.env.EDGY_URL) return process.env.EDGY_URL;
+  if (config.slug) return `https://${config.slug}.edgysistemas.tech/ingresar`;
+  return null;
+}
 
 function rutaConfig() {
   return path.join(app.getPath('userData'), 'config.json');
@@ -71,8 +82,12 @@ function crearVentanaPrincipal() {
   Menu.setApplicationMenu(null);
 
   const config = leerConfig();
-  const urlApp = config.url || process.env.EDGY_URL || URL_DEFAULT;
-  ventanaPrincipal.loadURL(urlApp);
+  const urlApp = urlDelNegocio(config);
+  if (urlApp) {
+    ventanaPrincipal.loadURL(urlApp);
+  } else {
+    ventanaPrincipal.loadFile(path.join(__dirname, 'onboarding.html'));
+  }
 }
 
 app.whenReady().then(() => {
@@ -85,6 +100,16 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// ── IPC: onboarding (subdominio del negocio) ────────────────
+
+ipcMain.handle('guardar-negocio', (_evt, slug) => {
+  const config = leerConfig();
+  config.slug = slug;
+  guardarConfig(config);
+  const urlApp = urlDelNegocio(config);
+  if (ventanaPrincipal && urlApp) ventanaPrincipal.loadURL(urlApp);
 });
 
 // ── IPC: impresoras + impresión silenciosa ──────────────────
