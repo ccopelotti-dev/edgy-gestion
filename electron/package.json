@@ -1,0 +1,34 @@
+{
+  "name": "edgy-gestion-desktop",
+  "version": "1.0.0",
+  "description": "App de escritorio de Edgy Gestion (Windows) -- ventana nativa sobre la web app en vivo + impresion silenciosa a la impresora configurada. Fase 14.",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win --publish=never"
+  },
+  "build": {
+    "appId": "tech.edgysistemas.gestion",
+    "productName": "Edgy Gestion",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

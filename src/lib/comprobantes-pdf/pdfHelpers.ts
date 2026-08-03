@@ -16,8 +16,31 @@
 // ============================================================
 
 import { jsPDF } from 'jspdf'
+import { corriendoEnElectron } from '@/lib/electronBridge'
 
 export const COLOR_DEFAULT = '#0F6E56'
+
+// Fase 14 -- App de escritorio: único punto de salida de los 4
+// generadores de PDF (generarComprobantePdf, generarReciboPdf,
+// generarResumenCuentaPdf, generarComprobantePagoPdf), cada uno llama
+// esto en vez de `doc.save(...)` directo. Adentro de la app de
+// escritorio manda los bytes a imprimir silenciosamente en la
+// impresora configurada (ver electron/main.js); en cualquier
+// navegador normal (o si Electron reporta un error, ej. no hay
+// impresora configurada todavía) cae al mismo `doc.save(...)` de
+// siempre, así nunca se pierde el documento.
+export async function imprimirOGuardarPdf(doc: jsPDF, nombreArchivo: string): Promise<void> {
+  if (corriendoEnElectron()) {
+    const bytes = doc.output('arraybuffer') as ArrayBuffer
+    const resultado = await window.electronAPI!.imprimir(bytes, nombreArchivo)
+    if (resultado.ok) return
+    alert(
+      `No se pudo imprimir automáticamente (${resultado.error ?? 'error desconocido'}).\n\n` +
+        'Se descargó el PDF -- también podés configurar la impresora predeterminada desde Utilidades > Impresora.',
+    )
+  }
+  doc.save(`${nombreArchivo}.pdf`)
+}
 
 export interface EmpresaParaPdf {
   nombre: string

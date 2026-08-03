@@ -20,6 +20,7 @@ import {
   aclarar,
   dibujarEncabezado,
   dibujarPie,
+  imprimirOGuardarPdf,
 } from './pdfHelpers'
 
 export interface ImputacionReciboParaPdf {
@@ -160,5 +161,5 @@ export async function generarReciboPdf(
   doc.text('Aclaración', pageWidth - marginX - 70, y)
 
   dibujarPie(doc, empresa)
-  doc.save(`${nombreArchivo}.pdf`)
+  await imprimirOGuardarPdf(doc, nombreArchivo)
 }

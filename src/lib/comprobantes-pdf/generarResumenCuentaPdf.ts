@@ -22,6 +22,7 @@ import {
   aclarar,
   dibujarEncabezado,
   dibujarPie,
+  imprimirOGuardarPdf,
 } from './pdfHelpers'
 
 export interface MovimientoResumenCuenta {
@@ -175,5 +176,5 @@ export async function generarResumenCuentaPdf(
   }
 
   dibujarPie(doc, empresa)
-  doc.save(`${nombreArchivo}.pdf`)
+  await imprimirOGuardarPdf(doc, nombreArchivo)
 }

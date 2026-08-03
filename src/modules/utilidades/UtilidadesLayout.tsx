@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { FolderOpen, Upload, Clock } from 'lucide-react'
+import { FolderOpen, Upload, Clock, Printer } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export function UtilidadesLayout() {
@@ -10,6 +10,7 @@ export function UtilidadesLayout() {
     { to: base, label: 'Explorador de archivos', icon: FolderOpen, end: true },
     { to: `${base}/importacion`, label: 'Importación masiva', icon: Upload, end: false },
     { to: `${base}/tracking-horas`, label: 'Tracking de horas', icon: Clock, end: false },
+    { to: `${base}/impresora`, label: 'Impresora', icon: Printer, end: false },
   ]
 
   return (
@@ -17,7 +18,7 @@ export function UtilidadesLayout() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Utilidades</h1>
         <p className="text-muted-foreground text-sm">
-          Caja de herramientas transversal: archivos, importación masiva y tracking de horas
+          Caja de herramientas transversal: archivos, importación masiva, tracking de horas e impresora
         </p>
       </div>
 

@@ -12,6 +12,7 @@ import { UtilidadesLayout } from './UtilidadesLayout'
 import Explorador from './pages/Explorador'
 import ImportacionMasiva from './pages/ImportacionMasiva'
 import TrackingHoras from './pages/TrackingHoras'
+import Impresora from './pages/Impresora'
 
 export default function UtilidadesModule() {
   return (
@@ -21,6 +22,7 @@ export default function UtilidadesModule() {
           <Route index element={<Explorador />} />
           <Route path="importacion" element={<ImportacionMasiva />} />
           <Route path="tracking-horas" element={<TrackingHoras />} />
+          <Route path="impresora" element={<Impresora />} />
         </Route>
       </Routes>
     </UtilidadesProvider>

@@ -31,6 +31,7 @@
 // ============================================================
 
 import { jsPDF } from 'jspdf'
+import { imprimirOGuardarPdf } from './pdfHelpers'
 import QRCode from 'qrcode'
 import { construirUrlQrFiscal, type DatosQrFiscal } from './arcaQr'
 
@@ -383,5 +384,5 @@ export async function generarComprobantePdf(
     : empresa.nombre
   doc.text(pieTexto, marginX, pageHeight - 10)
 
-  doc.save(`${nombreArchivo}.pdf`)
+  await imprimirOGuardarPdf(doc, nombreArchivo)
 }
