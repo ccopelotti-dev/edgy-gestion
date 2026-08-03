@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 
 interface ItemMenu {
   to: string
@@ -13,6 +14,30 @@ const ITEMS: ItemMenu[] = [
   { to: '/panel/modulos', label: 'Módulos', disponible: true },
   { to: '/panel/metricas', label: 'Métricas', disponible: false },
 ]
+
+// Edgy Trading Hub es un proyecto aparte (repo propio, hosteado en GitHub
+// Pages) que comparte el mismo proyecto de Supabase que Edgy Gestión. En
+// vez de un link plano, se arma la URL con la sesión actual pegada en el
+// hash (#sso_access_token=...&sso_refresh_token=...) -- el Trading Hub la
+// consume al cargar (ver bootstrap agregado en su index.html), valida que
+// sea la cuenta de Carlos, y entra directo sin pedir el login manual de
+// ese sitio. Si por algún motivo no hay sesión activa acá, igual abre el
+// link (cae al login manual del otro lado, nunca rompe la navegación).
+const TRADING_HUB_URL = 'https://ccopelotti-dev.github.io/Edgy-Prop-Trading-Hub/'
+
+async function abrirTradingHub() {
+  const { data } = await supabase.auth.getSession()
+  const session = data.session
+  if (!session) {
+    window.open(TRADING_HUB_URL, '_blank', 'noopener')
+    return
+  }
+  const params = new URLSearchParams({
+    sso_access_token: session.access_token,
+    sso_refresh_token: session.refresh_token,
+  })
+  window.open(`${TRADING_HUB_URL}#${params.toString()}`, '_blank', 'noopener')
+}
 
 export function PanelSidebar({ nombreStaff }: { nombreStaff: string | null }) {
   return (
@@ -47,6 +72,15 @@ export function PanelSidebar({ nombreStaff }: { nombreStaff: string | null }) {
             </div>
           ),
         )}
+
+        <button
+          type="button"
+          onClick={abrirTradingHub}
+          className="mt-2 flex w-full items-center justify-between rounded-md border border-white/10 px-3 py-2 text-left text-sm font-medium text-white/70 transition-colors hover:bg-white/10"
+        >
+          Edgy Trading Hub
+          <span aria-hidden className="text-white/40">↗</span>
+        </button>
       </nav>
 
       <div className="border-t border-white/10 px-3 py-4">
