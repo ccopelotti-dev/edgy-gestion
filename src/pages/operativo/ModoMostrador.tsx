@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Receipt, Banknote, Search, UserPlus, FileText, CircleCheck, CircleAlert } from 'lucide-react';
+import { Receipt, Banknote, Search, UserPlus, FileText, ShoppingBag, CircleCheck, CircleAlert } from 'lucide-react';
 import { VentasProvider, useVentas, useVentasDispatch } from '@/modules/ventas/data/store';
 import { ClienteDialog, CobroDialog, PresupuestoDialog } from '@/modules/ventas/components/ventas/dialogs';
 import {
@@ -30,10 +30,25 @@ import {
   type ImputacionCobro,
 } from '@/modules/ventas/types';
 import { todayISO, nowISO, formatARS } from '@/modules/ventas/lib/format';
+// Compras es núcleo (siempre activo, a diferencia de Ventas) -- por eso el
+// botón "Comprar" no está condicionado a ningún módulo activo, a diferencia
+// del resto de esta pantalla (que sí depende de que Ventas esté activo).
+import { ComprasProvider, useCompras, useComprasDispatch, useProveedores } from '@/modules/compras/data/store';
+import { ComprobanteCompraDialog } from '@/modules/compras/components/compras/dialogs';
+import { actualizarStockPorCompra } from '@/modules/compras/lib/actualizarStockCompra';
+import { formatNumero, PREFIJO_COMPROBANTE_COMPRA } from '@/modules/compras/lib/format';
+import type {
+  TipoComprobanteCompra,
+  MedioPagoCompra,
+  ItemComprobanteCompra,
+  ControlRemision,
+  ImpuestoOrdenCompra,
+} from '@/modules/compras/types';
 import { useClienteActual, type ModuloActivo } from '@/hooks/useClienteActual';
 import { supabase } from '@/lib/supabase';
 import { ModoMostradorToggle } from './ModoMostradorToggle';
 import { ConsultarArticulo } from './ConsultarArticulo';
+import { EvolucionMostrador } from './EvolucionMostrador';
 
 interface Props {
   modulosActivos: ModuloActivo[];
@@ -44,7 +59,9 @@ export function ModoMostrador({ modulosActivos, onCambiarModo }: Props) {
   const tieneCajaTurno = modulosActivos.some((m) => m.slug === 'caja-turno');
   return (
     <VentasProvider>
-      <ModoMostradorInterior tieneCajaTurno={tieneCajaTurno} onCambiarModo={onCambiarModo} />
+      <ComprasProvider>
+        <ModoMostradorInterior tieneCajaTurno={tieneCajaTurno} onCambiarModo={onCambiarModo} />
+      </ComprasProvider>
     </VentasProvider>
   );
 }
@@ -59,6 +76,9 @@ function ModoMostradorInterior({
   const navigate = useNavigate();
   const { comprobantes, cobros, clientes, config } = useVentas();
   const dispatch = useVentasDispatch();
+  const proveedores = useProveedores();
+  const comprasState = useCompras();
+  const dispatchCompras = useComprasDispatch();
   const { cliente: clienteTenant } = useClienteActual();
 
   const hoy = todayISO();
@@ -214,6 +234,90 @@ function ModoMostradorInterior({
   // ── Consultar artículo ────────────────────────────────────
   const [articuloOpen, setArticuloOpen] = useState(false);
 
+  // ── Comprar ───────────────────────────────────────────────
+  // Espejo exacto de handleSaveComprobante en compras/pages/Comprobantes.tsx
+  // -- alta manual (sin ordenCompra) del mismo comprobante de compra, con el
+  // mismo flujo opcional de "Actualizar stock" contra Recepción.
+  const [compraDialogOpen, setCompraDialogOpen] = useState(false);
+
+  async function handleSaveCompra(data: {
+    tipo: TipoComprobanteCompra;
+    proveedorId: string;
+    numeroComprobanteProveedor: string;
+    fecha: string;
+    fechaVencimiento: string;
+    medioPago: MedioPagoCompra;
+    items: Omit<ItemComprobanteCompra, 'id'>[];
+    controlRemision: ControlRemision;
+    numeroRemito: string;
+    actualizarStock: boolean;
+    otrosImpuestos: ImpuestoOrdenCompra[];
+    ordenCompraId?: string;
+  }) {
+    const now = nowISO();
+    const subtotal = data.items.reduce((s, i) => s + i.subtotal, 0);
+    const montoIva = data.items.reduce((s, i) => s + i.montoIva, 0);
+    const total = subtotal + montoIva;
+    const comprobanteId = generarId();
+    const itemsConId: ItemComprobanteCompra[] = data.items.map((it) => ({ ...it, id: generarId() }));
+
+    dispatchCompras({
+      type: 'ADD_COMPROBANTE_COMPRA',
+      payload: {
+        id: comprobanteId,
+        tipo: data.tipo,
+        proveedorId: data.proveedorId,
+        fecha: data.fecha,
+        fechaVencimiento: data.fechaVencimiento || undefined,
+        items: itemsConId,
+        subtotal,
+        montoIva,
+        total,
+        estado: 'pendiente',
+        medioPago: data.medioPago,
+        montoPagado: 0,
+        saldoPendiente: total,
+        controlRemision: data.controlRemision,
+        numeroRemito: data.numeroRemito || undefined,
+        numeroComprobanteProveedor: data.numeroComprobanteProveedor || undefined,
+        stockActualizado: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    if (data.actualizarStock && clienteTenant) {
+      const numeroFormateado = formatNumero(
+        PREFIJO_COMPROBANTE_COMPRA[data.tipo],
+        comprasState.nextNumeroComprobante[data.tipo],
+      );
+      const proveedorNombre = proveedores.find((p) => p.id === data.proveedorId)?.nombre ?? 'Desconocido';
+      const resultado = await actualizarStockPorCompra(itemsConId, {
+        clienteId: clienteTenant.id,
+        proveedorNombre,
+        fecha: data.fecha,
+        numeroRemito: data.numeroRemito || undefined,
+        numeroComprobante: numeroFormateado,
+      });
+      if (resultado) {
+        dispatchCompras({
+          type: 'MARCAR_STOCK_ACTUALIZADO',
+          payload: { comprobanteId, recepcionId: resultado.recepcionId },
+        });
+        if (resultado.advertenciasConversion.length > 0) {
+          alert(
+            `Comprobante guardado y stock actualizado, con advertencias:\n\n${resultado.advertenciasConversion.join('\n')}`,
+          );
+        }
+      } else {
+        alert(
+          'El comprobante se guardó, pero no se pudo actualizar el stock. Podés reintentarlo desde Compras > Comprobantes.',
+        );
+      }
+    }
+    setCompraDialogOpen(false);
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -238,12 +342,20 @@ function ModoMostradorInterior({
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <BotonGrande icon={Receipt} label="Facturar" onClick={irAFacturar} />
-        <BotonGrande icon={Banknote} label="Cobrar" onClick={() => setSelectorCobroOpen(true)} />
-        <BotonGrande icon={Search} label="Consultar artículo" onClick={() => setArticuloOpen(true)} />
-        <BotonGrande icon={UserPlus} label="Cargar cliente" onClick={() => setClienteDialogOpen(true)} />
-        <BotonGrande icon={FileText} label="Cotización" onClick={() => setPresupuestoDialogOpen(true)} />
+        <BotonGrande icon={Receipt} label="Facturar" accent="indigo" onClick={irAFacturar} />
+        <BotonGrande icon={Banknote} label="Cobrar" accent="emerald" onClick={() => setSelectorCobroOpen(true)} />
+        <BotonGrande icon={Search} label="Consultar artículo" accent="blue" onClick={() => setArticuloOpen(true)} />
+        <BotonGrande icon={UserPlus} label="Cargar cliente" accent="violet" onClick={() => setClienteDialogOpen(true)} />
+        <BotonGrande icon={FileText} label="Cotización" accent="amber" onClick={() => setPresupuestoDialogOpen(true)} />
+        <BotonGrande icon={ShoppingBag} label="Comprar" accent="orange" onClick={() => setCompraDialogOpen(true)} />
       </div>
+
+      <EvolucionMostrador
+        clienteId={clienteTenant?.id}
+        comprobantesVenta={comprobantes}
+        cobros={cobros}
+        comprobantesCompra={comprasState.comprobantes}
+      />
 
       {/* ── Selector de cliente previo a Cobrar ─────────────── */}
       {selectorCobroOpen && (
@@ -310,25 +422,50 @@ function ModoMostradorInterior({
       />
 
       <ConsultarArticulo open={articuloOpen} onOpenChange={setArticuloOpen} />
+
+      <ComprobanteCompraDialog
+        open={compraDialogOpen}
+        onOpenChange={setCompraDialogOpen}
+        proveedores={proveedores.filter((p) => p.activo)}
+        onSave={handleSaveCompra}
+      />
     </div>
   );
 }
 
+// Acentos de color por botón -- detalle estético a pedido del usuario
+// (Fase 26 cont.), pensado para poder revertirse fácil: si no convence,
+// alcanza con volver todos los BotonGrande a accent="indigo" (el color
+// único que tenían antes) o borrar la prop por completo.
+const ACENTOS_BOTON = {
+  indigo: { bg: 'bg-indigo-50/60', border: 'hover:border-indigo-300 hover:bg-indigo-50', icon: 'text-indigo-600' },
+  emerald: { bg: 'bg-emerald-50/60', border: 'hover:border-emerald-300 hover:bg-emerald-50', icon: 'text-emerald-600' },
+  blue: { bg: 'bg-blue-50/60', border: 'hover:border-blue-300 hover:bg-blue-50', icon: 'text-blue-600' },
+  violet: { bg: 'bg-violet-50/60', border: 'hover:border-violet-300 hover:bg-violet-50', icon: 'text-violet-600' },
+  amber: { bg: 'bg-amber-50/60', border: 'hover:border-amber-300 hover:bg-amber-50', icon: 'text-amber-600' },
+  orange: { bg: 'bg-orange-50/60', border: 'hover:border-orange-300 hover:bg-orange-50', icon: 'text-orange-600' },
+} as const;
+
+type AcentoBoton = keyof typeof ACENTOS_BOTON;
+
 function BotonGrande({
   icon: Icon,
   label,
+  accent = 'indigo',
   onClick,
 }: {
   icon: typeof Receipt;
   label: string;
+  accent?: AcentoBoton;
   onClick: () => void;
 }) {
+  const a = ACENTOS_BOTON[accent];
   return (
     <button
       onClick={onClick}
-      className="flex h-24 flex-col items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white text-center hover:border-indigo-300 hover:bg-indigo-50/50 transition-colors"
+      className={`flex h-24 flex-col items-center justify-center gap-2 rounded-lg border border-gray-200 text-center transition-colors ${a.bg} ${a.border}`}
     >
-      <Icon className="h-7 w-7 text-indigo-600" />
+      <Icon className={`h-7 w-7 ${a.icon}`} />
       <span className="text-sm font-medium text-gray-700">{label}</span>
     </button>
   );
