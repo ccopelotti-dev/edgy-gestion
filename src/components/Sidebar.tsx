@@ -104,6 +104,30 @@ export function Sidebar({ colorMarca, modulos }: SidebarProps) {
     )
   }
 
+  // Fase 25b: dentro del recuadro de un kit, el ícono se dibuja siempre
+  // con el color de fondo del rail (el de marca) -- al ser un bloque
+  // sólido y opaco contra el recuadro (también sólido, color del kit),
+  // se distingue sin importar qué tan parecidos sean los tonos entre sí
+  // (a diferencia de un relleno traslúcido, que sí se pierde con tonos
+  // cercanos). El estado activo se marca con un overlay tenue, elegido
+  // según el contraste propio del color del kit.
+  function botonModuloKit(modulo: ModuloActivo, activoFondoKit: string) {
+    const Icono = iconoDeModulo(modulo.slug)
+    return (
+      <NavLink
+        key={modulo.id}
+        to={`/m/${modulo.slug}`}
+        title={modulo.nombre}
+        className="flex h-10 w-10 items-center justify-center rounded-xl transition-colors"
+        style={({ isActive }) => ({
+          backgroundColor: isActive ? activoFondoKit : 'transparent',
+        })}
+      >
+        <Icono size={18} color={fondo} />
+      </NavLink>
+    )
+  }
+
   return (
     <aside
       className="flex h-screen w-16 flex-shrink-0 flex-col items-center gap-1.5 py-4"
@@ -124,15 +148,22 @@ export function Sidebar({ colorMarca, modulos }: SidebarProps) {
 
       {gruposKit.map(({ vertical, modulos: modulosDelKit }) => {
         const color = colorDeKit(vertical)
+        // Fase 25b, a pedido del usuario: el recuadro pasa a pintarse
+        // sólido con el color propio del kit (antes era un relleno tenue
+        // + franja lateral). El overlay de "activo" se elige según el
+        // contraste del color del kit, no el de la marca.
+        const contrasteKit = colorDeContraste(color)
+        const activoFondoKit =
+          contrasteKit === '#FFFFFF' ? 'rgba(255,255,255,0.28)' : 'rgba(32,31,27,0.20)'
         return (
           <div key={vertical} className="flex flex-col items-center gap-1.5">
-            <div className="my-0.5 h-px w-8" style={{ backgroundColor: inactivoOpacidad }} />
+            <div className="my-1 h-px w-9" style={{ backgroundColor: inactivoOpacidad }} />
             <div
-              className="flex flex-col items-center gap-1.5 rounded-xl px-1 py-1.5"
-              style={{ backgroundColor: `${color}33`, boxShadow: `inset 0 0 0 1px ${color}66` }}
+              className="flex flex-col items-center gap-1.5 rounded-xl py-1.5 px-1.5"
+              style={{ backgroundColor: color }}
               title={labelDeVertical(vertical)}
             >
-              {modulosDelKit.map(botonModulo)}
+              {modulosDelKit.map((modulo) => botonModuloKit(modulo, activoFondoKit))}
             </div>
           </div>
         )
