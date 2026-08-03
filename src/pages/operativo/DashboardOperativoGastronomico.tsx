@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Armchair, ChefHat, Banknote, Truck, Soup, QrCode, CircleCheck, CircleAlert, type LucideIcon } from 'lucide-react'
 import { useClienteActual, type ModuloActivo } from '@/hooks/useClienteActual'
 import { useResumenOperativoGastronomico } from '@/hooks/useResumenOperativoGastronomico'
+import { ModoMostradorToggle } from './ModoMostradorToggle'
 
 // Dashboard operativo del pack gastronómico -- lo que ve un Mozo,
 // Cocina, Cajero o Delivery al entrar a /dashboard (rolActual.vista =
@@ -37,9 +38,14 @@ const ICONO_POR_SLUG: Record<string, LucideIcon> = {
 
 interface Props {
   modulosActivos: ModuloActivo[]
+  /** Fase 26: si el cliente tiene Ventas activo, se puede ofrecer el
+   * atajo a Modo Mostrador desde acá (además del que ya existe en
+   * ModoMostrador.tsx para volver). */
+  mostrarToggleMostrador?: boolean
+  onCambiarModo?: (activo: boolean) => void
 }
 
-export function DashboardOperativoGastronomico({ modulosActivos }: Props) {
+export function DashboardOperativoGastronomico({ modulosActivos, mostrarToggleMostrador, onCambiarModo }: Props) {
   const { cliente } = useClienteActual()
   const resumen = useResumenOperativoGastronomico(cliente?.id)
 
@@ -48,9 +54,14 @@ export function DashboardOperativoGastronomico({ modulosActivos }: Props) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-medium text-gray-900">Así está el turno</h1>
-        <p className="text-sm text-gray-500">Un vistazo rápido antes de entrar a trabajar.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-medium text-gray-900">Así está el turno</h1>
+          <p className="text-sm text-gray-500">Un vistazo rápido antes de entrar a trabajar.</p>
+        </div>
+        {mostrarToggleMostrador && onCambiarModo && (
+          <ModoMostradorToggle activo={false} onChange={onCambiarModo} />
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

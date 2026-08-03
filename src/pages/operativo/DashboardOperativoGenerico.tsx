@@ -1,11 +1,15 @@
 import { Link } from 'react-router-dom'
 import type { ModuloActivo } from '@/hooks/useClienteActual'
 import { iconoDeModulo } from '@/modules/iconosModulo'
+import { ModoMostradorToggle } from './ModoMostradorToggle'
 
 const SLUGS_EXCLUIDOS = ['utilidades', 'configuracion']
 
 interface Props {
   modulosActivos: ModuloActivo[]
+  /** Fase 26: atajo a Modo Mostrador si el cliente tiene Ventas activo. */
+  mostrarToggleMostrador?: boolean
+  onCambiarModo?: (activo: boolean) => void
 }
 
 // Dashboard operativo genérico -- para rubros que todavía no tienen un
@@ -19,14 +23,19 @@ interface Props {
 // Cuando se construya el pack operativo de otro rubro (ej. logística),
 // reemplazar este fallback por uno dedicado, igual que se hizo con
 // gastronómico.
-export function DashboardOperativoGenerico({ modulosActivos }: Props) {
+export function DashboardOperativoGenerico({ modulosActivos, mostrarToggleMostrador, onCambiarModo }: Props) {
   const accesos = modulosActivos.filter((m) => !SLUGS_EXCLUIDOS.includes(m.slug))
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-medium text-gray-900">Tus accesos</h1>
-        <p className="text-sm text-gray-500">Entrá directo al módulo que necesitás.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-medium text-gray-900">Tus accesos</h1>
+          <p className="text-sm text-gray-500">Entrá directo al módulo que necesitás.</p>
+        </div>
+        {mostrarToggleMostrador && onCambiarModo && (
+          <ModoMostradorToggle activo={false} onChange={onCambiarModo} />
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

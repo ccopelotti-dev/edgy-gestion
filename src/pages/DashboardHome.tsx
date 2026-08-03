@@ -1,7 +1,9 @@
 import { useClienteActual } from '@/hooks/useClienteActual'
+import { useModoMostrador } from '@/hooks/useModoMostrador'
 import { DashboardAdministrativo } from './DashboardAdministrativo'
 import { DashboardOperativoGastronomico } from './operativo/DashboardOperativoGastronomico'
 import { DashboardOperativoGenerico } from './operativo/DashboardOperativoGenerico'
+import { ModoMostrador } from './operativo/ModoMostrador'
 
 // Punto de entrada de /dashboard -- decide qué pantalla mostrar según
 // el rol del usuario logueado (rolActual.vista, ver useClienteActual):
@@ -18,12 +20,23 @@ import { DashboardOperativoGenerico } from './operativo/DashboardOperativoGeneri
 // una pantalla vacía.
 export function DashboardHome() {
   const { cliente, modulosActivos, rolActual, cargando } = useClienteActual()
+  const [modoMostrador, setModoMostrador] = useModoMostrador(rolActual?.nombre)
 
   if (cargando) {
     return <div className="flex h-40 items-center justify-center text-gray-400">Cargando...</div>
   }
 
   if (rolActual?.vista === 'operativo') {
+    // Fase 26: Modo Mostrador -- pantalla de accesos grandes (Facturar,
+    // Cobrar, etc.) para el puesto de Caja/Mostrador. Necesita el
+    // módulo Ventas activo (de ahí salen los dialogs que reutiliza); si
+    // el cliente no lo tiene activado, no tiene sentido ofrecerlo y se
+    // cae al dashboard operativo de siempre.
+    const tieneVentas = modulosActivos.some((m) => m.slug === 'ventas')
+    if (modoMostrador && tieneVentas) {
+      return <ModoMostrador modulosActivos={modulosActivos} onCambiarModo={setModoMostrador} />
+    }
+
     // Fase 15: cualquiera de las dos variantes del kit gastronómico
     // (con o sin salón) usa el mismo dashboard operativo -- sus propias
     // tarjetas (mesas, cocina) ya muestran 0 sin romper nada si el
@@ -31,9 +44,17 @@ export function DashboardHome() {
     const esGastronomico =
       cliente?.tipo_negocio === 'gastronomico_con_salon' || cliente?.tipo_negocio === 'gastronomico_sin_salon'
     return esGastronomico ? (
-      <DashboardOperativoGastronomico modulosActivos={modulosActivos} />
+      <DashboardOperativoGastronomico
+        modulosActivos={modulosActivos}
+        mostrarToggleMostrador={tieneVentas}
+        onCambiarModo={setModoMostrador}
+      />
     ) : (
-      <DashboardOperativoGenerico modulosActivos={modulosActivos} />
+      <DashboardOperativoGenerico
+        modulosActivos={modulosActivos}
+        mostrarToggleMostrador={tieneVentas}
+        onCambiarModo={setModoMostrador}
+      />
     )
   }
 
