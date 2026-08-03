@@ -26,17 +26,20 @@ export function DashboardHome() {
     return <div className="flex h-40 items-center justify-center text-gray-400">Cargando...</div>
   }
 
-  if (rolActual?.vista === 'operativo') {
-    // Fase 26: Modo Mostrador -- pantalla de accesos grandes (Facturar,
-    // Cobrar, etc.) para el puesto de Caja/Mostrador. Necesita el
-    // módulo Ventas activo (de ahí salen los dialogs que reutiliza); si
-    // el cliente no lo tiene activado, no tiene sentido ofrecerlo y se
-    // cae al dashboard operativo de siempre.
-    const tieneVentas = modulosActivos.some((m) => m.slug === 'ventas')
-    if (modoMostrador && tieneVentas) {
-      return <ModoMostrador modulosActivos={modulosActivos} onCambiarModo={setModoMostrador} />
-    }
+  // Fase 26: Modo Mostrador -- pantalla de accesos grandes (Facturar,
+  // Cobrar, etc.) para el puesto de Caja/Mostrador. Es un "modo", no
+  // algo fijo por rol/vista: cualquiera (Cajero, Vendedor, Encargado o
+  // Dueño) puede entrar si le resulta más cómodo en ese momento, por
+  // eso este chequeo va antes de separar administrativo/operativo, no
+  // adentro de la rama operativo. Necesita el módulo Ventas activo (de
+  // ahí salen los dialogs que reutiliza); si el cliente no lo tiene, no
+  // tiene sentido ofrecerlo.
+  const tieneVentas = modulosActivos.some((m) => m.slug === 'ventas')
+  if (modoMostrador && tieneVentas) {
+    return <ModoMostrador modulosActivos={modulosActivos} onCambiarModo={setModoMostrador} />
+  }
 
+  if (rolActual?.vista === 'operativo') {
     // Fase 15: cualquiera de las dos variantes del kit gastronómico
     // (con o sin salón) usa el mismo dashboard operativo -- sus propias
     // tarjetas (mesas, cocina) ya muestran 0 sin romper nada si el
@@ -58,5 +61,5 @@ export function DashboardHome() {
     )
   }
 
-  return <DashboardAdministrativo />
+  return <DashboardAdministrativo mostrarToggleMostrador={tieneVentas} onCambiarModo={setModoMostrador} />
 }

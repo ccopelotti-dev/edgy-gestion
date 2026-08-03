@@ -1,9 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Wallet,
-  Landmark,
-  FileText,
   ShoppingCart,
   ShoppingBag,
   Banknote,
@@ -14,9 +11,8 @@ import {
 } from 'lucide-react'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { useResumenDashboard } from '@/hooks/useResumenDashboard'
-import { KpiCard } from '@/modules/tesoreria/components/treasury/KpiCard'
-import { PAYMENT_METHODS } from '@/modules/tesoreria/types'
 import { formatARS } from '@/modules/tesoreria/lib/format'
+import { ModoMostradorToggle } from './operativo/ModoMostradorToggle'
 
 // Resumen ejecutivo multi-módulo -- lo que veía todo el mundo en
 // /dashboard antes de la migración 0022 (Dashboard operativo por rol).
@@ -25,11 +21,11 @@ import { formatARS } from '@/modules/tesoreria/lib/format'
 // DashboardOperativo* (vista='operativo') -- ver ese archivo. El
 // contenido de acá no cambió, solo el nombre del componente.
 //
-// Los datos de "Informes de caja" salen de useResumenDashboard (consulta
-// directa a Supabase, ver ese archivo). Los dashboards internos de cada
-// módulo (Tesorería, Ventas, Compras, Productos y Stock) siguen
-// existiendo tal cual y no se tocaron -- esto es un resumen de entrada,
-// no un reemplazo.
+// "Informes de caja" (saldo de caja/bancos/cheques, flujo de fondos)
+// se sacó de acá a pedido del usuario -- quedaba duplicado con
+// Tesorería, que ya lo muestra con más detalle. useResumenDashboard
+// sigue calculando esos campos (los usan otras pantallas), simplemente
+// no se leen más en este componente.
 //
 // El panel de la derecha ("dock") reutiliza el mismo diseño visual que
 // se pensó para la futura app mobile (grilla de atajos con ícono + label),
@@ -54,7 +50,13 @@ const ATAJOS_DEFAULT: Atajo[] = [
   { id: 'nuevo-pago', label: 'Nuevo pago', icon: Receipt, ruta: '/m/compras/comprobantes' },
 ]
 
-export function DashboardAdministrativo() {
+interface Props {
+  /** Fase 26: atajo a Modo Mostrador si el cliente tiene Ventas activo. */
+  mostrarToggleMostrador?: boolean
+  onCambiarModo?: (activo: boolean) => void
+}
+
+export function DashboardAdministrativo({ mostrarToggleMostrador, onCambiarModo }: Props = {}) {
   const { cliente } = useClienteActual()
   const resumen = useResumenDashboard(cliente?.id)
   const navigate = useNavigate()
@@ -65,71 +67,14 @@ export function DashboardAdministrativo() {
     setAtajos((prev) => prev.filter((a) => a.id !== id))
   }
 
-  const maxMedio = Math.max(1, ...resumen.flujoPorMedio.map((x) => Math.max(x.ingreso, x.egreso)))
-
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_300px]">
-      {/* Informes de caja */}
       <div className="space-y-4">
-        <p className="text-sm text-gray-500">Informes de caja</p>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <KpiCard label="Saldo de caja" value={formatARS(resumen.saldoCaja)} icon={Wallet} accent="primary" />
-          <KpiCard label="Total en bancos" value={formatARS(resumen.totalBancos)} icon={Landmark} accent="income" />
-          <KpiCard
-            label="Cheques en cartera"
-            value={formatARS(resumen.chequesEnCarteraValor)}
-            icon={FileText}
-            accent="warning"
-            hint={`${resumen.chequesEnCarteraCount} por cobrar`}
-          />
-        </div>
-
-        <div className="rounded-lg border border-gray-200 p-4">
-          <p className="mb-3 text-sm text-gray-500">Flujo de fondos por medio de pago — últimos 30 días</p>
-
-          {resumen.flujoPorMedio.length === 0 ? (
-            <div className="flex h-20 items-center justify-center">
-              <p className="text-sm text-gray-400">
-                {resumen.cargando ? 'Cargando...' : 'Sin movimientos de caja en este período'}
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {resumen.flujoPorMedio.map((row) => {
-                const meta = PAYMENT_METHODS.find((m) => m.value === row.medio)
-                return (
-                  <div key={row.medio} className="flex items-center gap-3">
-                    <span className="w-28 flex-shrink-0 text-sm text-gray-500">{meta?.label ?? row.medio}</span>
-                    <div className="flex flex-1 items-center gap-1.5">
-                      <div className="flex flex-1 justify-end">
-                        <div
-                          className="bg-income h-2.5 rounded-full"
-                          style={{ width: `${(row.ingreso / maxMedio) * 100}%` }}
-                        />
-                      </div>
-                      <div className="h-4 w-px bg-gray-200" />
-                      <div className="flex flex-1">
-                        <div
-                          className="bg-expense h-2.5 rounded-full"
-                          style={{ width: `${(row.egreso / maxMedio) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-              <div className="mt-1 flex items-center justify-center gap-6 text-xs text-gray-500">
-                <span className="flex items-center gap-1.5">
-                  <span className="bg-income size-2.5 rounded-full" /> Ingresos
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="bg-expense size-2.5 rounded-full" /> Egresos
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
+        {mostrarToggleMostrador && onCambiarModo && (
+          <div className="flex justify-end">
+            <ModoMostradorToggle activo={false} onChange={onCambiarModo} />
+          </div>
+        )}
 
         {resumen.stockCritico > 0 && (
           <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
