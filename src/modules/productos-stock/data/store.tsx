@@ -93,6 +93,7 @@ import type {
 } from '../types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
+import { resolverPuntoVentaId, ajustarStockPuntoVenta } from '@/lib/puntoVenta'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { todayISO } from '../lib/format'
 
@@ -1010,7 +1011,7 @@ function logErr(label: string) {
 
 // ─── Sincronización con Supabase por acción ────────────────────
 
-function syncToSupabase(
+async function syncToSupabase(
   action: Action,
   prevState: ProductosStockState,
   nextState: ProductosStockState,
@@ -1227,21 +1228,50 @@ function syncToSupabase(
       if (p) {
         supabase.from('producciones').insert(produccionToRow(p, clienteId)).then(logErr('alta de producción'))
       }
+      // Fase 27e-2: null en clientes de un solo local -- sin cambios para
+      // ellos (ver src/lib/puntoVenta.ts).
+      const puntoVentaIdProduccion = await resolverPuntoVentaId(clienteId)
+
       // Mismo patrón que CONFIRMAR_RECEPCION: los movimientos nuevos son
       // los que el reducer agregó al final del array.
       const nuevosMovimientos = nextState.movimientos.slice(prevState.movimientos.length)
       if (nuevosMovimientos.length) {
-        supabase.from('movimientos_stock').insert(nuevosMovimientos.map((m) => movimientoToRow(m, clienteId))).then(logErr('movimientos de producción'))
+        supabase
+          .from('movimientos_stock')
+          .insert(nuevosMovimientos.map((m) => ({ ...movimientoToRow(m, clienteId), punto_venta_id: puntoVentaIdProduccion })))
+          .then(logErr('movimientos de producción'))
       }
+
       for (const i of nextState.insumos) {
         const prev = prevState.insumos.find((x) => x.id === i.id)
-        if (prev && prev.stock !== i.stock) {
+        if (!prev || prev.stock === i.stock) continue
+        if (puntoVentaIdProduccion) {
+          ajustarStockPuntoVenta({
+            clienteId,
+            puntoVentaId: puntoVentaIdProduccion,
+            itemTipo: 'insumo',
+            itemId: i.id,
+            delta: i.stock - prev.stock,
+          }).then(logErr('stock de insumo tras producción'))
+        } else {
           supabase.from('insumos').update({ stock: i.stock }).eq('id', i.id).then(logErr('stock de insumo tras producción'))
         }
       }
       for (const p of nextState.productos) {
         const prev = prevState.productos.find((x) => x.id === p.id)
-        if (prev && prev.stock !== p.stock) {
+        if (!prev || prev.stock === p.stock) continue
+        if (puntoVentaIdProduccion) {
+          // REGISTRAR_PRODUCCION solo afecta productos 'unico' (el producto
+          // que arma la fórmula, sin desglose por variante) -- ver el
+          // reducer más arriba.
+          ajustarStockPuntoVenta({
+            clienteId,
+            puntoVentaId: puntoVentaIdProduccion,
+            itemTipo: 'producto',
+            itemId: p.id,
+            delta: p.stock - prev.stock,
+          }).then(logErr('stock de producto tras producción'))
+        } else {
           supabase.from('productos').update({ stock: p.stock }).eq('id', p.id).then(logErr('stock de producto tras producción'))
         }
       }
@@ -1280,30 +1310,82 @@ function syncToSupabase(
         supabase.from('recepciones').update({ estado: recepcion.estado }).eq('id', recepcion.id).then(logErr('confirmación de recepción'))
       }
 
+      // Fase 27e-2: null en clientes de un solo local -- sin cambios para
+      // ellos (ver src/lib/puntoVenta.ts).
+      const puntoVentaIdRecepcion = await resolverPuntoVentaId(clienteId)
+
       // Movimientos nuevos: el reducer solo agrega al final.
       const nuevosMovimientos = nextState.movimientos.slice(prevState.movimientos.length)
       if (nuevosMovimientos.length) {
-        supabase.from('movimientos_stock').insert(nuevosMovimientos.map((m) => movimientoToRow(m, clienteId))).then(logErr('movimientos de recepción'))
+        supabase
+          .from('movimientos_stock')
+          .insert(nuevosMovimientos.map((m) => ({ ...movimientoToRow(m, clienteId), punto_venta_id: puntoVentaIdRecepcion })))
+          .then(logErr('movimientos de recepción'))
       }
 
       // Productos/insumos cuyo stock o costo cambió.
       for (const p of nextState.productos) {
         const prev = prevState.productos.find((x) => x.id === p.id)
         if (!prev) continue
-        if (prev.stock !== p.stock || prev.costo !== p.costo) {
-          supabase.from('productos').update({ stock: p.stock, costo: p.costo }).eq('id', p.id).then(logErr('stock de producto'))
-        }
-        // Variantes cuyo stock cambió (Fase 2).
-        for (const v of p.variantes) {
-          const prevV = prev.variantes.find((x) => x.id === v.id)
-          if (prevV && prevV.stock !== v.stock) {
-            supabase.from('producto_variantes').update({ stock: v.stock }).eq('id', v.id).then(logErr('stock de variante'))
+
+        if (p.variantes.length) {
+          // Variantes cuyo stock cambió (Fase 2) -- el total del producto
+          // padre (p.stock) es la suma de sus variantes, no se toca aparte.
+          for (const v of p.variantes) {
+            const prevV = prev.variantes.find((x) => x.id === v.id)
+            if (!prevV || prevV.stock === v.stock) continue
+            if (puntoVentaIdRecepcion) {
+              ajustarStockPuntoVenta({
+                clienteId,
+                puntoVentaId: puntoVentaIdRecepcion,
+                itemTipo: 'producto',
+                itemId: p.id,
+                varianteId: v.id,
+                delta: v.stock - prevV.stock,
+              }).then(logErr('stock de variante'))
+            } else {
+              supabase.from('producto_variantes').update({ stock: v.stock }).eq('id', v.id).then(logErr('stock de variante'))
+            }
+          }
+          if (prev.costo !== p.costo) {
+            supabase.from('productos').update({ costo: p.costo }).eq('id', p.id).then(logErr('costo de producto'))
+          }
+        } else if (prev.stock !== p.stock || prev.costo !== p.costo) {
+          if (puntoVentaIdRecepcion) {
+            if (prev.stock !== p.stock) {
+              ajustarStockPuntoVenta({
+                clienteId,
+                puntoVentaId: puntoVentaIdRecepcion,
+                itemTipo: 'producto',
+                itemId: p.id,
+                delta: p.stock - prev.stock,
+              }).then(logErr('stock de producto'))
+            }
+            if (prev.costo !== p.costo) {
+              supabase.from('productos').update({ costo: p.costo }).eq('id', p.id).then(logErr('costo de producto'))
+            }
+          } else {
+            supabase.from('productos').update({ stock: p.stock, costo: p.costo }).eq('id', p.id).then(logErr('stock de producto'))
           }
         }
       }
       for (const i of nextState.insumos) {
         const prev = prevState.insumos.find((x) => x.id === i.id)
-        if (prev && (prev.stock !== i.stock || prev.costo !== i.costo)) {
+        if (!prev || (prev.stock === i.stock && prev.costo === i.costo)) continue
+        if (puntoVentaIdRecepcion) {
+          if (prev.stock !== i.stock) {
+            ajustarStockPuntoVenta({
+              clienteId,
+              puntoVentaId: puntoVentaIdRecepcion,
+              itemTipo: 'insumo',
+              itemId: i.id,
+              delta: i.stock - prev.stock,
+            }).then(logErr('stock de insumo'))
+          }
+          if (prev.costo !== i.costo) {
+            supabase.from('insumos').update({ costo: i.costo }).eq('id', i.id).then(logErr('costo de insumo'))
+          }
+        } else {
           supabase.from('insumos').update({ stock: i.stock, costo: i.costo }).eq('id', i.id).then(logErr('stock de insumo'))
         }
       }
@@ -1334,22 +1416,66 @@ function syncToSupabase(
     case 'AJUSTAR_STOCK':
     case 'RECIBIR_STOCK': {
       const m = nextState.movimientos[nextState.movimientos.length - 1]
-      supabase.from('movimientos_stock').insert(movimientoToRow(m, clienteId)).then(logErr('movimiento de stock'))
 
-      const { itemTipo, itemId } = action.payload
+      // Fase 27e-2: null en clientes de un solo local -- sin cambios para
+      // ellos (ver src/lib/puntoVenta.ts).
+      const puntoVentaIdAjuste = await resolverPuntoVentaId(clienteId)
+      supabase
+        .from('movimientos_stock')
+        .insert({ ...movimientoToRow(m, clienteId), punto_venta_id: puntoVentaIdAjuste })
+        .then(logErr('movimiento de stock'))
+
+      const { itemTipo, itemId, cantidad } = action.payload
       const varianteId = 'varianteId' in action.payload ? action.payload.varianteId : undefined
+      // AJUSTAR_STOCK/RECIBIR_STOCK aplican `cantidad` como delta directo
+      // sobre el stock actual (ver el reducer más arriba: `stock + cantidad`).
       if (itemTipo === 'producto') {
         const p = nextState.productos.find((x) => x.id === itemId)
         if (p) {
-          supabase.from('productos').update({ stock: p.stock, costo: p.costo }).eq('id', p.id).then(logErr('stock de producto'))
-          if (varianteId) {
-            const v = p.variantes.find((x) => x.id === varianteId)
-            if (v) supabase.from('producto_variantes').update({ stock: v.stock }).eq('id', v.id).then(logErr('stock de variante'))
+          const prev = prevState.productos.find((x) => x.id === itemId)
+          if (puntoVentaIdAjuste) {
+            if (cantidad) {
+              ajustarStockPuntoVenta({
+                clienteId,
+                puntoVentaId: puntoVentaIdAjuste,
+                itemTipo: 'producto',
+                itemId: p.id,
+                varianteId,
+                delta: cantidad,
+              }).then(logErr('stock de producto'))
+            }
+            if (!prev || prev.costo !== p.costo) {
+              supabase.from('productos').update({ costo: p.costo }).eq('id', p.id).then(logErr('costo de producto'))
+            }
+          } else {
+            supabase.from('productos').update({ stock: p.stock, costo: p.costo }).eq('id', p.id).then(logErr('stock de producto'))
+            if (varianteId) {
+              const v = p.variantes.find((x) => x.id === varianteId)
+              if (v) supabase.from('producto_variantes').update({ stock: v.stock }).eq('id', v.id).then(logErr('stock de variante'))
+            }
           }
         }
       } else {
         const i = nextState.insumos.find((x) => x.id === itemId)
-        if (i) supabase.from('insumos').update({ stock: i.stock, costo: i.costo }).eq('id', i.id).then(logErr('stock de insumo'))
+        if (i) {
+          const prev = prevState.insumos.find((x) => x.id === itemId)
+          if (puntoVentaIdAjuste) {
+            if (cantidad) {
+              ajustarStockPuntoVenta({
+                clienteId,
+                puntoVentaId: puntoVentaIdAjuste,
+                itemTipo: 'insumo',
+                itemId: i.id,
+                delta: cantidad,
+              }).then(logErr('stock de insumo'))
+            }
+            if (!prev || prev.costo !== i.costo) {
+              supabase.from('insumos').update({ costo: i.costo }).eq('id', i.id).then(logErr('costo de insumo'))
+            }
+          } else {
+            supabase.from('insumos').update({ stock: i.stock, costo: i.costo }).eq('id', i.id).then(logErr('stock de insumo'))
+          }
+        }
       }
       return
     }

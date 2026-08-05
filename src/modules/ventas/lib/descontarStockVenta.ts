@@ -19,6 +19,7 @@
 // ============================================================
 
 import { supabase } from '@/lib/supabase'
+import { resolverPuntoVentaId, ajustarStockPuntoVenta } from '@/lib/puntoVenta'
 
 export interface LineaStock {
   productoId?: string
@@ -99,6 +100,13 @@ export async function descontarStockPorVenta(
     else agrupado.set(key, { productoId: l.productoId, varianteId: l.varianteId, cantidad: l.cantidad })
   }
 
+  if (agrupado.size === 0) return
+
+  // Fase 27e-2: se resuelve UNA sola vez para toda la venta (mismo local
+  // para todas las líneas de un mismo comprobante) -- null en clientes de
+  // un solo local, que siguen exactamente como antes de esta fase.
+  const puntoVentaId = await resolverPuntoVentaId(clienteTenantId)
+
   for (const { productoId, varianteId, cantidad } of agrupado.values()) {
     const { data: producto } = await supabase
       .from('productos')
@@ -108,7 +116,19 @@ export async function descontarStockPorVenta(
 
     if (!producto || !producto.controla_stock) continue
 
-    if (varianteId) {
+    if (puntoVentaId) {
+      // Multi-local: la RPC ajusta stock_por_punto_venta y su trigger
+      // recalcula productos.stock/producto_variantes.stock como el total
+      // -- no hace falta (ni conviene) escribir esos campos acá también.
+      await ajustarStockPuntoVenta({
+        clienteId: clienteTenantId,
+        puntoVentaId,
+        itemTipo: 'producto',
+        itemId: productoId,
+        varianteId,
+        delta: -cantidad,
+      })
+    } else if (varianteId) {
       const { data: variante } = await supabase
         .from('producto_variantes')
         .select('stock')
@@ -134,6 +154,7 @@ export async function descontarStockPorVenta(
       nota: `Venta — Factura N.º ${numeroFactura}`,
       origen: 'venta',
       fecha,
+      punto_venta_id: puntoVentaId,
     })
   }
 }

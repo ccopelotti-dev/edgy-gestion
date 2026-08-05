@@ -20,6 +20,7 @@
 // ============================================================
 
 import { supabase } from '@/lib/supabase';
+import { resolverPuntoVentaId, ajustarStockPuntoVenta } from '@/lib/puntoVenta';
 import { convertirUnidad } from '@/modules/productos-stock/lib/format';
 import type { UnidadMedida } from '@/modules/productos-stock/types';
 import type { ItemComprobanteCompra } from '../types';
@@ -44,6 +45,10 @@ export async function actualizarStockPorCompra(
 ): Promise<ResultadoActualizarStock | null> {
   const itemsVinculados = items.filter((i) => (i.productoId || i.insumoId) && i.cantidad > 0);
   if (itemsVinculados.length === 0) return null;
+
+  // Fase 27e-2: null en clientes de un solo local -- sin cambios para
+  // ellos (ver src/lib/puntoVenta.ts).
+  const puntoVentaId = await resolverPuntoVentaId(opts.clienteId);
 
   // Resuelve la unidad de stock REAL y el stock actual de cada insumo/
   // producto vinculado, para poder convertir la cantidad comprada (que
@@ -139,6 +144,7 @@ export async function actualizarStockPorCompra(
     fecha: opts.fecha,
     origen: 'recepcion',
     origen_id: recepcionId,
+    punto_venta_id: puntoVentaId,
   }));
   if (movimientos.length) {
     supabase.from('movimientos_stock').insert(movimientos).then(({ error }) => {
@@ -146,23 +152,39 @@ export async function actualizarStockPorCompra(
     });
   }
 
-  // 3) Stock real de insumos/productos -- secuencial (no en paralelo) para
-  //    que una misma línea repetida dos veces acumule sobre el valor ya
-  //    actualizado, no sobre uno "viejo" leído antes de la primera pasada.
+  // 3) Stock real de insumos/productos.
+  //
+  //    Multi-local (puntoVentaId no nulo): la RPC ajusta
+  //    stock_por_punto_venta y su trigger recalcula productos.stock/
+  //    insumos.stock como el total -- el costo, que la RPC no toca, se
+  //    actualiza aparte en la misma pasada.
+  //
+  //    Un solo local: EXACTAMENTE el mismo comportamiento que antes de la
+  //    Fase 27e -- secuencial (no en paralelo), para que una misma línea
+  //    repetida dos veces acumule sobre el valor ya actualizado, no sobre
+  //    uno "viejo" leído antes de la primera pasada.
   for (const linea of lineas) {
-    if (linea.item_tipo === 'insumo') {
-      const stockActual = stockInsumo.get(linea.item_id) ?? 0;
-      const update: Record<string, number> = { stock: stockActual + linea.cantidad };
-      if (linea.costo_unitario > 0) update.costo = linea.costo_unitario;
-      await supabase.from('insumos').update(update).eq('id', linea.item_id);
-      stockInsumo.set(linea.item_id, stockActual + linea.cantidad);
+    const tabla = linea.item_tipo === 'insumo' ? 'insumos' : 'productos';
+    const stockMap = linea.item_tipo === 'insumo' ? stockInsumo : stockProducto;
+    const stockActual = stockMap.get(linea.item_id) ?? 0;
+
+    if (puntoVentaId) {
+      await ajustarStockPuntoVenta({
+        clienteId: opts.clienteId,
+        puntoVentaId,
+        itemTipo: linea.item_tipo,
+        itemId: linea.item_id,
+        delta: linea.cantidad,
+      });
+      if (linea.costo_unitario > 0) {
+        await supabase.from(tabla).update({ costo: linea.costo_unitario }).eq('id', linea.item_id);
+      }
     } else {
-      const stockActual = stockProducto.get(linea.item_id) ?? 0;
       const update: Record<string, number> = { stock: stockActual + linea.cantidad };
       if (linea.costo_unitario > 0) update.costo = linea.costo_unitario;
-      await supabase.from('productos').update(update).eq('id', linea.item_id);
-      stockProducto.set(linea.item_id, stockActual + linea.cantidad);
+      await supabase.from(tabla).update(update).eq('id', linea.item_id);
     }
+    stockMap.set(linea.item_id, stockActual + linea.cantidad);
   }
 
   return { recepcionId, advertenciasConversion };
