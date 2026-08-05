@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
+import { resolverPuntoVentaId } from '@/lib/puntoVenta'
 import { useCajaTurno, useTurnoAbierto, useHistorialTurnos } from '../data/store'
 import { formatARS, formatDateTime } from '../lib/format'
 
@@ -31,7 +32,7 @@ interface ResumenCierre {
 }
 
 export default function Turno() {
-  const { cliente } = useClienteActual()
+  const { cliente, puntosVenta } = useClienteActual()
   const { dispatch } = useCajaTurno()
   const turnoAbierto = useTurnoAbierto()
   const historial = useHistorialTurnos()
@@ -41,9 +42,18 @@ export default function Turno() {
   const [calculando, setCalculando] = useState(false)
   const [resumenCierre, setResumenCierre] = useState<ResumenCierre | null>(null)
 
-  function abrirTurno() {
+  // Fase 27f: el nombre del local, para mostrarlo -- solo tiene sentido
+  // con 2+ locales (con uno solo, sigue exactamente igual que siempre).
+  const aliasPorId = new Map(puntosVenta.map((pv) => [pv.id, pv.alias]))
+  const multiLocal = puntosVenta.length > 1
+
+  async function abrirTurno() {
     setResumenCierre(null)
-    dispatch({ type: 'ABRIR_TURNO', payload: { montoApertura } })
+    // Mismo criterio de resolución que el resto del sistema (Ventas,
+    // Compras, Producción...) -- ver src/lib/puntoVenta.ts. Devuelve
+    // undefined en clientes de un solo local, sin cambios para ellos.
+    const puntoVentaId = cliente?.id ? (await resolverPuntoVentaId(cliente.id)) ?? undefined : undefined
+    dispatch({ type: 'ABRIR_TURNO', payload: { montoApertura, puntoVentaId } })
   }
 
   async function cerrarTurno() {
@@ -57,12 +67,19 @@ export default function Turno() {
     // día, sin hora) para no mezclar con otro turno del mismo día. Este
     // cálculo se hace recién ACÁ, después de que el cajero ya declaró
     // `montoCierre` -- nunca se le mostró antes en pantalla.
-    const { data } = await supabase
+    //
+    // Fase 27f: con 2+ locales, además se filtra por punto_venta_id --
+    // si no, el neto de efectivo de un local se mezclaría con el del
+    // otro. En clientes de un solo local, turnoAbierto.puntoVentaId es
+    // undefined y el filtro no se aplica (sin cambios para ellos).
+    let query = supabase
       .from('movimientos_caja')
       .select('tipo, monto')
       .eq('cliente_id', cliente.id)
       .eq('medio_pago', 'efectivo')
       .gte('created_at', turnoAbierto.fechaApertura)
+    if (turnoAbierto.puntoVentaId) query = query.eq('punto_venta_id', turnoAbierto.puntoVentaId)
+    const { data } = await query
 
     const neto = (data ?? []).reduce(
       (sum, m: any) => sum + (m.tipo === 'ingreso' ? Number(m.monto) : -Number(m.monto)),
@@ -86,6 +103,12 @@ export default function Turno() {
         <Card className="max-w-sm">
           <CardContent className="flex flex-col gap-3 py-6">
             <h2 className="font-semibold">Abrir turno</h2>
+            {multiLocal && (
+              <p className="text-muted-foreground text-xs">
+                Este turno queda asociado a tu local. Si sos usuario sin local asignado, se abre en
+                el local por defecto.
+              </p>
+            )}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="apertura">Monto de apertura</Label>
               <Input
@@ -102,7 +125,14 @@ export default function Turno() {
         <Card className="max-w-sm border-emerald-300 bg-emerald-50">
           <CardContent className="flex flex-col gap-3 py-6">
             <div>
-              <h2 className="font-semibold text-emerald-900">Turno abierto</h2>
+              <h2 className="font-semibold text-emerald-900">
+                Turno abierto
+                {multiLocal && turnoAbierto.puntoVentaId && (
+                  <span className="ml-2 text-xs font-normal text-emerald-700">
+                    ({aliasPorId.get(turnoAbierto.puntoVentaId) ?? 'Local'})
+                  </span>
+                )}
+              </h2>
               <p className="text-sm text-emerald-800">
                 Desde {formatDateTime(turnoAbierto.fechaApertura)} · apertura {formatARS(turnoAbierto.montoApertura)}
               </p>
@@ -162,6 +192,7 @@ export default function Turno() {
               <thead className="bg-gray-50 text-left text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2">Apertura</th>
+                  {multiLocal && <th className="px-3 py-2">Local</th>}
                   <th className="px-3 py-2">Cierre</th>
                   <th className="px-3 py-2 text-right">Monto apertura</th>
                   <th className="px-3 py-2 text-right">Declarado</th>
@@ -173,6 +204,11 @@ export default function Turno() {
                 {historial.map((t) => (
                   <tr key={t.id} className="border-t">
                     <td className="px-3 py-2">{formatDateTime(t.fechaApertura)}</td>
+                    {multiLocal && (
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {t.puntoVentaId ? aliasPorId.get(t.puntoVentaId) ?? '—' : '—'}
+                      </td>
+                    )}
                     <td className="px-3 py-2">{t.fechaCierre ? formatDateTime(t.fechaCierre) : '—'}</td>
                     <td className="px-3 py-2 text-right">{formatARS(t.montoApertura)}</td>
                     <td className="px-3 py-2 text-right">

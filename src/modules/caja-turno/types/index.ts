@@ -30,6 +30,14 @@ export interface TurnoCaja {
   diferencia?: number
   estado: EstadoTurno
   notas?: string
+  /** Fase 27f: local al que pertenece este turno -- undefined en clientes
+   * de un solo local (sin cambios para ellos). Con 2+ locales, cada uno
+   * puede tener su propio turno abierto en simultáneo; la RLS de
+   * `turnos_caja` (migración 0074) ya se encarga de que un usuario
+   * restringido a un local solo vea/opere los turnos de ESE local, así
+   * que este campo es sobre todo para mostrarlo en pantalla y para poder
+   * filtrar el arqueo (movimientos_caja) por el local correcto. */
+  puntoVentaId?: string
 }
 
 export interface CajaTurnoState {

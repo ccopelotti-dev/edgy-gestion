@@ -27,6 +27,7 @@ import type { CajaTurnoState, TurnoCaja } from '../types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
+import { resolverPuntoVentaId } from '@/lib/puntoVenta'
 import { nowISO } from '../lib/format'
 
 function uid(): string {
@@ -34,7 +35,10 @@ function uid(): string {
 }
 
 type Action =
-  | { type: 'ABRIR_TURNO'; payload: { montoApertura: number; usuarioAperturaId?: string; notas?: string } }
+  | {
+      type: 'ABRIR_TURNO'
+      payload: { montoApertura: number; usuarioAperturaId?: string; notas?: string; puntoVentaId?: string }
+    }
   | {
       type: 'CERRAR_TURNO'
       payload: {
@@ -61,6 +65,7 @@ function reducer(state: CajaTurnoState, action: Action): CajaTurnoState {
         montoApertura: action.payload.montoApertura,
         estado: 'abierto',
         notas: action.payload.notas,
+        puntoVentaId: action.payload.puntoVentaId,
       }
       return { ...state, turnos: [...state.turnos, nuevo] }
     }
@@ -107,6 +112,7 @@ function turnoToRow(t: TurnoCaja, clienteId: string) {
     diferencia: t.diferencia ?? null,
     estado: t.estado,
     notas: t.notas ?? null,
+    punto_venta_id: t.puntoVentaId ?? null,
   }
 }
 
@@ -166,6 +172,7 @@ async function fetchCajaTurnoState(): Promise<CajaTurnoState> {
     diferencia: r.diferencia != null ? Number(r.diferencia) : undefined,
     estado: r.estado,
     notas: r.notas ?? undefined,
+    puntoVentaId: r.punto_venta_id ?? undefined,
   }))
 
   return { turnos }

@@ -22,6 +22,7 @@
 // ============================================================
 
 import { supabase } from './supabase';
+import { resolverPuntoVentaId } from './puntoVenta';
 
 type MedioPagoTesoreria = 'efectivo' | 'transferencia' | 'cheque' | 'tarjeta' | 'mercadopago';
 
@@ -78,6 +79,13 @@ export async function registrarMovimientoTesoreria(opts: RegistrarMovimientoOpts
 
   const linkId = crypto.randomUUID();
 
+  // Fase 27f: se resuelve el local del operador que generó este cobro/pago
+  // (mismo criterio que el resto del sistema, ver src/lib/puntoVenta.ts) --
+  // así el arqueo de Caja por turno puede filtrar el efectivo de CADA
+  // local por separado. undefined en clientes de un solo local, sin
+  // cambios para ellos.
+  const puntoVentaId = (await resolverPuntoVentaId(opts.clienteId)) ?? undefined;
+
   const { error: errCaja } = await supabase.from('movimientos_caja').insert({
     id: crypto.randomUUID(),
     cliente_id: opts.clienteId,
@@ -89,6 +97,7 @@ export async function registrarMovimientoTesoreria(opts: RegistrarMovimientoOpts
     monto: opts.monto,
     cuenta_id: null,
     link_id: linkId,
+    punto_venta_id: puntoVentaId ?? null,
   });
   if (errCaja) {
     console.error(`Tesorería · error registrando movimiento de caja desde ${opts.origenModulo}:`, errCaja);
