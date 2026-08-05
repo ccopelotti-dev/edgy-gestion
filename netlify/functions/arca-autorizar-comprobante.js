@@ -167,6 +167,34 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: false, error: 'El comprobante no tiene ítems' }), { status: 400 })
   }
 
+  // ── 2b) Punto de venta a usar ante ARCA (Fase 27b) ───────────────
+  // Si el comprobante tiene un punto de venta asignado (cliente con
+  // más de un local), usamos el número fiscal de ESE punto de venta.
+  // Si no (clientes de un solo local, o comprobantes viejos de antes
+  // de esta fase), caemos al valor legado de clientes_arca_config --
+  // mismo comportamiento de siempre, sin romper nada.
+  let puntoVenta = config.punto_venta
+  if (comprobante.punto_venta_id) {
+    const { data: pv, error: pvError } = await supabaseAdmin
+      .from('puntos_venta')
+      .select('numero')
+      .eq('id', comprobante.punto_venta_id)
+      .maybeSingle()
+    if (pvError || !pv?.numero) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'El punto de venta asignado a este comprobante no tiene número fiscal cargado' }),
+        { status: 409 },
+      )
+    }
+    puntoVenta = Number(pv.numero)
+  }
+  if (!puntoVenta) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'Este negocio no tiene un punto de venta fiscal configurado todavía' }),
+      { status: 409 },
+    )
+  }
+
   // ── 3) Receptor (cliente_venta, o Consumidor Final) ─────────────
   let receptor
   if (comprobante.cliente_venta_id === CONSUMIDOR_FINAL_ID) {
@@ -251,7 +279,7 @@ export default async (req) => {
       token: ta.token,
       sign: ta.sign,
       cuit,
-      puntoVenta: config.punto_venta,
+      puntoVenta,
       cbteTipo,
     })
     cbteNro = ultimo + 1
@@ -261,7 +289,7 @@ export default async (req) => {
   }
 
   const feCaeReq = construirFeCaeReq({
-    puntoVenta: config.punto_venta,
+    puntoVenta,
     cbteTipo,
     concepto,
     docTipo,
@@ -292,7 +320,7 @@ export default async (req) => {
 
   // ── 7) Guardar resultado en comprobantes_venta.afip ─────────────
   const afip = {
-    puntoVenta: config.punto_venta,
+    puntoVenta,
     tipoFiscal: letra,
     tipoComprobanteAfip: cbteTipo,
     numeroComprobante: resultadoCae.cbteNro,
