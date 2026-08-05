@@ -57,6 +57,9 @@ interface ComboDialogProps {
   rubros: Rubro[]
   /** Combos existentes del cliente, para validar que el nombre no se repita. */
   combos: Combo[]
+  /** Puntos de venta (locales) del cliente -- Fase 27d. Ver mismo prop en
+   * ProductoDialog. */
+  puntosVenta?: { id: string; alias: string }[]
   editData?: Combo
 }
 
@@ -68,6 +71,7 @@ const emptyCombo: ComboFormData = {
   imagenes: [],
   etiqueta: '',
   disponible: true,
+  puntoVentaId: undefined,
   componentesFijos: [],
   componentesEleccion: [],
 }
@@ -79,6 +83,7 @@ export function ComboDialog({
   productos,
   rubros,
   combos,
+  puntosVenta = [],
   editData,
 }: ComboDialogProps) {
   const [form, setForm] = useState<ComboFormData>(emptyCombo)
@@ -347,6 +352,7 @@ export function ComboDialog({
       descripcion: form.descripcion.trim(),
       descuentoPorcentaje: Math.min(Math.max(form.descuentoPorcentaje || 0, 0), 100),
       etiqueta: form.etiqueta?.trim() || undefined,
+      puntoVentaId: form.puntoVentaId || undefined,
     })
     onOpenChange(false)
   }
@@ -483,6 +489,27 @@ export function ComboDialog({
               querés resaltar nada especial.
             </p>
           </div>
+
+          {/* Disponible en (Fase 27d): solo aparece en clientes con 2+
+              locales cargados -- default (sin elegir nada) = compartido,
+              visible desde cualquier local, igual que hasta ahora. */}
+          {puntosVenta.length > 1 && (
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Disponible en</label>
+              <select
+                className={inputClass}
+                value={form.puntoVentaId ?? ''}
+                onChange={(e) => update('puntoVentaId', e.target.value || undefined)}
+              >
+                <option value="">Todos los locales</option>
+                {puntosVenta.map((pv) => (
+                  <option key={pv.id} value={pv.id}>
+                    Solo {pv.alias}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Descuento */}
           <div className="grid gap-1.5">

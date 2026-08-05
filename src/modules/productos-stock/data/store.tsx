@@ -745,6 +745,8 @@ function productoToRow(p: Producto, clienteId: string) {
     tipo: p.tipo,
     plantilla_garantia_id: p.plantillaGarantiaId || null,
     dias_disponibles: p.diasDisponibles && p.diasDisponibles.length ? p.diasDisponibles : null,
+    // Fase 27d: null = compartido entre todos los locales (default).
+    punto_venta_id: p.puntoVentaId || null,
   }
 }
 
@@ -791,6 +793,8 @@ function comboToRow(c: Combo, clienteId: string) {
     imagenes: c.imagenes ?? [],
     descuento_porcentaje: c.descuentoPorcentaje ?? 0,
     etiqueta: c.etiqueta?.trim() || null,
+    // Fase 27d: null = compartido entre todos los locales (default).
+    punto_venta_id: c.puntoVentaId || null,
   }
 }
 
@@ -1488,6 +1492,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     variantes: variantesByProducto.get(r.id) ?? [],
     plantillaGarantiaId: r.plantilla_garantia_id ?? undefined,
     diasDisponibles: r.dias_disponibles ?? undefined,
+    puntoVentaId: r.punto_venta_id ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -1576,6 +1581,7 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
     imagenes: r.imagenes ?? [],
     descuentoPorcentaje: Number(r.descuento_porcentaje ?? 0),
     etiqueta: r.etiqueta ?? undefined,
+    puntoVentaId: r.punto_venta_id ?? undefined,
     componentesFijos: componentesFijosByCombo.get(r.id) ?? [],
     componentesEleccion: componentesEleccionByCombo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),

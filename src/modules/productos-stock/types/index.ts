@@ -220,6 +220,10 @@ export interface Combo {
    */
   etiqueta?: string
   disponible: boolean
+  /** Fase 27d: si está seteado, este combo solo se ofrece desde ESE
+   * punto de venta (local); undefined/null = compartido, visible desde
+   * cualquier local del cliente (default, sin cambios). */
+  puntoVentaId?: string
   componentesFijos: ComboComponenteFijo[]
   componentesEleccion: ComboComponenteEleccion[]
   createdAt: string
@@ -319,6 +323,12 @@ export interface Producto {
    * autoservido no pida algo que no se está haciendo ese día.
    */
   diasDisponibles?: number[]
+  /** Fase 27d: si está seteado, este producto solo se ofrece desde ESE
+   * punto de venta (local) -- no aparece en el catálogo de venta de los
+   * demás. undefined/null = compartido, visible desde cualquier local
+   * del cliente (default, sin cambios). No afecta a Compras/Kardex/
+   * administración de catálogo, que siguen viendo todo el catálogo. */
+  puntoVentaId?: string
   createdAt: string
 }
 

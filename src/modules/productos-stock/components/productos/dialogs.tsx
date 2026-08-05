@@ -74,6 +74,10 @@ interface ProductoDialogProps {
   onCrearMarca: (nombre: string) => void
   /** Catálogo de plantillas de garantía (Fase 4). */
   plantillasGarantia: PlantillaGarantia[]
+  /** Puntos de venta (locales) del cliente -- Fase 27d. Vacío o con un
+   * solo elemento en un cliente de un solo local: el selector de
+   * "Disponible en" directamente no se muestra en ese caso. */
+  puntosVenta?: { id: string; alias: string }[]
   editData?: Producto
 }
 
@@ -99,6 +103,7 @@ const emptyProducto: ProductoFormData = {
   variantes: [],
   plantillaGarantiaId: undefined,
   diasDisponibles: undefined,
+  puntoVentaId: undefined,
 }
 
 export function ProductoDialog({
@@ -111,6 +116,7 @@ export function ProductoDialog({
   marcas,
   onCrearMarca,
   plantillasGarantia,
+  puntosVenta = [],
   editData,
 }: ProductoDialogProps) {
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
@@ -324,6 +330,7 @@ export function ProductoDialog({
       proveedorId: form.proveedorId || undefined,
       plantillaGarantiaId: form.plantillaGarantiaId || undefined,
       diasDisponibles: form.diasDisponibles && form.diasDisponibles.length ? form.diasDisponibles : undefined,
+      puntoVentaId: form.puntoVentaId || undefined,
       variantes:
         form.tipo === 'con_variantes'
           ? form.variantes.map((v) => ({
@@ -618,6 +625,27 @@ export function ProductoDialog({
               </select>
             </div>
           </div>
+
+          {/* Disponible en (Fase 27d): solo aparece en clientes con 2+
+              locales cargados -- default (sin elegir nada) = compartido,
+              visible desde cualquier local, igual que hasta ahora. */}
+          {puntosVenta.length > 1 && (
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Disponible en</label>
+              <select
+                className={inputClass}
+                value={form.puntoVentaId ?? ''}
+                onChange={(e) => update('puntoVentaId', e.target.value || undefined)}
+              >
+                <option value="">Todos los locales</option>
+                {puntosVenta.map((pv) => (
+                  <option key={pv.id} value={pv.id}>
+                    Solo {pv.alias}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Garantía (Fase 4: override puntual, con fallback al rubro) */}
           <div className="grid gap-1.5">

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Plus, Pencil, Trash2, PackagePlus, ImageIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useProductosStock } from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import { EmptyState, Amount } from '../components/productos/display'
 import { ComboDialog } from '../components/productos/combo-dialogs'
 import { ImagenPromocionalDialog } from '../components/productos/imagen-promocional-dialog'
@@ -19,6 +20,9 @@ import type { Combo } from '../types'
 
 export default function Combos() {
   const { state, dispatch } = useProductosStock()
+  // Fase 27d: selector "Disponible en" del ComboDialog, solo se muestra
+  // si el cliente tiene 2+ locales cargados.
+  const { puntosVenta } = useClienteActual()
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Combo | undefined>()
@@ -201,6 +205,7 @@ export default function Combos() {
         productos={state.productos}
         rubros={state.rubros}
         combos={state.combos}
+        puntosVenta={puntosVenta}
         editData={editing}
       />
 

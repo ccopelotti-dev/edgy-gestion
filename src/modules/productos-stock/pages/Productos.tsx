@@ -6,6 +6,7 @@ import { Search, Plus, Pencil, Trash2, ImageOff, QrCode, History } from 'lucide-
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useProductosStock } from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import {
   KpiCard,
   StockBadge,
@@ -27,6 +28,9 @@ const inputClass =
 
 export default function Productos() {
   const { state, dispatch } = useProductosStock()
+  // Fase 27d: selector "Disponible en" del ProductoDialog, solo se
+  // muestra si el cliente tiene 2+ locales cargados.
+  const { puntosVenta } = useClienteActual()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Fase 16.2: acceso rápido a Movimientos filtrado por este producto.
@@ -299,6 +303,7 @@ export default function Productos() {
         marcas={state.marcas}
         onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
         plantillasGarantia={state.plantillasGarantia}
+        puntosVenta={puntosVenta}
         editData={editingProducto}
       />
 
