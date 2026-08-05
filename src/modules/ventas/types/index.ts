@@ -343,6 +343,11 @@ export interface Comprobante {
   numero: number;                 // numeración interna correlativa
   clienteId: string;
   ordenId?: string;               // si viene de una orden
+  /** Fase 27c: qué punto de venta (local/sucursal) emite este
+   * comprobante -- undefined en clientes de un solo local (sigue
+   * resolviéndose con el fallback legado de clientes_arca_config.punto_venta,
+   * ver arca-autorizar-comprobante.js). */
+  puntoVentaId?: string;
   fecha: string;
   items: ComprobanteItem[];
   subtotal: number;               // neto gravado

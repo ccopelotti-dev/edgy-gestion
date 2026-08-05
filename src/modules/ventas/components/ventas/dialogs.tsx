@@ -361,9 +361,11 @@ interface ComprobanteDialogProps {
    * selector de Tipo (queda fijo en 'factura') y solo se deja elegir el
    * modo de emisión (Interno -- se muestra como "Nota de entrega" hasta que
    * se conecte ARCA -- o Electrónica). No hay todavía un selector de punto
-   * de venta o tiqueadora fiscal por comprobante: el punto de venta es un
-   * dato fijo de la configuración ARCA de la empresa (Configuración >
-   * Empresa), no algo que se elija acá. */
+   * de venta o tiqueadora fiscal por comprobante en clientes de un solo
+   * local: el punto de venta sigue siendo un dato fijo de la
+   * configuración ARCA de la empresa (Configuración > Empresa). En
+   * clientes con 2+ puntos de venta cargados (Fase 27), sí aparece un
+   * selector -- ver `puntosVenta`/`puntoVentaId` más abajo. */
   soloFactura?: boolean;
   onSave: (data: {
     tipo: TipoComprobante;
@@ -373,6 +375,9 @@ interface ComprobanteDialogProps {
     modoEmision: ModoEmision;
     items: Omit<ComprobanteItem, 'id'>[];
     descuentoGeneral: number;
+    /** Fase 27c: qué punto de venta (local/sucursal) emite este
+     * comprobante -- undefined en clientes de un solo local. */
+    puntoVentaId?: string;
   }) => void;
   modoEmisionDefault: ModoEmision;
 }
@@ -459,6 +464,10 @@ export function ComprobanteDialog({
   const [modoEmision, setModoEmision] = useState<ModoEmision>(modoEmisionDefault);
   const [items, setItems] = useState<ItemRow[]>([newItemRow()]);
   const [descuentoGeneral, setDescuentoGeneral] = useState(0);
+  // Fase 27c: qué punto de venta (local/sucursal) emite este comprobante --
+  // solo importa en clientes con 2+ puntos de venta cargados (ver
+  // `puntosVenta.length > 1` más abajo, mismo criterio que ClienteDetalle.tsx).
+  const [puntoVentaId, setPuntoVentaId] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   // Se activa recién después del primer intento fallido de guardar: a partir
   // de ahí, las filas incompletas se resaltan en rojo en vivo a medida que
@@ -468,7 +477,9 @@ export function ComprobanteDialog({
 
   // Fase 18: catálogo de productos para el buscador (ver ProductoCatalogoItem
   // arriba). Se carga solo mientras el diálogo está abierto.
-  const { cliente: clienteTenant } = useClienteActual();
+  // Fase 27c: puntosVenta/puntoVentaUsuarioId vienen del mismo hook -- ya
+  // se llamaba acá para el catálogo, no hace falta un import nuevo.
+  const { cliente: clienteTenant, puntosVenta, puntoVentaUsuarioId } = useClienteActual();
   const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoItem[]>([]);
   // Fase 19.1: combos disponibles del catálogo, cargados junto con los
   // productos (misma condición `open` + cliente tenant).
@@ -485,6 +496,12 @@ export function ComprobanteDialog({
       setErrors({});
       setIntentoGuardar(false);
       setBusquedaProducto('');
+      // Fase 27c: precarga el punto de venta al que está restringido el
+      // usuario logueado (si tiene uno); si tiene acceso global y el
+      // cliente solo tiene un local cargado, ese es el único elegible.
+      // En cualquier otro caso queda en blanco y el operador elige --
+      // ver `validate()` más abajo, que lo exige si hay 2+ opciones.
+      setPuntoVentaId(puntoVentaUsuarioId ?? (puntosVenta.length === 1 ? puntosVenta[0].id : ''));
       if (orden) {
         // Fase 22f: si el cliente de la orden no tiene un Cliente formal
         // vinculado (pedido de invitado/canal externo -- Ventas Online,
@@ -531,7 +548,7 @@ export function ComprobanteDialog({
         setItems([newItemRow()]);
       }
     }
-  }, [open, modoEmisionDefault, orden, presupuesto, clientes]);
+  }, [open, modoEmisionDefault, orden, presupuesto, clientes, puntosVenta, puntoVentaUsuarioId]);
 
   useEffect(() => {
     if (!open || !clienteTenant?.id) return;
@@ -678,6 +695,9 @@ export function ComprobanteDialog({
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     if (!clienteId) next.clienteId = 'Seleccione un cliente';
+    // Fase 27c: con 2+ puntos de venta cargados, hay que elegir cuál
+    // factura -- con uno solo (o ninguno) no hay ambigüedad posible.
+    if (puntosVenta.length > 1 && !puntoVentaId) next.puntoVentaId = 'Seleccione un punto de venta';
     if (items.length === 0) next.items = 'Agregue al menos un ítem';
     const filasIncompletas = items
       .map((it, i) => (filaItemIncompleta(it) ? i + 1 : null))
@@ -707,6 +727,7 @@ export function ComprobanteDialog({
       medioPago,
       modoEmision,
       descuentoGeneral,
+      puntoVentaId: puntoVentaId || undefined,
       items: items.map((item) => {
         const subtotal = getSubtotal(item);
         const { montoIva } = calcularTotalConIva(subtotal, item.alicuotaIva);
@@ -788,6 +809,29 @@ export function ComprobanteDialog({
                 {errors.clienteId && <p className="text-xs text-red-600 mt-1">{errors.clienteId}</p>}
               </div>
             </div>
+
+            {/* Fase 27c: solo tiene sentido preguntar si el cliente ya
+                tiene más de un punto de venta cargado -- en un negocio
+                de un solo local queda oculto, cero cambio de flujo. */}
+            {puntosVenta.length > 1 && (
+              <div>
+                <label className={labelClass}>Punto de venta *</label>
+                <select
+                  className={selectClass}
+                  value={puntoVentaId}
+                  onChange={(e) => {
+                    setPuntoVentaId(e.target.value);
+                    if (errors.puntoVentaId) setErrors((p) => ({ ...p, puntoVentaId: '' }));
+                  }}
+                >
+                  <option value="">Seleccionar...</option>
+                  {puntosVenta.filter((pv) => pv.activo).map((pv) => (
+                    <option key={pv.id} value={pv.id}>{pv.alias}</option>
+                  ))}
+                </select>
+                {errors.puntoVentaId && <p className="text-xs text-red-600 mt-1">{errors.puntoVentaId}</p>}
+              </div>
+            )}
 
             {/* Fase 22f: datos de contacto de la comanda -- útiles para
                 confirmar a quién y adónde se factura/entrega, sobre todo

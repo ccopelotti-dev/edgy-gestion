@@ -374,6 +374,7 @@ export default function Ordenes() {
     modoEmision: ModoEmision;
     items: Omit<ComprobanteItem, 'id'>[];
     descuentoGeneral: number;
+    puntoVentaId?: string;
   }) => {
     const items: ComprobanteItem[] = data.items.map((i) => ({
       ...i,
@@ -397,6 +398,7 @@ export default function Ordenes() {
         tipo: data.tipo,
         modoEmision: data.modoEmision,
         clienteId: data.clienteId,
+        puntoVentaId: data.puntoVentaId,
         ordenId: ordenParaFacturar?.id,
         fecha: data.fecha,
         items,

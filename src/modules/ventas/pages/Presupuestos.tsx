@@ -205,6 +205,7 @@ export default function Presupuestos() {
     modoEmision: ModoEmision;
     items: Omit<ComprobanteItem, 'id'>[];
     descuentoGeneral: number;
+    puntoVentaId?: string;
   }) => {
     const items: ComprobanteItem[] = data.items.map((i) => ({
       ...i,
@@ -227,6 +228,7 @@ export default function Presupuestos() {
         tipo: data.tipo,
         modoEmision: data.modoEmision,
         clienteId: data.clienteId,
+        puntoVentaId: data.puntoVentaId,
         fecha: data.fecha,
         items,
         subtotal,

@@ -558,6 +558,10 @@ function comprobanteToRow(c: Comprobante, clienteId: string) {
     numero: c.numero,
     cliente_venta_id: c.clienteId,
     orden_id: c.ordenId ?? null,
+    // Fase 27c: qué punto de venta (local/sucursal) emite este
+    // comprobante -- null = fallback legado (clientes_arca_config.punto_venta),
+    // caso normal en un cliente de un solo local.
+    punto_venta_id: c.puntoVentaId ?? null,
     fecha: c.fecha,
     subtotal: c.subtotal,
     descuento_general: c.descuentoGeneral,
@@ -1075,6 +1079,7 @@ async function fetchVentasState(): Promise<VentasState> {
     numero: r.numero,
     clienteId: r.cliente_venta_id,
     ordenId: r.orden_id ?? undefined,
+    puntoVentaId: r.punto_venta_id ?? undefined,
     fecha: r.fecha,
     items: compItemsByComp.get(r.id) ?? [],
     subtotal: Number(r.subtotal),
