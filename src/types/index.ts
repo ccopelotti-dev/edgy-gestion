@@ -114,6 +114,11 @@ export interface UsuarioCliente {
   cuil: string | null
   nombre: string | null
   auth_mode: AuthMode
+  /** null = acceso global (todos los puntos de venta del cliente).
+   * Fase 27a. FK a `puntos_venta` (Configuración > Facturación) --
+   * mismo catálogo que ya existía pensado para esto, ver
+   * src/modules/configuracion/types/index.ts (`PuntoVenta`). */
+  punto_venta_id: string | null
 }
 
 export interface Permiso {

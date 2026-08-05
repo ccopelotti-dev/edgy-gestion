@@ -16,6 +16,15 @@ interface FilaClienteModulo {
   activo: boolean
 }
 
+// Fase 27a: versión liviana de un punto de venta -- solo lo necesario
+// para el selector de esta pantalla. El alta/edición completa de
+// puntos de venta la hace el propio cliente en Configuración >
+// Facturación (src/modules/configuracion/pages/PuntosVenta.tsx).
+interface PuntoVentaLiviano {
+  id: string
+  alias: string
+}
+
 const DATOS_ADMIN_VACIOS: DatosAdmin = { nombre: '', email: '' }
 
 export function ClienteDetalle() {
@@ -24,6 +33,8 @@ export function ClienteDetalle() {
   const [usuarios, setUsuarios] = useState<UsuarioCliente[]>([])
   const [filasModulos, setFilasModulos] = useState<FilaClienteModulo[]>([])
   const [modulosActivosFull, setModulosActivosFull] = useState<Modulo[]>([])
+  const [puntosVenta, setPuntosVenta] = useState<PuntoVentaLiviano[]>([])
+  const [asignandoPuntoVenta, setAsignandoPuntoVenta] = useState<string | null>(null)
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [mensaje, setMensaje] = useState<string | null>(null)
@@ -56,7 +67,7 @@ export function ClienteDetalle() {
     if (!id) return
     setCargando(true)
 
-    const [{ data: clienteData }, { data: usuariosData }, { data: clienteModulosData }] =
+    const [{ data: clienteData }, { data: usuariosData }, { data: clienteModulosData }, { data: puntosVentaData }] =
       await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('usuarios_cliente').select('*').eq('cliente_id', id),
@@ -64,10 +75,14 @@ export function ClienteDetalle() {
           .from('cliente_modulos')
           .select('id, modulo_id, activo, modulos(*)')
           .eq('cliente_id', id),
+        // Fase 27a: vacío en clientes de un solo local -- el selector
+        // de punto de venta simplemente no aparece en ese caso.
+        supabase.from('puntos_venta').select('id, alias').eq('cliente_id', id).order('alias'),
       ])
 
     setCliente(clienteData ?? null)
     setUsuarios(usuariosData ?? [])
+    setPuntosVenta(puntosVentaData ?? [])
     setFilasModulos(
       (clienteModulosData ?? []).map((f: any) => ({
         id: f.id,
@@ -124,6 +139,21 @@ export function ClienteDetalle() {
     await cargarTodo()
     setGuardando(false)
     setMensaje('Guardado.')
+  }
+
+  // Fase 27a: null = acceso global (ve/opera todos los puntos de venta
+  // del cliente) -- es la opción por defecto y la que corresponde a
+  // cualquier cliente de un solo local.
+  async function asignarPuntoVenta(usuarioClienteId: string, puntoVentaId: string) {
+    setAsignandoPuntoVenta(usuarioClienteId)
+    await supabase
+      .from('usuarios_cliente')
+      .update({ punto_venta_id: puntoVentaId || null })
+      .eq('id', usuarioClienteId)
+    setUsuarios((prev) =>
+      prev.map((u) => (u.id === usuarioClienteId ? { ...u, punto_venta_id: puntoVentaId || null } : u)),
+    )
+    setAsignandoPuntoVenta(null)
   }
 
   async function completarAdmin() {
@@ -208,6 +238,24 @@ export function ClienteDetalle() {
                         ? 'Enviado'
                         : 'Reenviar acceso'}
                   </button>
+                )}
+                {/* Fase 27a: solo tiene sentido mostrar el selector si el
+                    cliente ya tiene más de un punto de venta cargado --
+                    en un cliente de un solo local no aporta nada. */}
+                {puntosVenta.length > 1 && (
+                  <select
+                    className="rounded border border-gray-200 px-2 py-1 text-sm text-gray-600 disabled:opacity-50"
+                    value={u.punto_venta_id ?? ''}
+                    disabled={asignandoPuntoVenta === u.id}
+                    onChange={(e) => asignarPuntoVenta(u.id, e.target.value)}
+                  >
+                    <option value="">Todos los locales</option>
+                    {puntosVenta.map((pv) => (
+                      <option key={pv.id} value={pv.id}>
+                        {pv.alias}
+                      </option>
+                    ))}
+                  </select>
                 )}
                 <span className="text-sm capitalize text-gray-500">{u.rol}</span>
               </div>
