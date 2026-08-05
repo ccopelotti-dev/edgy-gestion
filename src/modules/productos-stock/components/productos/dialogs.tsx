@@ -1543,6 +1543,296 @@ export function RecepcionDialog({
   )
 }
 
+// ─── TransferenciaDialog ────────────────────────────────────────────────────
+// Fase 27e-1: primera vez que "Nueva transferencia" tiene un diálogo de alta
+// real (antes el botón estaba permanentemente deshabilitado). A diferencia
+// del resto de los diálogos de este archivo, onSave es ASYNC -- el alta pasa
+// por la RPC `crear_transferencia` (movimiento de stock atómico en el
+// servidor, ver migración 0073), que puede rechazar la operación (ej. "no
+// hay stock suficiente en el local de origen"). El diálogo espera esa
+// respuesta y muestra el error sin cerrarse si algo falla.
+
+interface LineaTransferenciaForm {
+  key: string
+  itemTipo: 'producto' | 'insumo'
+  itemId: string
+  varianteId: string
+  cantidad: number
+}
+
+interface TransferenciaDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** Puntos de venta activos del cliente (2+ siempre, si no esta pantalla no
+   * se muestra -- ver Transferencias.tsx). */
+  puntosVenta: { id: string; alias: string }[]
+  productos: Producto[]
+  insumos: Insumo[]
+  /** Devuelve un mensaje de error si la RPC rechazó la transferencia, o
+   * `null` si se creó bien (el diálogo se cierra solo en ese caso). */
+  onSave: (data: {
+    fecha: string
+    origenPuntoVentaId: string
+    destinoPuntoVentaId: string
+    notas: string
+    lineas: { itemTipo: 'producto' | 'insumo'; itemId: string; varianteId?: string; cantidad: number }[]
+  }) => Promise<string | null>
+}
+
+export function TransferenciaDialog({
+  open,
+  onOpenChange,
+  puntosVenta,
+  productos,
+  insumos,
+  onSave,
+}: TransferenciaDialogProps) {
+  const [fecha, setFecha] = useState(todayISO())
+  const [origenId, setOrigenId] = useState('')
+  const [destinoId, setDestinoId] = useState('')
+  const [notas, setNotas] = useState('')
+  const [lineas, setLineas] = useState<LineaTransferenciaForm[]>([])
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setFecha(todayISO())
+      setOrigenId(puntosVenta[0]?.id ?? '')
+      setDestinoId(puntosVenta[1]?.id ?? '')
+      setNotas('')
+      setLineas([])
+      setGuardando(false)
+      setError('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  function addLinea() {
+    setLineas((prev) => [
+      ...prev,
+      { key: `${Date.now()}-${Math.random()}`, itemTipo: 'producto', itemId: '', varianteId: '', cantidad: 0 },
+    ])
+  }
+
+  function updateLinea(index: number, updates: Partial<LineaTransferenciaForm>) {
+    setLineas((prev) => prev.map((l, i) => (i === index ? { ...l, ...updates } : l)))
+  }
+
+  function removeLinea(index: number) {
+    setLineas((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function lineaValida(l: LineaTransferenciaForm): boolean {
+    if (!l.itemId || l.cantidad <= 0) return false
+    if (l.itemTipo === 'producto') {
+      const producto = productos.find((p) => p.id === l.itemId)
+      if (producto?.tipo === 'con_variantes' && !l.varianteId) return false
+    }
+    return true
+  }
+
+  const lineasValidas = lineas.filter(lineaValida)
+  const puedeGuardar =
+    !guardando && origenId && destinoId && origenId !== destinoId && lineasValidas.length > 0
+
+  async function handleSave() {
+    if (!puedeGuardar) return
+    setGuardando(true)
+    setError('')
+    const errorRpc = await onSave({
+      fecha,
+      origenPuntoVentaId: origenId,
+      destinoPuntoVentaId: destinoId,
+      notas,
+      lineas: lineasValidas.map((l) => ({
+        itemTipo: l.itemTipo,
+        itemId: l.itemId,
+        varianteId: l.varianteId || undefined,
+        cantidad: l.cantidad,
+      })),
+    })
+    setGuardando(false)
+    if (errorRpc) {
+      setError(errorRpc)
+      return
+    }
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Nueva transferencia entre locales</DialogTitle>
+          <DialogDescription>
+            Mueve stock real de un local a otro. Se descuenta del origen y se suma al destino al
+            momento de guardar.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 py-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Fecha</label>
+              <input className={inputClass} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Local origen</label>
+              <select className={inputClass} value={origenId} onChange={(e) => setOrigenId(e.target.value)}>
+                <option value="">Seleccionar...</option>
+                {puntosVenta.map((pv) => (
+                  <option key={pv.id} value={pv.id}>
+                    {pv.alias}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Local destino</label>
+              <select className={inputClass} value={destinoId} onChange={(e) => setDestinoId(e.target.value)}>
+                <option value="">Seleccionar...</option>
+                {puntosVenta.map((pv) => (
+                  <option key={pv.id} value={pv.id}>
+                    {pv.alias}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {origenId && destinoId && origenId === destinoId && (
+            <p className="text-xs text-red-500">El local de origen y destino no pueden ser el mismo.</p>
+          )}
+
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Notas</label>
+            <textarea
+              className={`${inputClass} min-h-[48px] resize-y`}
+              value={notas}
+              onChange={(e) => setNotas(e.target.value)}
+              placeholder="Observaciones"
+              rows={2}
+            />
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Ítems a transferir</label>
+              <Button variant="outline" size="sm" onClick={addLinea}>
+                <Plus className="h-4 w-4 mr-1" />
+                Agregar ítem
+              </Button>
+            </div>
+
+            {lineas.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-md">
+                No hay ítems. Agrega al menos uno.
+              </p>
+            )}
+
+            {lineas.map((linea, idx) => {
+              const itemsDisponibles = linea.itemTipo === 'producto' ? productos : insumos
+              const productoSeleccionado =
+                linea.itemTipo === 'producto' ? productos.find((p) => p.id === linea.itemId) : undefined
+              const tieneVariantes = productoSeleccionado?.tipo === 'con_variantes'
+
+              return (
+                <div key={linea.key} className="grid gap-2 rounded-md border p-2">
+                  <div className="grid grid-cols-[110px_1fr_100px_36px] gap-2 items-end">
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Tipo</label>
+                      <select
+                        className={inputClass}
+                        value={linea.itemTipo}
+                        onChange={(e) =>
+                          updateLinea(idx, { itemTipo: e.target.value as 'producto' | 'insumo', itemId: '', varianteId: '' })
+                        }
+                      >
+                        <option value="producto">Producto</option>
+                        <option value="insumo">Insumo</option>
+                      </select>
+                    </div>
+
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Item</label>
+                      <select
+                        className={inputClass}
+                        value={linea.itemId}
+                        onChange={(e) => updateLinea(idx, { itemId: e.target.value, varianteId: '' })}
+                      >
+                        <option value="">Seleccionar...</option>
+                        {itemsDisponibles.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid gap-1">
+                      <label className="text-xs text-muted-foreground">Cantidad</label>
+                      <input
+                        className={inputClass}
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={linea.cantidad || ''}
+                        onChange={(e) => updateLinea(idx, { cantidad: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-muted-foreground hover:text-red-500"
+                      onClick={() => removeLinea(idx)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {tieneVariantes && (
+                    <div className="grid gap-1 max-w-xs">
+                      <label className="text-xs text-muted-foreground">Variante (color / talle) *</label>
+                      <select
+                        className={inputClass}
+                        value={linea.varianteId}
+                        onChange={(e) => updateLinea(idx, { varianteId: e.target.value })}
+                      >
+                        <option value="">Seleccionar...</option>
+                        {productoSeleccionado!.variantes.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {[v.color, v.talle].filter(Boolean).join(' / ') || '(sin nombre)'}
+                          </option>
+                        ))}
+                      </select>
+                      {!linea.varianteId && (
+                        <p className="text-xs text-red-500">Elegí la variante antes de guardar.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
+            Cancelar
+          </Button>
+          <Button onClick={handleSave} disabled={!puedeGuardar}>
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+            Crear transferencia
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ─── AjusteStockDialog ────────────────────────────────────────────────────────
 // Usado solo para Insumos (Insumos.tsx) -- los productos con variantes se
 // ajustan desde la página Stock, que maneja su propio selector de variante.

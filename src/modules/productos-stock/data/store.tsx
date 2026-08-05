@@ -87,6 +87,7 @@ import type {
   Recepcion,
   LineaRecepcion,
   Transferencia,
+  EstadoTransferencia,
   ReglaControl,
   RegistroControl,
 } from '../types'
@@ -143,7 +144,11 @@ type Action =
   | { type: 'ADD_RECEPCION'; payload: Omit<Recepcion, 'id' | 'createdAt'> }
   | { type: 'CONFIRMAR_RECEPCION'; payload: string }
   | { type: 'CANCELAR_RECEPCION'; payload: string }
-  | { type: 'ADD_TRANSFERENCIA'; payload: Omit<Transferencia, 'id' | 'createdAt'> }
+  // Fase 27e-1: ADD_TRANSFERENCIA se retira -- "Nueva transferencia" ahora
+  // llama directo a la RPC `crear_transferencia` (movimiento de stock
+  // atómico server-side) y recarga el estado con SET_STATE, en vez de pasar
+  // por el flujo optimista dispatch+syncToSupabase que usa el resto del
+  // store. Ver Transferencias.tsx.
   | { type: 'ADD_REGLA_CONTROL'; payload: Omit<ReglaControl, 'id' | 'createdAt'> }
   | { type: 'ADD_REGISTRO_CONTROL'; payload: Omit<RegistroControl, 'id'> }
   | {
@@ -577,16 +582,6 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         ),
       }
 
-    // ── Transferencias ────────────────────────────────────────────────────────
-    case 'ADD_TRANSFERENCIA': {
-      const nueva: Transferencia = {
-        ...action.payload,
-        id: uid(),
-        createdAt: todayISO(),
-      }
-      return { ...state, transferencias: [...state.transferencias, nueva] }
-    }
-
     // ── Control ───────────────────────────────────────────────────────────────
     case 'ADD_REGLA_CONTROL': {
       const nueva: ReglaControl = {
@@ -985,27 +980,6 @@ function recepcionLineaToRow(l: LineaRecepcion, recepcionId: string) {
   }
 }
 
-function transferenciaToRow(t: Transferencia, clienteId: string) {
-  return {
-    id: t.id,
-    cliente_id: clienteId,
-    fecha: t.fecha,
-    sucursal_origen: t.sucursalOrigen,
-    sucursal_destino: t.sucursalDestino,
-    notas: t.notas,
-  }
-}
-
-function transferenciaLineaToRow(l: Transferencia['lineas'][number], transferenciaId: string) {
-  return {
-    id: l.id,
-    transferencia_id: transferenciaId,
-    item_tipo: l.itemTipo,
-    item_id: l.itemId,
-    cantidad: l.cantidad,
-  }
-}
-
 function reglaControlToRow(rc: ReglaControl, clienteId: string) {
   return {
     id: rc.id,
@@ -1345,24 +1319,6 @@ function syncToSupabase(
       return
     }
 
-    case 'ADD_TRANSFERENCIA': {
-      const t = nextState.transferencias[nextState.transferencias.length - 1]
-      // Mismo fix: encadenado con .then para evitar la carrera contra la
-      // política RLS de `transferencia_lineas` (aunque hoy "Nueva
-      // transferencia" está deshabilitado en la UI, se corrige por
-      // consistencia con ADD_FORMULA/ADD_RECEPCION).
-      supabase
-        .from('transferencias')
-        .insert(transferenciaToRow(t, clienteId))
-        .then((res) => {
-          logErr('alta de transferencia')(res)
-          if (!res.error && t.lineas.length) {
-            supabase.from('transferencia_lineas').insert(t.lineas.map((l) => transferenciaLineaToRow(l, t.id))).then(logErr('líneas de transferencia'))
-          }
-        })
-      return
-    }
-
     case 'ADD_REGLA_CONTROL': {
       const rc = nextState.reglasControl[nextState.reglasControl.length - 1]
       supabase.from('reglas_control').insert(reglaControlToRow(rc, clienteId)).then(logErr('alta de regla de control'))
@@ -1405,7 +1361,11 @@ function syncToSupabase(
 
 // ─── Fetch inicial desde Supabase ──────────────────────────────
 
-async function fetchProductosStockState(): Promise<ProductosStockState> {
+// Exportada para que pantallas que mutan stock por fuera del flujo
+// dispatch+syncToSupabase (ej. Transferencias.tsx, que llama a la RPC
+// `crear_transferencia` directo) puedan recargar el estado completo
+// después de una escritura exitosa, sin duplicar la lógica de mapeo acá.
+export async function fetchProductosStockState(): Promise<ProductosStockState> {
   const [
     productosRes,
     productoVariantesRes,
@@ -1676,20 +1636,28 @@ async function fetchProductosStockState(): Promise<ProductosStockState> {
       id: r.id,
       itemTipo: r.item_tipo,
       itemId: r.item_id,
+      varianteId: r.variante_id ?? undefined,
       cantidad: Number(r.cantidad),
     })
     transferenciaLineasByTransferencia.set(r.transferencia_id, arr)
   }
 
-  const transferencias: Transferencia[] = (transferenciasRes.data ?? []).map((r: any) => ({
-    id: r.id,
-    fecha: r.fecha,
-    sucursalOrigen: r.sucursal_origen ?? '',
-    sucursalDestino: r.sucursal_destino ?? '',
-    lineas: transferenciaLineasByTransferencia.get(r.id) ?? [],
-    notas: r.notas ?? '',
-    createdAt: (r.created_at ?? '').slice(0, 10),
-  }))
+  // Fase 27e-1: filas viejas (previas a esta fase, si existieran) pueden no
+  // tener origen_punto_venta_id/destino_punto_venta_id cargados -- se
+  // descartan acá (nunca movieron stock de verdad, ya que "Nueva
+  // transferencia" estaba deshabilitado antes de esta fase).
+  const transferencias: Transferencia[] = (transferenciasRes.data ?? [])
+    .filter((r: any) => r.origen_punto_venta_id && r.destino_punto_venta_id)
+    .map((r: any) => ({
+      id: r.id,
+      fecha: r.fecha,
+      origenPuntoVentaId: r.origen_punto_venta_id,
+      destinoPuntoVentaId: r.destino_punto_venta_id,
+      estado: (r.estado ?? 'confirmada') as EstadoTransferencia,
+      lineas: transferenciaLineasByTransferencia.get(r.id) ?? [],
+      notas: r.notas ?? '',
+      createdAt: (r.created_at ?? '').slice(0, 10),
+    }))
 
   const reglasControl: ReglaControl[] = (reglasControlRes.data ?? []).map((r: any) => ({
     id: r.id,

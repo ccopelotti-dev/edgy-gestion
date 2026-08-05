@@ -508,19 +508,32 @@ export interface Recepcion {
 }
 
 // ─── Transferencia ──────────────────────────────────────────────────────────────
+// Fase 27e-1: antes de esta fase, sucursalOrigen/sucursalDestino eran texto
+// libre y "Nueva transferencia" no existía (botón permanentemente
+// deshabilitado, sin diálogo de alta -- ver Transferencias.tsx). Ahora
+// apuntan a un punto de venta real (`puntos_venta`) y el alta mueve stock
+// de verdad, vía la función `crear_transferencia` (RPC atómica -- ver
+// migración 0073), no por el flujo optimista de ADD_+syncToSupabase que
+// usa el resto del store.
 
 export interface LineaTransferencia {
   id: string
   itemTipo: 'producto' | 'insumo'
   itemId: string
+  /** Igual que en MovimientoStock/LineaRecepcion: variante puntual si el
+   * producto es 'con_variantes'. */
+  varianteId?: string
   cantidad: number
 }
+
+export type EstadoTransferencia = 'confirmada' | 'anulada'
 
 export interface Transferencia {
   id: string
   fecha: string
-  sucursalOrigen: string
-  sucursalDestino: string
+  origenPuntoVentaId: string
+  destinoPuntoVentaId: string
+  estado: EstadoTransferencia
   lineas: LineaTransferencia[]
   notas: string
   createdAt: string
