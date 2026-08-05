@@ -74,6 +74,7 @@ export function filaAPuntoVenta(fila: Record<string, any>): PuntoVenta {
     porDefecto: fila.por_defecto,
     paraIntegraciones: fila.para_integraciones,
     fechaBaja: fila.fecha_baja,
+    slug: fila.slug,
     createdAt: fila.created_at,
   }
 }

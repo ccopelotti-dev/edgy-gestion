@@ -52,6 +52,14 @@ interface ClienteVentaLite {
   nombre: string
 }
 
+// Fase 27d-2: versión liviana de un punto de venta con slug propio --
+// mismo criterio que menu-qr/pages/Index.tsx.
+interface PuntoVentaLite {
+  id: string
+  alias: string
+  slug: string | null
+}
+
 const ITEM_VACIO: ItemPedidoDelivery = { descripcion: '', cantidad: 1, precioUnitario: 0 }
 
 // Listado de pedidos + alta inline con el registro manual del
@@ -101,7 +109,21 @@ export default function Index() {
   // (publicUrl + qrserver.com) que esa página.
   const [mostrarCatalogo, setMostrarCatalogo] = useState(false)
   const [copiadoLink, setCopiadoLink] = useState(false)
-  const publicUrl = cliente?.slug ? `${window.location.origin}/menu/${cliente.slug}` : null
+  const [puntosVenta, setPuntosVenta] = useState<PuntoVentaLite[]>([])
+  // Fase 27d-2: con 2+ locales, el operador tiene que elegir de cuál
+  // es el catálogo que le va a mandar al cliente (arrancan sin nada
+  // seleccionado a propósito -- no hay un local "por defecto" obvio
+  // para compartir).
+  const [puntoVentaCompartirId, setPuntoVentaCompartirId] = useState('')
+  const puntoVentaCompartir = puntosVenta.find((pv) => pv.id === puntoVentaCompartirId)
+  const publicUrl =
+    puntosVenta.length > 1
+      ? cliente?.slug && puntoVentaCompartir?.slug
+        ? `${window.location.origin}/menu/${cliente.slug}/${puntoVentaCompartir.slug}`
+        : null
+      : cliente?.slug
+        ? `${window.location.origin}/menu/${cliente.slug}`
+        : null
   const qrUrl = publicUrl
     ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(publicUrl)}`
     : null
@@ -147,6 +169,13 @@ export default function Index() {
       .eq('activo', true)
       .order('nombre')
       .then(({ data }) => setClientesVenta(data ?? []))
+    supabase
+      .from('puntos_venta')
+      .select('id, alias, slug')
+      .eq('cliente_id', cliente.id)
+      .eq('activo', true)
+      .order('alias')
+      .then(({ data }) => setPuntosVenta((data ?? []) as PuntoVentaLite[]))
   }, [cliente?.id])
 
   const sugerenciasProducto = useMemo(() => {
@@ -264,6 +293,29 @@ export default function Index() {
               el Catálogo Público y aparece acá marcado como "Desde Menú QR".
             </DialogDescription>
           </DialogHeader>
+          {/* Fase 27d-2: con 2+ locales hay que elegir de cuál se
+              comparte el catálogo -- cada uno puede vender cosas
+              distintas. Con un solo local, sigue igual que siempre
+              (ni aparece el selector). */}
+          {puntosVenta.length > 1 && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="pv-compartir">¿Catálogo de qué local?</Label>
+              <Select value={puntoVentaCompartirId} onValueChange={setPuntoVentaCompartirId}>
+                <SelectTrigger id="pv-compartir">
+                  <SelectValue placeholder="Elegí un local..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {puntosVenta.map((pv) => (
+                    <SelectItem key={pv.id} value={pv.id} disabled={!pv.slug}>
+                      {pv.alias}
+                      {!pv.slug ? ' (sin link configurado)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {publicUrl && qrUrl ? (
             <div className="flex flex-col items-center gap-4">
               <img
@@ -286,6 +338,8 @@ export default function Index() {
                 </Button>
               </a>
             </div>
+          ) : puntosVenta.length > 1 ? (
+            <p className="text-muted-foreground text-sm">Elegí un local para generar el link.</p>
           ) : (
             <p className="text-muted-foreground text-sm">
               Todavía no tenés un identificador público configurado. Entrá a Menú QR para

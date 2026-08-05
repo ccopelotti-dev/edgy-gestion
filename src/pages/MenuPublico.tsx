@@ -117,6 +117,10 @@ interface MenuPublicoData {
     horarioDias?: number[]
     // Fase 19.3: título personalizable de la sección de Combos.
     combosTituloSeccion?: string
+    // Fase 27d-2: si este link es el de un local puntual (no el
+    // genérico del cliente), viene resuelto acá -- se usa para el
+    // encabezado y para pasarlo de vuelta al confirmar el pedido.
+    puntoVenta?: { id: string; slug: string; nombre: string } | null
   } | null
   categorias: CategoriaPublica[]
   combos: ComboPublico[]
@@ -169,7 +173,11 @@ function textoHorario(cliente: MenuPublicoData['cliente']): string {
 }
 
 export default function MenuPublico() {
-  const { slug } = useParams<{ slug: string }>()
+  // Fase 27d-2: puntoVentaSlug solo está presente en el link de un
+  // local puntual (`/menu/:slug/:puntoVentaSlug`) -- undefined en el
+  // link genérico del cliente (`/menu/:slug`), comportamiento sin
+  // cambios en ese caso.
+  const { slug, puntoVentaSlug } = useParams<{ slug: string; puntoVentaSlug?: string }>()
   const [searchParams] = useSearchParams()
   const numeroMesa = (() => {
     const raw = searchParams.get('mesa')
@@ -226,8 +234,13 @@ export default function MenuPublico() {
     if (!slug) return
     let activo = true
     setCargando(true)
+    // Fase 27d-2: con puntoVentaSlug presente resuelve el overload de
+    // dos parámetros (catálogo de ESE local); sin él, el de uno solo
+    // (catálogo compartido del cliente) -- mismo comportamiento que
+    // siempre tuvo /menu/:slug.
+    const params = puntoVentaSlug ? { p_slug: slug, p_punto_venta_slug: puntoVentaSlug } : { p_slug: slug }
     supabase
-      .rpc('menu_publico', { p_slug: slug })
+      .rpc('menu_publico', params)
       .then(({ data: resultado, error }) => {
         if (!activo) return
         if (error) {
@@ -241,7 +254,7 @@ export default function MenuPublico() {
     return () => {
       activo = false
     }
-  }, [slug])
+  }, [slug, puntoVentaSlug])
 
   // Fase 16: si el negocio configuró horario de atención y estamos
   // fuera de él, se bloquea el agregado al carrito (ver sePuedePedir
@@ -387,6 +400,9 @@ export default function MenuPublico() {
       p_items: itemsCarrito.map((i) =>
         i.comboId ? { comboId: i.comboId, cantidad: i.cantidad } : { productoId: i.productoId, cantidad: i.cantidad },
       ),
+      // Fase 27d-2: para que el pedido quede asociado al local
+      // correcto (Caja por turno, Fase 27f, lo va a poder filtrar).
+      ...(puntoVentaSlug ? { p_punto_venta_slug: puntoVentaSlug } : {}),
     })
 
     if (error) {
@@ -776,7 +792,10 @@ export default function MenuPublico() {
           <img src={cliente.logoUrl} alt={cliente.nombre} className="h-16 w-16 rounded-full border-2 border-white object-cover" />
         )}
         <h1 className="text-2xl font-bold">{cliente.nombre}</h1>
-        <p className="text-sm text-white/80">Menú</p>
+        {/* Fase 27d-2: si es el link de un local puntual, se aclara
+            cuál -- útil sobre todo cuando los locales venden cosas
+            distintas (ej. "Punto Tex" vs "Rúa"). */}
+        <p className="text-sm text-white/80">{cliente.puntoVenta ? cliente.puntoVenta.nombre : 'Menú'}</p>
       </div>
 
       <div className="mx-auto flex max-w-2xl flex-col gap-8 px-4 pt-8">

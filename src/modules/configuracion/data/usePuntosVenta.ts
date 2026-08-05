@@ -8,6 +8,9 @@ interface NuevoPuntoVenta {
   numero: string | null
   direccion: string | null
   paraIntegraciones: boolean
+  /** Fase 27d-2: identificador público para el link propio del Menú
+   * público de este local (`/menu/<slug cliente>/<este slug>`). */
+  slug: string | null
 }
 
 interface UsePuntosVentaResult {
@@ -17,6 +20,10 @@ interface UsePuntosVentaResult {
   crear: (datos: NuevoPuntoVenta) => Promise<boolean>
   marcarPorDefecto: (id: string) => Promise<boolean>
   darDeBaja: (id: string) => Promise<boolean>
+  /** Fase 27d-2: para puntos de venta creados antes de esta fase, que
+   * todavía no tienen slug -- permite cargarlo/editarlo después sin
+   * tener que recrear el punto de venta. */
+  actualizarSlug: (id: string, slug: string | null) => Promise<boolean>
 }
 
 export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
@@ -63,12 +70,13 @@ export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
         numero: datos.numero || null,
         direccion: datos.direccion || null,
         para_integraciones: datos.paraIntegraciones,
+        slug: datos.slug || null,
       })
 
       if (errInsert) {
         setError(
           errInsert.code === '23505'
-            ? 'Ya existe un punto de venta con ese número.'
+            ? 'Ya existe un punto de venta con ese número o identificador de link.'
             : 'No pudimos crear el punto de venta.',
         )
         return false
@@ -133,5 +141,28 @@ export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
     [cargar],
   )
 
-  return { puntosVenta, cargando, error, crear, marcarPorDefecto, darDeBaja }
+  const actualizarSlug = useCallback(
+    async (id: string, slug: string | null) => {
+      setError(null)
+      const { error: errUpdate } = await supabase
+        .from('puntos_venta')
+        .update({ slug: slug || null })
+        .eq('id', id)
+
+      if (errUpdate) {
+        setError(
+          errUpdate.code === '23505'
+            ? 'Ya hay otro local usando ese identificador de link.'
+            : 'No pudimos actualizar el identificador del link.',
+        )
+        return false
+      }
+
+      await cargar()
+      return true
+    },
+    [cargar],
+  )
+
+  return { puntosVenta, cargando, error, crear, marcarPorDefecto, darDeBaja, actualizarSlug }
 }

@@ -76,6 +76,11 @@ export interface PuntoVenta {
   porDefecto: boolean
   paraIntegraciones: boolean
   fechaBaja: string | null
+  /** Fase 27d-2: identificador público de ESTE local en el Menú
+   * público (`/menu/<slug del cliente>/<este slug>`) -- análogo a
+   * `clientes.slug` pero a nivel local. Único por cliente, nullable
+   * (un local sin slug simplemente no tiene link propio todavía). */
+  slug: string | null
   createdAt: string
 }
 

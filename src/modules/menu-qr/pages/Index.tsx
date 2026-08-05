@@ -23,10 +23,22 @@ interface MesaLite {
   numero: number
 }
 
+// Fase 27d-2: versión liviana de un punto de venta con slug propio --
+// solo lo que necesita esta pantalla para armar el link/QR de cada
+// local. El alta/edición del slug la hace el propio cliente en
+// Configuración > Puntos de venta (PuntosVenta.tsx).
+interface PuntoVentaLite {
+  id: string
+  alias: string
+  slug: string | null
+  activo: boolean
+}
+
 export default function Index() {
   const { cliente } = useClienteActual()
   const [copiado, setCopiado] = useState(false)
   const [mesas, setMesas] = useState<MesaLite[]>([])
+  const [puntosVenta, setPuntosVenta] = useState<PuntoVentaLite[]>([])
 
   useEffect(() => {
     if (!cliente?.id) return
@@ -36,6 +48,13 @@ export default function Index() {
       .eq('cliente_id', cliente.id)
       .order('numero')
       .then(({ data }) => setMesas((data ?? []).map((m: any) => ({ id: m.id, numero: m.numero }))))
+    supabase
+      .from('puntos_venta')
+      .select('id, alias, slug, activo')
+      .eq('cliente_id', cliente.id)
+      .eq('activo', true)
+      .order('alias')
+      .then(({ data }) => setPuntosVenta((data ?? []) as PuntoVentaLite[]))
   }, [cliente?.id])
 
   if (!cliente?.slug) {
@@ -68,50 +87,81 @@ export default function Index() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardContent className="flex flex-col items-center gap-4 py-6">
-            <img
-              src={qrUrl}
-              alt={`Código QR del menú de ${cliente.nombre}`}
-              className="h-56 w-56 rounded-md border"
-            />
-            <a href={qrUrl} download={`menu-qr-${cliente.slug}.png`}>
-              <Button variant="outline" size="sm">
-                Descargar QR
-              </Button>
-            </a>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="flex flex-col gap-4 py-6">
-            <div>
-              <h3 className="mb-1.5 font-medium">Link público</h3>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-md border bg-gray-50 px-3 py-2 text-sm">
-                  {publicUrl}
-                </code>
-                <Button variant="outline" size="sm" onClick={copiarLink}>
-                  {copiado ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      {/* Fase 27d-2: con 2+ locales, cada uno tiene su propio link/QR
+          (con su catálogo compartido + exclusivo de ESE local) en vez
+          del link único genérico -- mucho más útil cuando los locales
+          venden cosas distintas. Con un solo local, sigue exactamente
+          igual que siempre. */}
+      {puntosVenta.length > 1 ? (
+        <div className="flex flex-col gap-4">
+          <p className="text-muted-foreground text-sm">
+            Este negocio tiene más de un local -- cada uno tiene su propio link y QR, con el
+            catálogo que le corresponde.
+          </p>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {puntosVenta.map((pv) =>
+              pv.slug ? (
+                <LinkLocalCard key={pv.id} clienteSlug={cliente.slug!} clienteNombre={cliente.nombre} pv={pv} />
+              ) : (
+                <Card key={pv.id}>
+                  <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
+                    <h3 className="font-medium">{pv.alias}</h3>
+                    <p className="text-muted-foreground text-xs">
+                      Todavía no configuraste el link de este local -- hacelo en{' '}
+                      <strong>Configuración &gt; Puntos de venta</strong>.
+                    </p>
+                  </CardContent>
+                </Card>
+              ),
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card>
+            <CardContent className="flex flex-col items-center gap-4 py-6">
+              <img
+                src={qrUrl}
+                alt={`Código QR del menú de ${cliente.nombre}`}
+                className="h-56 w-56 rounded-md border"
+              />
+              <a href={qrUrl} download={`menu-qr-${cliente.slug}.png`}>
+                <Button variant="outline" size="sm">
+                  Descargar QR
                 </Button>
+              </a>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="flex flex-col gap-4 py-6">
+              <div>
+                <h3 className="mb-1.5 font-medium">Link público</h3>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 truncate rounded-md border bg-gray-50 px-3 py-2 text-sm">
+                    {publicUrl}
+                  </code>
+                  <Button variant="outline" size="sm" onClick={copiarLink}>
+                    {copiado ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
-            </div>
 
-            <a href={publicUrl} target="_blank" rel="noreferrer">
-              <Button className="w-full">
-                <ExternalLink className="mr-1.5 h-4 w-4" />
-                Ver menú público
-              </Button>
-            </a>
+              <a href={publicUrl} target="_blank" rel="noreferrer">
+                <Button className="w-full">
+                  <ExternalLink className="mr-1.5 h-4 w-4" />
+                  Ver menú público
+                </Button>
+              </a>
 
-            <p className="text-muted-foreground text-xs">
-              Solo se muestran los productos marcados como disponibles y activos en Productos y
-              Stock, agrupados por rubro. No incluye pedidos ni pagos -- es un menú informativo.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+              <p className="text-muted-foreground text-xs">
+                Solo se muestran los productos marcados como disponibles y activos en Productos y
+                Stock, agrupados por rubro. No incluye pedidos ni pagos -- es un menú informativo.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Fase 13c: QR por mesa -- solo si el negocio tiene mesas
           cargadas en Mesas y Salón. Habilita "Llamar mozo" desde el
@@ -148,5 +198,49 @@ export default function Index() {
         </div>
       )}
     </div>
+  )
+}
+
+// Fase 27d-2: tarjeta de link/QR de UN local puntual -- mismo patrón
+// visual que las tarjetas de arriba, pero con su propio estado de
+// "copiado" (cada tarjeta copia un link distinto).
+function LinkLocalCard({
+  clienteSlug,
+  clienteNombre,
+  pv,
+}: {
+  clienteSlug: string
+  clienteNombre: string
+  pv: { alias: string; slug: string | null }
+}) {
+  const [copiado, setCopiado] = useState(false)
+  const url = `${window.location.origin}/menu/${clienteSlug}/${pv.slug}`
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`
+
+  async function copiar() {
+    await navigator.clipboard.writeText(url)
+    setCopiado(true)
+    setTimeout(() => setCopiado(false), 2000)
+  }
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center gap-3 py-6">
+        <h3 className="font-medium">{pv.alias}</h3>
+        <img src={qrUrl} alt={`QR del menú de ${clienteNombre} -- ${pv.alias}`} className="h-40 w-40 rounded-md border" />
+        <div className="flex w-full items-center gap-2">
+          <code className="flex-1 truncate rounded-md border bg-gray-50 px-2 py-1.5 text-xs">{url}</code>
+          <Button variant="outline" size="sm" onClick={copiar}>
+            {copiado ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          </Button>
+        </div>
+        <a href={url} target="_blank" rel="noreferrer" className="w-full">
+          <Button className="w-full" size="sm">
+            <ExternalLink className="mr-1.5 h-4 w-4" />
+            Ver menú
+          </Button>
+        </a>
+      </CardContent>
+    </Card>
   )
 }

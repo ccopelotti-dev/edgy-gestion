@@ -36,6 +36,9 @@ export default function App() {
         <Route path="/ingresar" element={<Ingresar />} />
         <Route path="/completar-cuenta" element={<CompletarCuenta />} />
         <Route path="/menu/:slug" element={<MenuPublico />} />
+        {/* Fase 27d-2: link separado por punto de venta -- mismo
+            componente, MenuPublico.tsx distingue por el segundo param. */}
+        <Route path="/menu/:slug/:puntoVentaSlug" element={<MenuPublico />} />
         <Route element={<RutaStaff />}>
           <Route path="/panel" element={<PanelLayout />}>
             <Route index element={<Navigate to="/panel/nuevo-cliente" replace />} />
