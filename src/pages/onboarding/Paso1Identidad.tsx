@@ -12,6 +12,13 @@ const TIPOS_NEGOCIO: { value: TipoNegocio; label: string }[] = [
   { value: 'produccion', label: 'Producción' },
   { value: 'servicios', label: 'Servicios' },
   { value: 'agro', label: 'Agro' },
+  // Fase 29: categorías combinadas -- muchos emprendedores/pymes tienen
+  // actividades entrelazadas (ej: un taller que también vende al público,
+  // o un local que fabrica y además presta el servicio de instalación) y
+  // no encajan en una sola categoría pura.
+  { value: 'comercio_produccion', label: 'Comercio y Producción' },
+  { value: 'comercio_servicios', label: 'Comercio y Servicios' },
+  { value: 'comercio_produccion_servicios', label: 'Comercio, Producción y Servicios' },
 ]
 
 export interface DatosIdentidad {
@@ -102,12 +109,16 @@ export function Paso1Identidad({ datos, onChange, onContinuar, error, enviando }
       </div>
 
       <div>
-        <label className="mb-2 block text-sm font-medium text-gray-900">Dirección</label>
+        <label className="mb-2 block text-sm font-medium text-gray-900">Domicilio fiscal</label>
         <Input
-          placeholder="Calle, número, localidad"
+          placeholder="Calle, número, localidad (el que figura en la constancia de ARCA)"
           value={datos.direccion}
           onChange={(e) => onChange({ ...datos, direccion: e.target.value })}
         />
+        <p className="mt-2 text-sm text-gray-500">
+          El domicilio legal del CUIT. La dirección comercial de cada local se carga después,
+          al crear los puntos de venta en Configuración.
+        </p>
       </div>
 
       <div>

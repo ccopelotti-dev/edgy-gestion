@@ -395,11 +395,12 @@ export default function Empresa() {
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="direccion">Dirección</Label>
+            <Label htmlFor="direccion">Domicilio fiscal</Label>
             <Input
               id="direccion"
               value={form.direccion}
               onChange={(e) => setForm({ ...form, direccion: e.target.value })}
+              placeholder="El domicilio legal del CUIT"
             />
           </div>
           <div className="flex flex-col gap-1.5">

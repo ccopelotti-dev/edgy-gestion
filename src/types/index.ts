@@ -6,6 +6,10 @@
 // en comandas-cocina/types). Antes existía un solo valor 'gastronomico'
 // -- los clientes ya cargados con ese valor se migran a
 // 'gastronomico_con_salon' (ver migración 0066).
+// Fase 29: se suman 3 categorías combinadas -- muchos emprendedores/pymes
+// tienen actividades entrelazadas (ej: un taller que fabrica y también
+// vende al público) y no encajan en una sola categoría pura. No
+// reemplazan a las puras, se ofrecen como alternativa en el wizard.
 export type TipoNegocio =
   | 'gastronomico_con_salon'
   | 'gastronomico_sin_salon'
@@ -14,6 +18,9 @@ export type TipoNegocio =
   | 'produccion'
   | 'servicios'
   | 'agro'
+  | 'comercio_produccion'
+  | 'comercio_servicios'
+  | 'comercio_produccion_servicios'
 
 export const TIPO_NEGOCIO_LABEL: Record<TipoNegocio, string> = {
   gastronomico_con_salon: 'Gastronómico con salón',
@@ -23,6 +30,9 @@ export const TIPO_NEGOCIO_LABEL: Record<TipoNegocio, string> = {
   produccion: 'Producción',
   servicios: 'Servicios',
   agro: 'Agro',
+  comercio_produccion: 'Comercio y Producción',
+  comercio_servicios: 'Comercio y Servicios',
+  comercio_produccion_servicios: 'Comercio, Producción y Servicios',
 }
 
 export type EstadoCliente = 'pendiente' | 'activo'
@@ -163,6 +173,18 @@ export const MODULOS_SUGERIDOS: Record<TipoNegocio, string[]> = {
   produccion: ['produccion-servicios', 'productos-stock'],
   servicios: ['servicios', 'clientes'],
   agro: ['rutas', 'gps', 'rendicion'],
+  // Combinadas: unión (sin duplicados) de los módulos de cada categoría
+  // pura que las compone.
+  comercio_produccion: ['productos-stock', 'ventas', 'compras', 'produccion-servicios'],
+  comercio_servicios: ['productos-stock', 'ventas', 'compras', 'servicios', 'clientes'],
+  comercio_produccion_servicios: [
+    'productos-stock',
+    'ventas',
+    'compras',
+    'produccion-servicios',
+    'servicios',
+    'clientes',
+  ],
 }
 
 // Roles sugeridos por tipo de negocio — semilla para el Paso 4 del wizard.
@@ -176,4 +198,9 @@ export const ROLES_SUGERIDOS: Record<TipoNegocio, string[]> = {
   produccion: ['Encargado', 'Operario'],
   servicios: ['Encargado', 'Técnico'],
   agro: ['Encargado', 'Operario'],
+  // Combinadas: unión (sin duplicados) de los roles de cada categoría
+  // pura que las compone.
+  comercio_produccion: ['Encargado', 'Vendedor', 'Cajero', 'Operario'],
+  comercio_servicios: ['Encargado', 'Vendedor', 'Cajero', 'Técnico'],
+  comercio_produccion_servicios: ['Encargado', 'Vendedor', 'Cajero', 'Operario', 'Técnico'],
 }

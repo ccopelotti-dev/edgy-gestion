@@ -179,11 +179,12 @@ export default function PuntosVenta() {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="direccion-pv">Dirección (opcional)</Label>
+                  <Label htmlFor="direccion-pv">Dirección comercial (opcional)</Label>
                   <Input
                     id="direccion-pv"
                     value={direccion}
                     onChange={(e) => setDireccion(e.target.value)}
+                    placeholder="Calle, número, localidad de este local"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -225,7 +226,7 @@ export default function PuntosVenta() {
                 <TableRow>
                   <TableHead>Alias</TableHead>
                   <TableHead>Número</TableHead>
-                  <TableHead>Dirección</TableHead>
+                  <TableHead>Dirección comercial</TableHead>
                   <TableHead>Menú público</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Por defecto</TableHead>

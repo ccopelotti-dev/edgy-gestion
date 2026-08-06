@@ -34,6 +34,11 @@ export type TipoNegocio =
   | 'produccion'
   | 'servicios'
   | 'agro'
+  // Fase 29: categorías combinadas -- ver comentario espejo en
+  // src/types/index.ts.
+  | 'comercio_produccion'
+  | 'comercio_servicios'
+  | 'comercio_produccion_servicios'
 
 export type EstadoCliente = 'pendiente' | 'activo'
 
@@ -129,4 +134,7 @@ export const TIPOS_NEGOCIO_LABEL: Record<TipoNegocio, string> = {
   produccion: 'Producción',
   servicios: 'Servicios',
   agro: 'Agro',
+  comercio_produccion: 'Comercio y Producción',
+  comercio_servicios: 'Comercio y Servicios',
+  comercio_produccion_servicios: 'Comercio, Producción y Servicios',
 }
