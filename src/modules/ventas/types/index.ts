@@ -334,6 +334,12 @@ export interface DatosAfip {
   fechaEmisionAfip?: string;
   resultado?: 'A' | 'R';         // Aprobado / Rechazado
   observaciones?: string;
+  /** Fase 28: condición de IVA del EMISOR (Edgy: el negocio, no el
+   * cliente) tal como se declaró ante ARCA para este comprobante --
+   * la guarda arca-autorizar-comprobante.js. El PDF (Anexo II RG 1415)
+   * la usa para imprimir la leyenda ("IVA Responsable Inscripto",
+   * etc.) sin tener que volver a consultar clientes_arca_config. */
+  condicionIvaEmisor?: 'responsable_inscripto' | 'monotributista' | 'exento';
 }
 
 export interface Comprobante {

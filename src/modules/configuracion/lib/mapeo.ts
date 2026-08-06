@@ -22,6 +22,10 @@ export function filaAEmpresa(fila: Record<string, any>): DatosEmpresa {
     provincia: fila.provincia,
     localidad: fila.localidad,
     codigoPostal: fila.codigo_postal,
+    ingresosBrutosCondicion: fila.ingresos_brutos_condicion,
+    ingresosBrutosNumero: fila.ingresos_brutos_numero,
+    mostrarIibbAlicuota: fila.mostrar_iibb_alicuota ?? false,
+    iibbAlicuota: fila.iibb_alicuota != null ? Number(fila.iibb_alicuota) : null,
     horarioActivo: fila.horario_activo ?? false,
     horarioApertura: fila.horario_apertura,
     horarioCierre: fila.horario_cierre,
@@ -47,6 +51,11 @@ export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unk
   if ('provincia' in cambios) fila.provincia = cambios.provincia
   if ('localidad' in cambios) fila.localidad = cambios.localidad
   if ('codigoPostal' in cambios) fila.codigo_postal = cambios.codigoPostal
+  // Fase 28: Ingresos Brutos + Transparencia Fiscal (RG 5614/2024).
+  if ('ingresosBrutosCondicion' in cambios) fila.ingresos_brutos_condicion = cambios.ingresosBrutosCondicion
+  if ('ingresosBrutosNumero' in cambios) fila.ingresos_brutos_numero = cambios.ingresosBrutosNumero
+  if ('mostrarIibbAlicuota' in cambios) fila.mostrar_iibb_alicuota = cambios.mostrarIibbAlicuota
+  if ('iibbAlicuota' in cambios) fila.iibb_alicuota = cambios.iibbAlicuota
   // Logo y color de marca: antes solo se cargaban una vez en el
   // onboarding (Paso 1) y no había forma de cambiarlos. Fase 10 los
   // suma acá porque el motor de PDF de comprobantes los usa como

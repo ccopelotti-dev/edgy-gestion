@@ -34,6 +34,13 @@ function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
     telefono: empresaActual.telefono,
     logoUrl: empresaActual.logo_url,
     colorMarca: empresaActual.color_marca,
+    // Fase 28 (cumplimiento ARCA, Anexo II RG 1415 + RG 5614/2024).
+    ingresosBrutosCondicion: empresaActual.ingresos_brutos_condicion,
+    ingresosBrutosNumero: empresaActual.ingresos_brutos_numero,
+    inicioActividades: empresaActual.inicio_actividades,
+    provincia: empresaActual.provincia,
+    mostrarIibbAlicuota: empresaActual.mostrar_iibb_alicuota,
+    iibbAlicuota: empresaActual.iibb_alicuota,
   };
 }
 
@@ -79,6 +86,8 @@ export async function descargarComprobantePdf(
               tipoComprobanteAfip: comp.afip.tipoComprobanteAfip,
               numeroComprobante: comp.afip.numeroComprobante,
               docTipoReceptor: comp.afip.docTipoReceptor,
+              tipoFiscal: comp.afip.tipoFiscal,
+              condicionIvaEmisor: comp.afip.condicionIvaEmisor,
             }
           : undefined,
     },

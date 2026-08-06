@@ -47,6 +47,49 @@ export interface EmpresaParaPdf {
   logoUrl?: string | null
   /** Hex, ej "#0F6E56". Si no hay, se usa COLOR_DEFAULT. */
   colorMarca?: string | null
+  /** Fase 28 (cumplimiento ARCA, Anexo II RG 1415) -- Ingresos Brutos,
+   * fecha de inicio de actividades y jurisdicción. Todos opcionales:
+   * si no están cargados en Configuración > Empresa, la franja fiscal
+   * simplemente omite esa línea en vez de romper el PDF. */
+  ingresosBrutosCondicion?: string | null
+  ingresosBrutosNumero?: string | null
+  inicioActividades?: string | null
+  provincia?: string | null
+  /** RG 5614/2024 -- Régimen de Transparencia Fiscal al Consumidor:
+   * si la jurisdicción del cliente lo exige, además de "IVA Contenido"
+   * se imprime la alícuota de IIBB declarada acá. */
+  mostrarIibbAlicuota?: boolean
+  iibbAlicuota?: number | null
+}
+
+/** Leyenda de condición de IVA del emisor -- Anexo II RG 1415, espacio
+ * superior izquierdo. Los 3 valores posibles vienen de
+ * clientes_arca_config.condicion_iva (ver DatosAfipParaPdf.condicionIvaEmisor). */
+function leyendaCondicionIva(condicion: string): string {
+  switch (condicion) {
+    case 'responsable_inscripto':
+      return 'IVA Responsable Inscripto'
+    case 'monotributista':
+      return 'Responsable Monotributo'
+    case 'exento':
+      return 'IVA Exento'
+    default:
+      return ''
+  }
+}
+
+/** Leyenda de Ingresos Brutos -- Anexo II RG 1415: "N.º de inscripción
+ * ... o condición de NO CONTRIBUYENTE". */
+function leyendaIngresosBrutos(
+  condicion?: string | null,
+  numero?: string | null,
+  provincia?: string | null,
+): string | null {
+  if (!condicion) return null
+  if (condicion === 'exento') return 'IIBB: Exento'
+  if (condicion === 'no_contribuyente') return 'IIBB: No contribuyente'
+  const sufijo = condicion === 'inscripto_convenio_multilateral' ? ' (Conv. Multilateral)' : provincia ? ` (${provincia})` : ''
+  return numero ? `IIBB N.º ${numero}${sufijo}` : null
 }
 
 export interface ItemParaPdf {
@@ -72,6 +115,18 @@ export interface DatosAfipParaPdf {
   numeroComprobante: number
   /** Código AFIP del tipo de documento del receptor (80=CUIT, 96=DNI...). */
   docTipoReceptor?: number
+  /** Fase 28: letra fiscal ('A'|'B'|'C') resuelta por ARCA para este
+   * comprobante -- ver Comprobante.afip.tipoFiscal en el dominio de
+   * Ventas. Determina si corresponde el bloque de Transparencia Fiscal
+   * al Consumidor (RG 5614/2024, solo letra B). */
+  tipoFiscal?: string
+  /** Fase 28: condición de IVA del emisor declarada ante ARCA para
+   * este comprobante ('responsable_inscripto'|'monotributista'|'exento').
+   * Dispara la leyenda de condición de IVA y, si corresponde
+   * (tipoFiscal='B'), el bloque de Transparencia Fiscal al Consumidor
+   * (RG 5614/2024). Sin este dato no se imprime ninguno de los dos --
+   * comprobantes viejos (de antes de esta fase) simplemente no lo tienen. */
+  condicionIvaEmisor?: string
 }
 
 export interface ComprobanteParaPdf {
@@ -211,8 +266,40 @@ export async function generarComprobantePdf(
   doc.text(`N.º ${comprobante.numero}`, pageWidth - marginX, 20, { align: 'right' })
   doc.text(comprobante.fecha, pageWidth - marginX, 26, { align: 'right' })
 
+  // ─── Franja fiscal del emisor (Fase 28 -- Anexo II RG 1415) ──
+  // IIBB + Inicio de actividades + condición de IVA, en una sola línea
+  // chica debajo de la banda de color. Cada dato es opcional -- si
+  // falta alguno (todavía no se cargó en Configuración > Empresa, o el
+  // comprobante es de antes de esta fase), simplemente no se imprime
+  // esa parte, nunca rompe el PDF.
+  let y = anchoBanda + 6
+  const partesFiscales: string[] = []
+  const iibbTexto = leyendaIngresosBrutos(
+    empresa.ingresosBrutosCondicion,
+    empresa.ingresosBrutosNumero,
+    empresa.provincia,
+  )
+  if (iibbTexto) partesFiscales.push(iibbTexto)
+  if (empresa.inicioActividades) {
+    partesFiscales.push(`Inicio activ. ${formatFechaCorta(empresa.inicioActividades)}`)
+  }
+  if (comprobante.afip?.condicionIvaEmisor) {
+    const leyenda = leyendaCondicionIva(comprobante.afip.condicionIvaEmisor)
+    if (leyenda) partesFiscales.push(leyenda)
+  }
+  if (partesFiscales.length > 0) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor('#8a8a8a')
+    doc.text(partesFiscales.join('  ·  '), marginX, y)
+    y += 6
+  } else {
+    // Sin datos fiscales para mostrar -- mismo espaciado que antes de
+    // esta fase (anchoBanda + 10), para no correr el resto del layout.
+    y += 4
+  }
+
   // ─── Datos del cliente ──────────────────────────────────────
-  let y = anchoBanda + 10
   doc.setTextColor('#3a3a3a')
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
@@ -311,6 +398,49 @@ export async function generarComprobantePdf(
     const lineasNotas = doc.splitTextToSize(comprobante.notas, pageWidth - marginX * 2)
     doc.text(lineasNotas, marginX, y)
     y += 6 * (Array.isArray(lineasNotas) ? lineasNotas.length : 1)
+  }
+
+  // ─── Transparencia Fiscal al Consumidor (Fase 28 -- RG 5614/2024) ──
+  // Solo aplica a facturas tipo B (Responsable Inscripto vendiéndole a
+  // alguien que no es Responsable Inscripto -- consumidor final,
+  // monotributista, exento) con IVA > 0. Monotributistas/Exentos
+  // (letra C) quedan afuera por diseño: la propia norma los excluye
+  // (no discriminan IVA en ningún comprobante). Se apoya en
+  // `comprobante.afip.tipoFiscal`, que solo existe cuando ARCA ya
+  // aprobó el comprobante (CAE obtenido) -- antes de eso no hay letra
+  // resuelta todavía, así que el bloque simplemente no se dibuja.
+  if (
+    comprobante.afip?.tipoFiscal === 'B' &&
+    comprobante.montoIva &&
+    comprobante.montoIva > 0
+  ) {
+    if (y > pageHeight - 40) {
+      doc.addPage()
+      y = 20
+    }
+    doc.setDrawColor(230, 230, 230)
+    doc.setLineWidth(0.3)
+    doc.rect(marginX, y, pageWidth - marginX * 2, empresa.mostrarIibbAlicuota && empresa.iibbAlicuota ? 22 : 16)
+    y += 6
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8)
+    doc.setTextColor('#555555')
+    doc.text('Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)', marginX + 3, y)
+    y += 6
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.setTextColor('#222222')
+    doc.text(`IVA Contenido: $ ${formatARS(comprobante.montoIva)}`, marginX + 3, y)
+    if (empresa.mostrarIibbAlicuota && empresa.iibbAlicuota) {
+      y += 6
+      const juris = empresa.provincia ? ` (${empresa.provincia})` : ''
+      doc.text(
+        `Ingresos Brutos${juris}: alícuota ${empresa.iibbAlicuota}% incluida en el precio`,
+        marginX + 3,
+        y,
+      )
+    }
+    y += 10
   }
 
   // ─── CAE + QR fiscal (Fase 11 -- RG 4892/2020) ───────────────

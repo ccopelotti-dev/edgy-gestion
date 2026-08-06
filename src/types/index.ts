@@ -49,6 +49,19 @@ export interface Cliente {
   /** Igual que lista_precio_comandas_id pero para el canal Delivery por
    * WhatsApp (Fase 6d del refactor de Productos). */
   lista_precio_delivery_id: string | null
+  // Fase 28: cumplimiento fiscal ARCA -- estas columnas ya existían en
+  // Supabase (Configuración > Empresa las carga hace rato) pero no
+  // estaban declaradas acá; el motor de PDF de comprobantes (Fase 28)
+  // las necesita para armar el recuadro fiscal del emisor (Anexo II RG
+  // 1415) y el bloque de Transparencia Fiscal al Consumidor (RG
+  // 5614/2024). `useClienteActual`/`useEmpresa` hacen `select('*')`,
+  // así que el dato ya viaja en runtime -- esto solo lo declara en el tipo.
+  provincia: string | null
+  inicio_actividades: string | null
+  ingresos_brutos_condicion: string | null
+  ingresos_brutos_numero: string | null
+  mostrar_iibb_alicuota: boolean
+  iibb_alicuota: number | null
   created_at: string
 }
 

@@ -13,6 +13,16 @@ export type CategoriaImpositiva =
 
 export type Personeria = 'fisica' | 'juridica'
 
+// Fase 28: condición del negocio ante Ingresos Brutos -- dato exigido
+// por el Anexo II de la RG 1415 en el recuadro fiscal de toda factura
+// ("N° de inscripción ... o condición de NO CONTRIBUYENTE"). No
+// confundir con `CategoriaImpositiva` (esa es la condición ante IVA).
+export type IngresosBrutosCondicion =
+  | 'inscripto_local'
+  | 'inscripto_convenio_multilateral'
+  | 'exento'
+  | 'no_contribuyente'
+
 // Fase 15: mismo split que src/types/index.ts (única fuente real es la
 // columna clientes.tipo_negocio -- este tipo es una copia local para no
 // importar del módulo Ventas/onboarding acá, ver comentario del archivo).
@@ -46,6 +56,14 @@ export interface DatosEmpresa {
   provincia: string | null
   localidad: string | null
   codigoPostal: string | null
+  // Fase 28: cumplimiento fiscal ARCA -- Ingresos Brutos (Anexo II RG
+  // 1415) y el bloque de Transparencia Fiscal al Consumidor (RG
+  // 5614/2024). `provincia` (arriba) se reutiliza como jurisdicción de
+  // IIBB, no hace falta un campo aparte.
+  ingresosBrutosCondicion: IngresosBrutosCondicion | null
+  ingresosBrutosNumero: string | null
+  mostrarIibbAlicuota: boolean
+  iibbAlicuota: number | null
   // Fase 16 (Backlog menor): horario de atención del Catálogo público
   // -- opcional y apagado por defecto. horarioDias usa la misma
   // convención que JS Date.getDay(): 0 = domingo … 6 = sábado.
@@ -89,6 +107,13 @@ export const CATEGORIAS_IMPOSITIVAS: { value: CategoriaImpositiva; label: string
   { value: 'monotributista', label: 'Monotributista' },
   { value: 'responsable_no_inscripto', label: 'Responsable no inscripto' },
   { value: 'exento', label: 'Exento' },
+]
+
+export const INGRESOS_BRUTOS_CONDICIONES: { value: IngresosBrutosCondicion; label: string }[] = [
+  { value: 'inscripto_local', label: 'Inscripto — Local (una sola provincia)' },
+  { value: 'inscripto_convenio_multilateral', label: 'Inscripto — Convenio Multilateral' },
+  { value: 'exento', label: 'Exento' },
+  { value: 'no_contribuyente', label: 'No contribuyente' },
 ]
 
 export const PERSONERIAS: { value: Personeria; label: string }[] = [

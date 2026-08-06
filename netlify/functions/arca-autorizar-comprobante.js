@@ -330,6 +330,13 @@ export default async (req) => {
     fechaEmisionAfip: new Date().toISOString().slice(0, 10),
     resultado: resultadoCae.resultado,
     observaciones: resultadoCae.observaciones,
+    // Fase 28: se guarda la condición de IVA del emisor tal como se
+    // declaró ante ARCA para ESTE comprobante puntual -- el PDF (Anexo
+    // II RG 1415) necesita imprimir la leyenda de condición de IVA, y
+    // conviene que sea la que realmente se usó acá (config.condicion_iva
+    // podría cambiar más adelante) en vez de pegarle a otro endpoint
+    // para volver a preguntarla.
+    condicionIvaEmisor: config.condicion_iva,
   }
 
   const { error: updateError } = await supabaseAdmin

@@ -23,8 +23,10 @@ import {
   CATEGORIAS_IMPOSITIVAS,
   PERSONERIAS,
   TIPOS_NEGOCIO_LABEL,
+  INGRESOS_BRUTOS_CONDICIONES,
   type CategoriaImpositiva,
   type Personeria,
+  type IngresosBrutosCondicion,
 } from '../types'
 import { obtenerEstadoArca, guardarConfigArca, type EstadoArca } from '../lib/arcaConfig'
 import { obtenerEstadoPago, guardarConfigPago, type EstadoPago } from '../lib/pagoConfig'
@@ -54,6 +56,10 @@ interface FormEmpresa {
   provincia: string
   localidad: string
   codigoPostal: string
+  ingresosBrutosCondicion: string
+  ingresosBrutosNumero: string
+  mostrarIibbAlicuota: boolean
+  iibbAlicuota: string
   colorMarca: string
   horarioActivo: boolean
   horarioApertura: string
@@ -73,6 +79,10 @@ const FORM_VACIO: FormEmpresa = {
   provincia: '',
   localidad: '',
   codigoPostal: '',
+  ingresosBrutosCondicion: '',
+  ingresosBrutosNumero: '',
+  mostrarIibbAlicuota: false,
+  iibbAlicuota: '',
   colorMarca: COLOR_MARCA_DEFAULT,
   horarioActivo: false,
   horarioApertura: '09:00',
@@ -170,6 +180,10 @@ export default function Empresa() {
       provincia: empresa.provincia ?? '',
       localidad: empresa.localidad ?? '',
       codigoPostal: empresa.codigoPostal ?? '',
+      ingresosBrutosCondicion: empresa.ingresosBrutosCondicion ?? '',
+      ingresosBrutosNumero: empresa.ingresosBrutosNumero ?? '',
+      mostrarIibbAlicuota: empresa.mostrarIibbAlicuota,
+      iibbAlicuota: empresa.iibbAlicuota != null ? String(empresa.iibbAlicuota) : '',
       colorMarca: empresa.colorMarca ?? COLOR_MARCA_DEFAULT,
       horarioActivo: empresa.horarioActivo,
       horarioApertura: (empresa.horarioApertura ?? '09:00').slice(0, 5),
@@ -335,6 +349,10 @@ export default function Empresa() {
       provincia: form.provincia || null,
       localidad: form.localidad || null,
       codigoPostal: form.codigoPostal || null,
+      ingresosBrutosCondicion: (form.ingresosBrutosCondicion || null) as IngresosBrutosCondicion | null,
+      ingresosBrutosNumero: form.ingresosBrutosNumero || null,
+      mostrarIibbAlicuota: form.mostrarIibbAlicuota,
+      iibbAlicuota: form.iibbAlicuota.trim() ? Number(form.iibbAlicuota) : null,
       colorMarca: form.colorMarca || COLOR_MARCA_DEFAULT,
       horarioActivo: form.horarioActivo,
       horarioApertura: form.horarioApertura || null,
@@ -645,6 +663,78 @@ export default function Empresa() {
               value={form.codigoPostal}
               onChange={(e) => setForm({ ...form, codigoPostal: e.target.value })}
             />
+          </div>
+          {/* Fase 28: Ingresos Brutos -- exigido por el Anexo II de la RG
+              1415 en toda factura, junto con CUIT e Inicio de actividades.
+              La jurisdicción es la misma Provincia de arriba, no hace
+              falta pedirla dos veces. */}
+          <div className="flex flex-col gap-1.5">
+            <Label>Ingresos Brutos — condición</Label>
+            <Select
+              value={form.ingresosBrutosCondicion}
+              onValueChange={(v) => setForm({ ...form, ingresosBrutosCondicion: v })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccioná" />
+              </SelectTrigger>
+              <SelectContent>
+                {INGRESOS_BRUTOS_CONDICIONES.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="iibb-numero">N.º de inscripción en IIBB</Label>
+            <Input
+              id="iibb-numero"
+              placeholder="Igual al CUIT si es Convenio Multilateral"
+              value={form.ingresosBrutosNumero}
+              onChange={(e) => setForm({ ...form, ingresosBrutosNumero: e.target.value })}
+              disabled={
+                form.ingresosBrutosCondicion === 'exento' ||
+                form.ingresosBrutosCondicion === 'no_contribuyente'
+              }
+            />
+          </div>
+          {/* Fase 28: RG 5614/2024 -- Régimen de Transparencia Fiscal al
+              Consumidor. Algunas provincias que adhirieron exigen mostrar
+              la alícuota de IIBB en las facturas B a consumidor final.
+              Apagado por defecto: se activa solo si tu jurisdicción lo
+              exige (consultalo con tu contador). */}
+          <div className="flex flex-col gap-2 rounded-lg border border-dashed p-3 sm:col-span-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Mostrar alícuota de IIBB en la factura</p>
+                <p className="text-muted-foreground text-xs">
+                  Régimen de Transparencia Fiscal al Consumidor (RG 5614/2024) — solo aplica si tu
+                  provincia adhirió y sos Responsable Inscripto. Si no estás seguro, dejalo
+                  apagado y consultá con tu contador.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                className="h-5 w-5 shrink-0"
+                checked={form.mostrarIibbAlicuota}
+                onChange={(e) => setForm({ ...form, mostrarIibbAlicuota: e.target.checked })}
+              />
+            </div>
+            {form.mostrarIibbAlicuota && (
+              <div className="flex max-w-[200px] flex-col gap-1.5">
+                <Label htmlFor="iibb-alicuota">Alícuota IIBB (%)</Label>
+                <Input
+                  id="iibb-alicuota"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={form.iibbAlicuota}
+                  onChange={(e) => setForm({ ...form, iibbAlicuota: e.target.value })}
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
