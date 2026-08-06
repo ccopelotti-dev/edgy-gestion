@@ -43,8 +43,13 @@ export function Ingresar() {
     }
     setRecuperando(true)
     setError(null)
+    // Fase 30 (fix #143): antes esto mandaba siempre a
+    // panel.edgysistemas.tech (dominio interno del staff), sea cual sea
+    // el subdominio desde el que la persona esté pidiendo el reset --
+    // usar el origin actual la devuelve al mismo lugar desde donde
+    // entró (su propio subdominio si es un cliente, panel si es staff).
     await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://panel.edgysistemas.tech/completar-cuenta',
+      redirectTo: `${window.location.origin}/completar-cuenta`,
     })
     setRecuperando(false)
     setRecuperado(true)

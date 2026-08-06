@@ -64,7 +64,22 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: false, error: 'No autorizado' }), { status: 403 })
   }
 
-  // 2) Traer el Admin real (rol Dueño) de este cliente.
+  // 2) Traer el slug del cliente -- Fase 30 (fix #143): antes el mail
+  // de invitación mandaba siempre a panel.edgysistemas.tech (dominio
+  // interno de staff) en vez del subdominio propio del cliente. Si
+  // todavía no tiene slug (no debería pasar a esta altura del wizard),
+  // se cae al dominio interno como antes.
+  const { data: clienteRow } = await supabaseAdmin
+    .from('clientes')
+    .select('slug')
+    .eq('id', clienteId)
+    .maybeSingle()
+
+  const redirectTo = clienteRow?.slug
+    ? `https://${clienteRow.slug}.edgysistemas.tech/completar-cuenta`
+    : 'https://panel.edgysistemas.tech/completar-cuenta'
+
+  // 3) Traer el Admin real (rol Dueño) de este cliente.
   const { data: rolDueno, error: rolError } = await supabaseAdmin
     .from('roles')
     .select('id')
@@ -103,13 +118,13 @@ export default async (req) => {
     )
   }
 
-  // 3) Invitar — Supabase crea la cuenta y manda el mail con el link
+  // 4) Invitar — Supabase crea la cuenta y manda el mail con el link
   // para que el Admin defina su propia contraseña.
   const { data: invitado, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
     admin.email,
     {
       data: { nombre: admin.nombre, cliente_id: clienteId },
-      redirectTo: 'https://panel.edgysistemas.tech/completar-cuenta',
+      redirectTo,
     },
   )
 

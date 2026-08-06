@@ -9,6 +9,7 @@ import { ClientesListado } from '@/pages/panel/ClientesListado'
 import { ClienteDetalle } from '@/pages/panel/ClienteDetalle'
 import { ModulosListado } from '@/pages/panel/ModulosListado'
 import { CompletarCuenta } from '@/pages/CompletarCuenta'
+import { ConfirmarCambioEmail } from '@/pages/ConfirmarCambioEmail'
 import { Ingresar } from '@/pages/Ingresar'
 import MenuPublico from '@/pages/MenuPublico'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/" element={<RaizRedirect />} />
         <Route path="/ingresar" element={<Ingresar />} />
         <Route path="/completar-cuenta" element={<CompletarCuenta />} />
+        <Route path="/confirmar-cambio-email" element={<ConfirmarCambioEmail />} />
         <Route path="/menu/:slug" element={<MenuPublico />} />
         {/* Fase 27d-2: link separado por punto de venta -- mismo
             componente, MenuPublico.tsx distingue por el segundo param. */}

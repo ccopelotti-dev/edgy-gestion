@@ -142,6 +142,10 @@ export interface UsuarioCliente {
    * mismo catálogo que ya existía pensado para esto, ver
    * src/modules/configuracion/types/index.ts (`PuntoVenta`). */
   punto_venta_id: string | null
+  /** Fase 30: true = la próxima vez que entra al dashboard, se le pide
+   * definir un email nuevo antes de dejarlo pasar. Lo prende el staff
+   * desde ClienteDetalle.tsx. */
+  debe_cambiar_email: boolean
 }
 
 export interface Permiso {

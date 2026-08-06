@@ -39,6 +39,10 @@ interface UseClienteActualResult {
    * null significa acceso global (ve/opera todos). No confundir con
    * rolActual.esAdmin: son restricciones independientes. */
   puntoVentaUsuarioId: string | null
+  /** Fase 30: true = hay que interceptar la navegación y pedirle un
+   * email nuevo antes de mostrarle cualquier pantalla del dashboard --
+   * ver DashboardLayout (components/Layout.tsx). */
+  debeCambiarEmail: boolean
   cargando: boolean
   error: string | null
 }
@@ -55,6 +59,7 @@ export function useClienteActual(): UseClienteActualResult {
   const [rolActual, setRolActual] = useState<RolActual | null>(null)
   const [puntosVenta, setPuntosVenta] = useState<PuntoVentaLiviano[]>([])
   const [puntoVentaUsuarioId, setPuntoVentaUsuarioId] = useState<string | null>(null)
+  const [debeCambiarEmail, setDebeCambiarEmail] = useState(false)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -73,6 +78,7 @@ export function useClienteActual(): UseClienteActualResult {
           setRolActual(null)
           setPuntosVenta([])
           setPuntoVentaUsuarioId(null)
+          setDebeCambiarEmail(false)
           setCargando(false)
         }
         return
@@ -86,7 +92,7 @@ export function useClienteActual(): UseClienteActualResult {
       // global" a todos los puntos de venta del cliente.
       const { data: usuarioCliente, error: errUsuario } = await supabase
         .from('usuarios_cliente')
-        .select('cliente_id, rol_id, punto_venta_id, roles(nombre, es_admin, vista)')
+        .select('cliente_id, rol_id, punto_venta_id, debe_cambiar_email, roles(nombre, es_admin, vista)')
         .eq('user_id', authData.user.id)
         .single()
 
@@ -124,6 +130,7 @@ export function useClienteActual(): UseClienteActualResult {
       setCliente((clienteData as Cliente) ?? null)
       setPuntosVenta((puntosVentaData as PuntoVentaLiviano[]) ?? [])
       setPuntoVentaUsuarioId((usuarioCliente.punto_venta_id as string | null) ?? null)
+      setDebeCambiarEmail(!!usuarioCliente.debe_cambiar_email)
       setModulosActivos(
         (clienteModulos ?? []).map((row: any) => ({
           ...(row.modulos as Modulo),
@@ -149,7 +156,16 @@ export function useClienteActual(): UseClienteActualResult {
     }
   }, [])
 
-  return { cliente, modulosActivos, rolActual, puntosVenta, puntoVentaUsuarioId, cargando, error }
+  return {
+    cliente,
+    modulosActivos,
+    rolActual,
+    puntosVenta,
+    puntoVentaUsuarioId,
+    debeCambiarEmail,
+    cargando,
+    error,
+  }
 }
 
 // Tipo auxiliar reexportado para los componentes que listan módulos

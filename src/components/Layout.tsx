@@ -1,6 +1,7 @@
 import { Outlet, Navigate, Link, useNavigate } from 'react-router-dom'
 import { Store, LogOut } from 'lucide-react'
 import { Sidebar } from '@/components/Sidebar'
+import { CambiarEmailObligatorio } from '@/pages/CambiarEmailObligatorio'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { usePersonalEdgy } from '@/hooks/usePersonalEdgy'
 import { colorDeContraste } from '@/lib/colorContraste'
@@ -20,7 +21,7 @@ function iniciales(nombre: string): string {
 }
 
 export function DashboardLayout() {
-  const { cliente, modulosActivos, cargando, error } = useClienteActual()
+  const { cliente, modulosActivos, debeCambiarEmail, cargando, error } = useClienteActual()
   const { esStaff, cargando: cargandoStaff } = usePersonalEdgy()
   const navigate = useNavigate()
 
@@ -67,6 +68,14 @@ export function DashboardLayout() {
         {error ?? 'No hay un negocio configurado para este usuario.'}
       </div>
     )
+  }
+
+  // Fase 30: intercepta ANTES de mostrar cualquier pantalla del
+  // dashboard -- cubre tanto el primer ingreso después de que el
+  // staff prendió el flag como cualquier navegación posterior (no
+  // solo el momento exacto de loguearse).
+  if (debeCambiarEmail) {
+    return <CambiarEmailObligatorio />
   }
 
   const colorMarca = cliente.color_marca ?? '#0C1A2E'

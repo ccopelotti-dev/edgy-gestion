@@ -56,11 +56,39 @@ export function ClienteDetalle() {
   async function reenviarAcceso(email: string) {
     setReenviando(email)
     setReenviado(null)
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://panel.edgysistemas.tech/completar-cuenta',
-    })
+    // Fase 30 (fix #143): antes esto mandaba siempre a
+    // panel.edgysistemas.tech (dominio interno de staff) en vez del
+    // subdominio propio del cliente. Si el cliente ya tiene slug, lo
+    // usamos -- si todavía no (altas muy viejas sin slug), se cae al
+    // dominio interno como antes, así nunca queda un link roto.
+    const destino = cliente?.slug
+      ? `https://${cliente.slug}.edgysistemas.tech/completar-cuenta`
+      : 'https://panel.edgysistemas.tech/completar-cuenta'
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: destino })
     setReenviando(null)
     setReenviado(email)
+  }
+
+  // Fase 30: prende el flag que hace que, la próxima vez que este
+  // usuario entra a cualquier pantalla del dashboard, se le pida un
+  // email nuevo antes de dejarlo pasar (ver CambiarEmailObligatorio.tsx
+  // y el gate en components/Layout.tsx). Pensado para el caso de
+  // "cargamos la cuenta con un mail provisorio de Edgy para hacer el
+  // trabajo pesado, y ahora hay que entregársela al dueño real".
+  const [forzandoCambioEmail, setForzandoCambioEmail] = useState<string | null>(null)
+
+  async function forzarCambioEmail(usuarioClienteId: string) {
+    setForzandoCambioEmail(usuarioClienteId)
+    const { error } = await supabase
+      .from('usuarios_cliente')
+      .update({ debe_cambiar_email: true })
+      .eq('id', usuarioClienteId)
+    if (!error) {
+      setUsuarios((prev) =>
+        prev.map((u) => (u.id === usuarioClienteId ? { ...u, debe_cambiar_email: true } : u)),
+      )
+    }
+    setForzandoCambioEmail(null)
   }
 
   async function cargarTodo() {
@@ -225,19 +253,37 @@ export function ClienteDetalle() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {u.rol === 'Dueño' && u.auth_mode === 'full' && u.email && (
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-brand-500 disabled:opacity-50"
-                    disabled={reenviando === u.email}
-                    onClick={() => reenviarAcceso(u.email as string)}
-                  >
-                    {reenviando === u.email
-                      ? 'Enviando...'
-                      : reenviado === u.email
-                        ? 'Enviado'
-                        : 'Reenviar acceso'}
-                  </button>
+                {u.auth_mode === 'full' && u.email && (
+                  <>
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-brand-500 disabled:opacity-50"
+                      disabled={reenviando === u.email}
+                      onClick={() => reenviarAcceso(u.email as string)}
+                    >
+                      {reenviando === u.email
+                        ? 'Enviando...'
+                        : reenviado === u.email
+                          ? 'Enviado'
+                          : 'Reenviar acceso'}
+                    </button>
+                    {/* Fase 30: para cuentas cargadas con un mail
+                        provisorio de Edgy (ej. mientras se hace la carga
+                        inicial de stock) -- fuerza a que en el próximo
+                        ingreso, esta persona defina su email real. */}
+                    {u.debe_cambiar_email ? (
+                      <span className="text-sm text-amber-600">Pendiente de confirmar</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-sm font-medium text-brand-500 disabled:opacity-50"
+                        disabled={forzandoCambioEmail === u.id}
+                        onClick={() => forzarCambioEmail(u.id)}
+                      >
+                        {forzandoCambioEmail === u.id ? 'Guardando...' : 'Cambiar email'}
+                      </button>
+                    )}
+                  </>
                 )}
                 {/* Fase 27a: solo tiene sentido mostrar el selector si el
                     cliente ya tiene más de un punto de venta cargado --
