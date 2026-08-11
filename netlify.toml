@@ -5,6 +5,14 @@
 [functions]
   directory = "netlify/functions"
 
+# Fase 31b: manifest.json dinámico por subdominio (ver
+# netlify/functions/manifest.js) -- tiene que ir ANTES del catch-all de
+# abajo, si no Netlify nunca llega a la función y sirve index.html.
+[[redirects]]
+  from = "/manifest.json"
+  to = "/.netlify/functions/manifest"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

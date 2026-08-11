@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Edgy Gestión</title>
+
+    <!-- Fase 31b: PWA instalable. El manifest se sirve dinámico por
+    subdominio (netlify/functions/manifest.js) -- Android/Chrome instala
+    con el logo y nombre propios de cada cliente. iOS/Safari no lee el
+    manifest para "Agregar a pantalla de inicio", usa las etiquetas
+    fijas de acá -- queda genérico de Edgy hasta una vuelta futura. -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0C1A2E" />
+    <link rel="icon" href="/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Edgy Gestión" />
   </head>
   <body>
     <div id="root"></div>
