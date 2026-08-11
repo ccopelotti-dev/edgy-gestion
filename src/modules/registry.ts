@@ -6,6 +6,8 @@ import { lazy } from 'react'
 // con un index.tsx que exporte el componente como default, y agregar la
 // entrada acá.
 export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
+  // Fase 31: Agenda (núcleo) -- calendario, tareas y bandeja de notas.
+  agenda: lazy(() => import('./agenda')),
   tesoreria: lazy(() => import('@/modules/tesoreria')),
   'productos-stock': lazy(() => import('@/modules/productos-stock')),
   'ventas': lazy(() => import('./ventas')),

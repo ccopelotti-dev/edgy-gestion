@@ -16,6 +16,7 @@ import {
   Wrench,
   Briefcase,
   Calculator,
+  CalendarDays,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -23,6 +24,7 @@ import {
  * agregan un módulo nuevo al catálogo y no está acá, cae en
  * CircleDashed en vez de romper. */
 const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
+  agenda: CalendarDays,
   tesoreria: Wallet,
   'productos-stock': Package,
   ventas: ShoppingCart,

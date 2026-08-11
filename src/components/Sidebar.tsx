@@ -23,6 +23,8 @@ const SLUGS_PIE = ['utilidades', 'configuracion']
 // (módulo nuevo que todavía no se agregó a esta lista) cae al final, en
 // vez de desaparecer.
 const ORDEN_PRINCIPALES = [
+  // Fase 31: Agenda va primera -- inmediatamente debajo de Dashboard.
+  'agenda',
   'tesoreria',
   'productos-stock',
   'servicios',
