@@ -38,6 +38,7 @@ import {
 } from '../../types';
 
 import { formatARS, todayISO } from '../../lib/format';
+import { esCuitValido } from '@/lib/validarCuit';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 
@@ -140,6 +141,12 @@ export function ClienteDialog({ open, onOpenChange, cliente, onSave }: ClienteDi
     const next: Partial<Record<keyof ClienteForm, string>> = {};
     if (!form.nombre.trim()) next.nombre = 'El nombre es obligatorio';
     if (!form.documento.trim()) next.documento = 'El documento es obligatorio';
+    else if (
+      (form.tipoDocumento === 'cuit' || form.tipoDocumento === 'cuil') &&
+      !esCuitValido(form.documento)
+    ) {
+      next.documento = 'El CUIT/CUIL no es válido (dígito verificador incorrecto)';
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };

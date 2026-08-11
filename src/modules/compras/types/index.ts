@@ -195,6 +195,14 @@ export interface ComprobanteCompra {
    * IVA Compras del período fiscal.
    */
   numeroComprobanteProveedor?: string;
+  /**
+   * Letra/tipo AFIP-ARCA del comprobante recibido del proveedor (código de
+   * 3 dígitos, ej "001" = Factura A) -- Fase 34 (Impuestos). Es el dato que
+   * determina si genera crédito fiscal computable de IVA (A/M sí, B/C no).
+   * Texto libre a propósito: si el proveedor emite un tipo fuera del
+   * subconjunto ofrecido en el Select, se puede cargar el código a mano.
+   */
+  tipoComprobanteCodigo?: string;
   /** true una vez que se generó la Recepción correspondiente en Productos y
    * Stock -- evita sumar el mismo stock dos veces. */
   stockActualizado: boolean;

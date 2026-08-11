@@ -261,6 +261,8 @@ export default function OrdenesCompra() {
     proveedorId: string;
     /** Nro. de comprobante fiscal del proveedor (ej. "0001-00000542"). */
     numeroComprobanteProveedor: string;
+    /** Letra/tipo AFIP-ARCA del comprobante (Fase 34, Impuestos). */
+    tipoComprobanteCodigo: string;
     fecha: string;
     fechaVencimiento: string;
     medioPago: any;
@@ -304,6 +306,7 @@ export default function OrdenesCompra() {
         controlRemision: data.controlRemision,
         numeroRemito: data.numeroRemito || undefined,
         numeroComprobanteProveedor: data.numeroComprobanteProveedor || undefined,
+        tipoComprobanteCodigo: data.tipoComprobanteCodigo || undefined,
         stockActualizado: false,
         createdAt: now,
         updatedAt: now,

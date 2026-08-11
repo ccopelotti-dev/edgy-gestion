@@ -33,6 +33,8 @@ import {
 } from '../../types';
 
 import { formatARS, todayISO } from '../../lib/format';
+import { esCuitValido } from '@/lib/validarCuit';
+import { TIPOS_COMPROBANTE_ARCA } from '@/modules/impuestos/lib/arcaReferencia';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { UNIDADES, unidadAbrev, type UnidadMedida } from '@/modules/productos-stock/types';
@@ -139,6 +141,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
     const next: Partial<Record<keyof ProveedorForm, string>> = {};
     if (!form.nombre.trim()) next.nombre = 'El nombre es obligatorio';
     if (!form.cuit.trim()) next.cuit = 'El CUIT es obligatorio';
+    else if (!esCuitValido(form.cuit)) next.cuit = 'El CUIT no es válido (dígito verificador incorrecto)';
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -688,6 +691,9 @@ interface ComprobanteCompraDialogProps {
     /** Nro. de comprobante fiscal del proveedor (ej. "0001-00000542") --
      * ver comentario en ComprobanteCompra.numeroComprobanteProveedor. */
     numeroComprobanteProveedor: string;
+    /** Letra/tipo AFIP-ARCA del comprobante recibido (código de 3 dígitos)
+     * -- Fase 34 (Impuestos), determina crédito fiscal computable de IVA. */
+    tipoComprobanteCodigo: string;
     fecha: string;
     fechaVencimiento: string;
     medioPago: MedioPagoCompra;
@@ -789,6 +795,9 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
   const [comprobantePtoVta, setComprobantePtoVta] = useState('');
   const [comprobanteNumero, setComprobanteNumero] = useState('');
   const comprobanteNumeroInputRef = useRef<HTMLInputElement>(null);
+  // Letra/tipo AFIP-ARCA del comprobante recibido (Fase 34, Impuestos) --
+  // determina si genera crédito fiscal computable de IVA (A/M sí, B/C no).
+  const [tipoComprobanteCodigo, setTipoComprobanteCodigo] = useState('');
   const numeroComprobanteProveedor =
     comprobantePtoVta || comprobanteNumero
       ? `${comprobantePtoVta.padStart(4, '0')}-${comprobanteNumero.padStart(8, '0')}`
@@ -1036,6 +1045,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
     onSave({
       tipo, proveedorId, fecha, fechaVencimiento, medioPago,
       numeroComprobanteProveedor,
+      tipoComprobanteCodigo,
       items: construirItems(),
       controlRemision,
       numeroRemito,
@@ -1113,6 +1123,15 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
             </div>
 
             <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelClass}>Letra/Tipo (ARCA)</label>
+                <select className={selectClass} value={tipoComprobanteCodigo} onChange={(e) => setTipoComprobanteCodigo(e.target.value)}>
+                  <option value="">Sin especificar</option>
+                  {TIPOS_COMPROBANTE_ARCA.map((t) => (
+                    <option key={t.codigo} value={t.codigo}>{t.descripcion}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className={labelClass}>Fecha</label>
                 <input className={inputClass} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />

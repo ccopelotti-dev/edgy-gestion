@@ -11,6 +11,9 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   // Fase 33: Gastos Fijos y Fiscales (núcleo) -- sueldos, alquiler,
   // servicios y (a futuro) impuestos.
   'gastos-fijos': lazy(() => import('./gastos-fijos')),
+  // Fase 34: Impuestos (núcleo) -- Libro IVA, posición mensual,
+  // retenciones y percepciones.
+  'impuestos': lazy(() => import('./impuestos')),
   tesoreria: lazy(() => import('@/modules/tesoreria')),
   'productos-stock': lazy(() => import('@/modules/productos-stock')),
   'ventas': lazy(() => import('./ventas')),
