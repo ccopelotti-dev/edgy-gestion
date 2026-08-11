@@ -35,15 +35,28 @@ export function CompletarCuenta() {
     setError(null)
     const { error: updateError } = await supabase.auth.updateUser({ password })
 
-    if (updateError) {
+    // Fix #142: si la persona ya había definido esta misma contraseña
+    // antes (ej. abrió el link de invitación dos veces, o esta pantalla
+    // se recargó después de un guardado que sí funcionó), Supabase
+    // rechaza el update con error_code "same_password" -- no es una
+    // falla real, la cuenta ya queda lista para entrar con esa
+    // contraseña. Antes esto cortaba acá con un error genérico de "no
+    // pudimos guardar" que hacía pensar que la cuenta había quedado sin
+    // contraseña, cuando en realidad sí la tenía.
+    const esMismaContrasena =
+      (updateError as { code?: string } | null)?.code === 'same_password' ||
+      /different from the old password/i.test(updateError?.message ?? '')
+
+    if (updateError && !esMismaContrasena) {
       setGuardando(false)
       setError('No pudimos guardar la contraseña. Probá de nuevo en un momento.')
       return
     }
 
-    // Recién acá existe una sesión real con la contraseña ya puesta —
-    // vinculamos esta cuenta a la fila de usuarios_cliente que el
-    // wizard dejó esperando (matchea por email, ver migración 0006).
+    // Recién acá existe una sesión real con la contraseña ya puesta (o ya
+    // estaba puesta de antes) — vinculamos esta cuenta a la fila de
+    // usuarios_cliente que el wizard dejó esperando (matchea por email, ver
+    // migración 0006).
     const { error: vincularError } = await supabase.rpc('vincular_usuario_actual')
     setGuardando(false)
 

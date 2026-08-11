@@ -1,0 +1,5 @@
+-- Archivo descartado: se reemplazó por 0069_fase27a_puntos_venta.sql
+-- (se encontró que ya existía el concepto pensado como "puntos_venta",
+-- con pantalla propia en Configuración > Facturación, en vez de crear
+-- una tabla "sucursales" nueva y paralela). No aplicar -- se borra del
+-- repo en el próximo commit (git rm).
