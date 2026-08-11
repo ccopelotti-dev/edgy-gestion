@@ -30,6 +30,8 @@ const ORDEN_PRINCIPALES = [
   'servicios',
   'ventas',
   'compras',
+  // Fase 33: Gastos Fijos y Fiscales va justo debajo de Compras.
+  'gastos-fijos',
   'mesas-salon',
   'comandas-cocina',
   'menu-qr',

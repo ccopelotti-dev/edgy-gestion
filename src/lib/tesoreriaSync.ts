@@ -58,7 +58,10 @@ interface RegistrarMovimientoOpts {
   concepto: string;
   categoria: string;
   fecha: string;
-  origenModulo: 'ventas' | 'compras';
+  // Fase 33: 'gastos-fijos' cubre tanto Sueldos (pago de recibo) como
+  // Alquiler y Servicios (pago de un gasto fijo) -- ambos disparan el
+  // mismo egreso de caja/banco que Compras/Ventas.
+  origenModulo: 'ventas' | 'compras' | 'gastos-fijos';
   /**
    * Cuenta bancaria real a debitar/acreditar (Orden de Pago, Fase 22) --
    * cuando se pasa explícita, se usa tal cual y NO se auto-selecciona "la

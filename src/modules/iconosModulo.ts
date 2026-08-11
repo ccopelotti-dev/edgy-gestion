@@ -17,6 +17,7 @@ import {
   Briefcase,
   Calculator,
   CalendarDays,
+  Landmark,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -25,6 +26,7 @@ import {
  * CircleDashed en vez de romper. */
 const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   agenda: CalendarDays,
+  'gastos-fijos': Landmark,
   tesoreria: Wallet,
   'productos-stock': Package,
   ventas: ShoppingCart,

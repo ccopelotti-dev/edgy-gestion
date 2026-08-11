@@ -8,6 +8,9 @@ import { lazy } from 'react'
 export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   // Fase 31: Agenda (núcleo) -- calendario, tareas y bandeja de notas.
   agenda: lazy(() => import('./agenda')),
+  // Fase 33: Gastos Fijos y Fiscales (núcleo) -- sueldos, alquiler,
+  // servicios y (a futuro) impuestos.
+  'gastos-fijos': lazy(() => import('./gastos-fijos')),
   tesoreria: lazy(() => import('@/modules/tesoreria')),
   'productos-stock': lazy(() => import('@/modules/productos-stock')),
   'ventas': lazy(() => import('./ventas')),
