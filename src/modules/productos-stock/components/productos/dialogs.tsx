@@ -104,6 +104,7 @@ const emptyProducto: ProductoFormData = {
   plantillaGarantiaId: undefined,
   diasDisponibles: undefined,
   puntoVentaId: undefined,
+  esInsumo: false,
 }
 
 export function ProductoDialog({
@@ -885,7 +886,23 @@ export function ProductoDialog({
               />
               Disponible
             </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.esInsumo ?? false}
+                onChange={(e) => update('esInsumo', e.target.checked)}
+                className="rounded border-input"
+              />
+              También es insumo (usar en Formular Producto)
+            </label>
           </div>
+          {form.esInsumo && (
+            <p className="text-xs text-muted-foreground -mt-2">
+              Este artículo va a estar disponible como ingrediente en Formular Producto (ej. una
+              tela que también se usa para confeccionar). El stock y el costo se sincronizan
+              solos desde acá -- no hace falta cargarlos por separado en Insumos.
+            </p>
+          )}
 
           {/* Días disponibles (Fase 24a) -- pensado para productos con
               disponibilidad acotada por día (ej. viandas), pero sirve para

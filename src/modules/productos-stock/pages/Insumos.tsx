@@ -268,7 +268,17 @@ export default function Insumos() {
             <tbody>
               {filtered.map((i) => (
                 <tr key={i.id} className="border-b last:border-0 hover:bg-muted/50">
-                  <td className="px-4 py-3 font-medium">{i.nombre}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {i.nombre}
+                    {i.productoVinculadoId && (
+                      <span
+                        className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-normal text-blue-700"
+                        title="Vinculado a un producto -- el stock y el costo se sincronizan solos desde Productos"
+                      >
+                        vinculado a producto
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {(() => {
                       const rubro = rubrosMap.get(i.rubroId)

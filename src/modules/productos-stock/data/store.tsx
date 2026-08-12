@@ -218,7 +218,11 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         id: uid(),
         createdAt: todayISO(),
       }
-      return { ...state, productos: [...state.productos, nuevo] }
+      return {
+        ...state,
+        productos: [...state.productos, nuevo],
+        insumos: sincronizarInsumoDeProducto(nuevo, state.insumos),
+      }
     }
     case 'UPDATE_PRODUCTO':
       return {
@@ -226,11 +230,19 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         productos: state.productos.map((p) =>
           p.id === action.payload.id ? action.payload : p,
         ),
+        insumos: sincronizarInsumoDeProducto(action.payload, state.insumos),
       }
     case 'DELETE_PRODUCTO':
       return {
         ...state,
         productos: state.productos.filter((p) => p.id !== action.payload),
+        // Desvincula (no borra) el insumo espejo, si tenía uno -- ver
+        // sincronizarInsumoDeProducto. Le pasamos esInsumo:false "a mano"
+        // para forzar la rama de desvinculación sin necesitar el producto
+        // completo (ya se está borrando).
+        insumos: state.insumos.map((i) =>
+          i.productoVinculadoId === action.payload ? { ...i, productoVinculadoId: undefined } : i,
+        ),
       }
 
     // ── Insumos ───────────────────────────────────────────────────────────────
@@ -461,9 +473,20 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           origen: 'formula',
           origenId: loteId,
         })
-        insumos = insumos.map((i) =>
-          i.id === linea.insumoId ? { ...i, stock: i.stock - cantidadConsumida } : i,
-        )
+        // Fase 34+: ver comentario en AJUSTAR_STOCK -- si el insumo
+        // consumido está vinculado a un producto, el descuento se aplica
+        // sobre el producto y se espeja de vuelta.
+        const vinculado = productoVinculadoDe(linea.insumoId, insumos, productos)
+        if (vinculado) {
+          productos = productos.map((p) =>
+            p.id === vinculado.id ? { ...p, stock: p.stock - cantidadConsumida } : p,
+          )
+          insumos = espejarInsumoVinculado(vinculado.id, productos, insumos)
+        } else {
+          insumos = insumos.map((i) =>
+            i.id === linea.insumoId ? { ...i, stock: i.stock - cantidadConsumida } : i,
+          )
+        }
       }
 
       nuevosMovimientos.push({
@@ -550,15 +573,31 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
             return { ...p, stock: p.stock + linea.cantidad, costo: nuevoCosto }
           })
         } else {
-          insumos = insumos.map((i) =>
-            i.id === linea.itemId
-              ? {
-                  ...i,
-                  stock: i.stock + linea.cantidad,
-                  costo: linea.costoUnitario > 0 ? linea.costoUnitario : i.costo,
-                }
-              : i,
-          )
+          // Fase 34+: ver comentario en AJUSTAR_STOCK -- redirección a
+          // producto + espejo de vuelta si el insumo está vinculado.
+          const vinculado = productoVinculadoDe(linea.itemId, insumos, productos)
+          if (vinculado) {
+            productos = productos.map((p) =>
+              p.id === vinculado.id
+                ? {
+                    ...p,
+                    stock: p.stock + linea.cantidad,
+                    costo: linea.costoUnitario > 0 ? linea.costoUnitario : p.costo,
+                  }
+                : p,
+            )
+            insumos = espejarInsumoVinculado(vinculado.id, productos, insumos)
+          } else {
+            insumos = insumos.map((i) =>
+              i.id === linea.itemId
+                ? {
+                    ...i,
+                    stock: i.stock + linea.cantidad,
+                    costo: linea.costoUnitario > 0 ? linea.costoUnitario : i.costo,
+                  }
+                : i,
+            )
+          }
         }
       }
 
@@ -618,9 +657,17 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       let productos = state.productos
       let insumos = state.insumos
 
-      if (itemTipo === 'producto') {
+      // Fase 34+: un insumo vinculado a un producto no tiene stock propio
+      // -- el ajuste se redirige al producto (fuente única de verdad) y
+      // después se espeja de vuelta sobre el insumo.
+      const vinculado =
+        itemTipo === 'insumo' ? productoVinculadoDe(itemId, insumos, productos) : undefined
+      const itemTipoEfectivo = vinculado ? 'producto' : itemTipo
+      const itemIdEfectivo = vinculado ? vinculado.id : itemId
+
+      if (itemTipoEfectivo === 'producto') {
         productos = productos.map((p) => {
-          if (p.id !== itemId) return p
+          if (p.id !== itemIdEfectivo) return p
           if (varianteId) {
             const variantes = p.variantes.map((v) =>
               v.id === varianteId ? { ...v, stock: v.stock + cantidad } : v,
@@ -630,6 +677,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           }
           return { ...p, stock: p.stock + cantidad }
         })
+        if (vinculado) insumos = espejarInsumoVinculado(vinculado.id, productos, insumos)
       } else {
         insumos = insumos.map((i) =>
           i.id === itemId ? { ...i, stock: i.stock + cantidad } : i,
@@ -664,9 +712,16 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       let productos = state.productos
       let insumos = state.insumos
 
-      if (itemTipo === 'producto') {
+      // Fase 34+: ver comentario en AJUSTAR_STOCK -- mismo criterio de
+      // redirección a producto + espejo de vuelta sobre el insumo.
+      const vinculado =
+        itemTipo === 'insumo' ? productoVinculadoDe(itemId, insumos, productos) : undefined
+      const itemTipoEfectivo = vinculado ? 'producto' : itemTipo
+      const itemIdEfectivo = vinculado ? vinculado.id : itemId
+
+      if (itemTipoEfectivo === 'producto') {
         productos = productos.map((p) => {
-          if (p.id !== itemId) return p
+          if (p.id !== itemIdEfectivo) return p
           const costoUpdate =
             costoUnitario != null && costoUnitario > 0 ? { costo: costoUnitario } : {}
           if (varianteId) {
@@ -678,6 +733,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           }
           return { ...p, stock: p.stock + cantidad, ...costoUpdate }
         })
+        if (vinculado) insumos = espejarInsumoVinculado(vinculado.id, productos, insumos)
       } else {
         insumos = insumos.map((i) =>
           i.id === itemId
@@ -743,6 +799,8 @@ function productoToRow(p: Producto, clienteId: string) {
     dias_disponibles: p.diasDisponibles && p.diasDisponibles.length ? p.diasDisponibles : null,
     // Fase 27d: null = compartido entre todos los locales (default).
     punto_venta_id: p.puntoVentaId || null,
+    // Fase 34+: ver comentario en types/index.ts (Producto.esInsumo).
+    es_insumo: p.esInsumo ?? false,
   }
 }
 
@@ -882,6 +940,100 @@ function insumoToRow(i: Insumo, clienteId: string) {
   }
 }
 
+// ─── Producto ↔ Insumo vinculado (Fase 34+) ─────────────────────────────────
+// Un producto marcado `esInsumo` tiene un registro espejo en `insumos` (con
+// `productoVinculadoId` apuntando a él) para poder elegirse en Formular
+// Producto. El producto es la fuente única de verdad del stock/costo -- el
+// insumo vinculado NUNCA se edita a mano, solo se espeja. Estos tres
+// helpers centralizan esa relación para no duplicar la lógica en cada
+// action que toca stock (Recepción, Ajuste, Producción).
+
+/** Si `insumoId` corresponde a un insumo vinculado a un producto, devuelve
+ * ese producto. undefined si el insumo no existe o no está vinculado. */
+function productoVinculadoDe(
+  insumoId: string,
+  insumos: Insumo[],
+  productos: Producto[],
+): Producto | undefined {
+  const insumo = insumos.find((i) => i.id === insumoId)
+  if (!insumo?.productoVinculadoId) return undefined
+  return productos.find((p) => p.id === insumo.productoVinculadoId)
+}
+
+/** Copia stock/costo del producto `productoId` sobre su insumo vinculado (si
+ * tiene uno) dentro del array de insumos. No-op si no hay insumo vinculado. */
+function espejarInsumoVinculado(
+  productoId: string,
+  productos: Producto[],
+  insumos: Insumo[],
+): Insumo[] {
+  const producto = productos.find((p) => p.id === productoId)
+  if (!producto) return insumos
+  return insumos.map((i) =>
+    i.productoVinculadoId === productoId
+      ? { ...i, stock: producto.stock, costo: producto.costo }
+      : i,
+  )
+}
+
+/** Alta/edición de un producto: crea, actualiza o desvincula el insumo
+ * espejo según `producto.esInsumo`. Devuelve el array de insumos ya
+ * actualizado (no muta el original). Se usa desde ADD_PRODUCTO,
+ * UPDATE_PRODUCTO y DELETE_PRODUCTO (con `producto.esInsumo = false` para
+ * forzar la desvinculación). */
+function sincronizarInsumoDeProducto(producto: Producto, insumos: Insumo[]): Insumo[] {
+  const existente = insumos.find((i) => i.productoVinculadoId === producto.id)
+
+  if (producto.esInsumo && !existente) {
+    const nuevo: Insumo = {
+      id: uid(),
+      nombre: producto.nombre,
+      rubroId: producto.rubroId,
+      subRubroId: producto.subRubroId,
+      unidad: producto.unidadVenta,
+      stock: producto.stock,
+      stockMinimo: producto.stockMinimo,
+      costo: producto.costo,
+      esComercializable: true,
+      productoVinculadoId: producto.id,
+      createdAt: todayISO(),
+    }
+    return [...insumos, nuevo]
+  }
+
+  if (!producto.esInsumo && existente) {
+    // No se borra -- puede estar referenciado por una Fórmula. Se
+    // desvincula: queda como insumo independiente, deja de espejar.
+    return insumos.map((i) =>
+      i.id === existente.id ? { ...i, productoVinculadoId: undefined } : i,
+    )
+  }
+
+  if (producto.esInsumo && existente) {
+    // Sigue vinculado -- espeja los campos editables desde el formulario de
+    // Producto. Stock/costo también, por si se editaron a mano en el
+    // formulario (las mutaciones de stock en sí las espejan por separado
+    // `espejarInsumoVinculado`, en las actions de Recepción/Ajuste/
+    // Producción).
+    return insumos.map((i) =>
+      i.id === existente.id
+        ? {
+            ...i,
+            nombre: producto.nombre,
+            rubroId: producto.rubroId,
+            subRubroId: producto.subRubroId,
+            unidad: producto.unidadVenta,
+            stockMinimo: producto.stockMinimo,
+            costo: producto.costo,
+            stock: producto.stock,
+          }
+        : i,
+    )
+  }
+
+  return insumos
+}
+
 function rubroToRow(r: Rubro, clienteId: string) {
   return {
     id: r.id,
@@ -1009,6 +1161,36 @@ function logErr(label: string) {
   return ({ error }: { error: unknown }) => error && console.error(`Productos y Stock · error en ${label}:`, error)
 }
 
+/** Fase 34+: persiste en Supabase los insumos vinculados que
+ * `sincronizarInsumoDeProducto` haya creado/editado/desvinculado en el
+ * reducer (ADD_PRODUCTO/UPDATE_PRODUCTO/DELETE_PRODUCTO). Compara
+ * `prevState.insumos` vs `nextState.insumos` fila por fila -- alcanza con
+ * eso porque esas tres actions solo tocan, como mucho, el insumo vinculado
+ * a UN producto por vez. */
+function persistirInsumosVinculados(
+  prevState: ProductosStockState,
+  nextState: ProductosStockState,
+  clienteId: string,
+) {
+  for (const i of nextState.insumos) {
+    const prev = prevState.insumos.find((x) => x.id === i.id)
+    if (!prev) {
+      supabase.from('insumos').insert(insumoToRow(i, clienteId)).then(logErr('alta de insumo vinculado'))
+    } else if (
+      prev.nombre !== i.nombre ||
+      prev.rubroId !== i.rubroId ||
+      prev.subRubroId !== i.subRubroId ||
+      prev.unidad !== i.unidad ||
+      prev.stockMinimo !== i.stockMinimo ||
+      prev.costo !== i.costo ||
+      prev.stock !== i.stock ||
+      prev.productoVinculadoId !== i.productoVinculadoId
+    ) {
+      supabase.from('insumos').update(insumoToRow(i, clienteId)).eq('id', i.id).then(logErr('sync de insumo vinculado'))
+    }
+  }
+}
+
 // ─── Sincronización con Supabase por acción ────────────────────
 
 async function syncToSupabase(
@@ -1027,17 +1209,22 @@ async function syncToSupabase(
           .insert(p.variantes.map((v, idx) => productoVarianteToRow(v, p.id, idx)))
           .then(logErr('variantes de producto'))
       }
+      persistirInsumosVinculados(prevState, nextState, clienteId)
       return
     }
     case 'UPDATE_PRODUCTO': {
       const p = action.payload
       supabase.from('productos').update(productoToRow(p, clienteId)).eq('id', p.id).then(logErr('edición de producto'))
       syncProductoVariantes(p.id, p.tipo === 'con_variantes' ? p.variantes : [])
+      persistirInsumosVinculados(prevState, nextState, clienteId)
       return
     }
     case 'DELETE_PRODUCTO':
       // producto_variantes tiene ON DELETE CASCADE en la migración.
       supabase.from('productos').delete().eq('id', action.payload).then(logErr('borrado de producto'))
+      // Fase 34+: si tenía un insumo vinculado, el reducer ya lo desvinculó
+      // (no se borra -- puede estar usado en una Fórmula) -- se persiste acá.
+      persistirInsumosVinculados(prevState, nextState, clienteId)
       return
 
     case 'ADD_INSUMO': {
@@ -1427,12 +1614,23 @@ async function syncToSupabase(
 
       const { itemTipo, itemId, cantidad } = action.payload
       const varianteId = 'varianteId' in action.payload ? action.payload.varianteId : undefined
+
+      // Fase 34+: si el itemTipo pedido es 'insumo' pero ese insumo está
+      // vinculado a un producto, el movimiento en realidad se aplicó sobre
+      // el producto (ver reducer) -- acá se persiste con ese mismo criterio,
+      // y el insumo vinculado se espeja aparte, siempre como columna plana
+      // (nunca reparte stock por punto de venta: es un mirror, no un item
+      // real).
+      const insumoOriginal = itemTipo === 'insumo' ? nextState.insumos.find((x) => x.id === itemId) : undefined
+      const itemTipoEfectivo = insumoOriginal?.productoVinculadoId ? 'producto' : itemTipo
+      const itemIdEfectivo = insumoOriginal?.productoVinculadoId ?? itemId
+
       // AJUSTAR_STOCK/RECIBIR_STOCK aplican `cantidad` como delta directo
       // sobre el stock actual (ver el reducer más arriba: `stock + cantidad`).
-      if (itemTipo === 'producto') {
-        const p = nextState.productos.find((x) => x.id === itemId)
+      if (itemTipoEfectivo === 'producto') {
+        const p = nextState.productos.find((x) => x.id === itemIdEfectivo)
         if (p) {
-          const prev = prevState.productos.find((x) => x.id === itemId)
+          const prev = prevState.productos.find((x) => x.id === itemIdEfectivo)
           if (puntoVentaIdAjuste) {
             if (cantidad) {
               ajustarStockPuntoVenta({
@@ -1453,6 +1651,16 @@ async function syncToSupabase(
               const v = p.variantes.find((x) => x.id === varianteId)
               if (v) supabase.from('producto_variantes').update({ stock: v.stock }).eq('id', v.id).then(logErr('stock de variante'))
             }
+          }
+          // Espejo sobre el insumo vinculado, si lo hay -- siempre columna
+          // plana en `insumos`, nunca stock_por_punto_venta.
+          const insumoVinculado = nextState.insumos.find((x) => x.productoVinculadoId === p.id)
+          if (insumoVinculado) {
+            supabase
+              .from('insumos')
+              .update({ stock: p.stock, costo: p.costo })
+              .eq('id', insumoVinculado.id)
+              .then(logErr('espejo de stock en insumo vinculado'))
           }
         }
       } else {
@@ -1579,6 +1787,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     plantillaGarantiaId: r.plantilla_garantia_id ?? undefined,
     diasDisponibles: r.dias_disponibles ?? undefined,
     puntoVentaId: r.punto_venta_id ?? undefined,
+    esInsumo: r.es_insumo ?? false,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 

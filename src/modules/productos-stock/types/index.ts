@@ -329,6 +329,16 @@ export interface Producto {
    * del cliente (default, sin cambios). No afecta a Compras/Kardex/
    * administración de catálogo, que siguen viendo todo el catálogo. */
   puntoVentaId?: string
+  /**
+   * Fase 34+: si es true, este producto TAMBIÉN funciona como insumo --
+   * aparece disponible para elegir en Formular Producto (ej. una tela que
+   * se vende suelta pero también se usa para confeccionar cortinas). Al
+   * marcarlo, el sistema crea/mantiene un registro espejo en `insumos`
+   * (con `productoVinculadoId` apuntando acá) cuyo stock y costo se
+   * sincronizan solos desde este producto -- no se cargan por separado.
+   * Ver `productoVinculadoDe`/`espejarInsumoVinculado` en data/store.tsx.
+   */
+  esInsumo?: boolean
   createdAt: string
 }
 
