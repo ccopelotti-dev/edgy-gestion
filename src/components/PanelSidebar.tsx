@@ -78,7 +78,7 @@ export function PanelSidebar({ nombreStaff }: { nombreStaff: string | null }) {
           onClick={abrirTradingHub}
           className="mt-2 flex w-full items-center justify-between rounded-md border border-white/10 px-3 py-2 text-left text-sm font-medium text-white/70 transition-colors hover:bg-white/10"
         >
-          Edgy Trading Hub
+          Personal Hub
           <span aria-hidden className="text-white/40">↗</span>
         </button>
       </nav>
