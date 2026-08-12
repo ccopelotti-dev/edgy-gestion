@@ -53,6 +53,44 @@ export function ClienteDetalle() {
   const [reenviando, setReenviando] = useState<string | null>(null)
   const [reenviado, setReenviado] = useState<string | null>(null)
 
+  // Fase 35: primer envío de invitación para cuentas full que todavía no
+  // tienen user_id (nunca se creó la cuenta de Auth) — a diferencia de
+  // reenviarAcceso, esto sí necesita la service_role key (crea la
+  // cuenta), así que pasa por la función de Netlify en vez de llamar a
+  // Supabase directo desde el navegador.
+  const [invitando, setInvitando] = useState<string | null>(null)
+  const [invitado, setInvitado] = useState<string | null>(null)
+  const [errorInvitar, setErrorInvitar] = useState<string | null>(null)
+
+  async function enviarInvitacion(usuarioClienteId: string) {
+    if (!id) return
+    setInvitando(usuarioClienteId)
+    setErrorInvitar(null)
+    const { data: sesion } = await supabase.auth.getSession()
+    const token = sesion?.session?.access_token
+    try {
+      const resp = await fetch('/.netlify/functions/invitar-admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ clienteId: id, usuarioClienteId }),
+      })
+      const json = await resp.json()
+      if (!json.ok) {
+        setErrorInvitar(json.error || 'No pudimos enviar la invitación')
+      } else {
+        setInvitado(usuarioClienteId)
+        await cargarTodo()
+      }
+    } catch (e) {
+      console.error('enviarInvitacion: error de red', e)
+      setErrorInvitar('No pudimos enviar la invitación')
+    }
+    setInvitando(null)
+  }
+
   async function reenviarAcceso(email: string) {
     setReenviando(email)
     setReenviado(null)
@@ -240,6 +278,7 @@ export function ClienteDetalle() {
 
       <div>
         <h2 className="mb-3 text-base font-medium text-gray-900">Equipo</h2>
+        {errorInvitar && <p className="mb-3 text-sm text-red-600">{errorInvitar}</p>}
         <div className="space-y-2">
           {usuarios.length === 0 && (
             <p className="text-sm text-gray-400">Todavía no hay nadie cargado.</p>
@@ -253,7 +292,21 @@ export function ClienteDetalle() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {u.auth_mode === 'full' && u.email && (
+                {u.auth_mode === 'full' && u.email && !u.user_id && (
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-brand-500 disabled:opacity-50"
+                    disabled={invitando === u.id}
+                    onClick={() => enviarInvitacion(u.id)}
+                  >
+                    {invitando === u.id
+                      ? 'Enviando...'
+                      : invitado === u.id
+                        ? 'Invitación enviada'
+                        : 'Enviar invitación'}
+                  </button>
+                )}
+                {u.auth_mode === 'full' && u.email && u.user_id && (
                   <>
                     <button
                       type="button"
