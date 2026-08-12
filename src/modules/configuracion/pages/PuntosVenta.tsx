@@ -161,6 +161,7 @@ export default function PuntosVenta() {
   const [logoUrlActual, setLogoUrlActual] = useState<string | null>(null)
   const [subiendoLogo, setSubiendoLogo] = useState(false)
   const [guardandoBranding, setGuardandoBranding] = useState(false)
+  const [errorBranding, setErrorBranding] = useState<string | null>(null)
 
   function abrirBranding(pv: PuntoVenta) {
     setBrandingAbiertoId(pv.id)
@@ -168,6 +169,7 @@ export default function PuntosVenta() {
     setColorMarcaLocal(pv.colorMarca ?? COLOR_MARCA_DEFAULT)
     setLogoUrlActual(pv.logoUrl)
     setLogoFile(null)
+    setErrorBranding(null)
   }
 
   async function handleSubirLogo(file: File) {
@@ -183,25 +185,35 @@ export default function PuntosVenta() {
   async function guardarBranding() {
     if (!brandingAbiertoId) return
     setGuardandoBranding(true)
-    await actualizarBranding(brandingAbiertoId, {
+    setErrorBranding(null)
+    const ok = await actualizarBranding(brandingAbiertoId, {
       nombreVisible: nombreVisible.trim() || null,
       colorMarca: colorMarcaLocal || null,
       logoUrl: logoUrlActual,
     })
     setGuardandoBranding(false)
-    setBrandingAbiertoId(null)
+    if (ok) {
+      setBrandingAbiertoId(null)
+    } else {
+      setErrorBranding('No pudimos guardar. Probá de nuevo -- si sigue fallando, avisame.')
+    }
   }
 
   async function quitarBrandingPropio() {
     if (!brandingAbiertoId) return
     setGuardandoBranding(true)
-    await actualizarBranding(brandingAbiertoId, {
+    setErrorBranding(null)
+    const ok = await actualizarBranding(brandingAbiertoId, {
       nombreVisible: null,
       colorMarca: null,
       logoUrl: null,
     })
     setGuardandoBranding(false)
-    setBrandingAbiertoId(null)
+    if (ok) {
+      setBrandingAbiertoId(null)
+    } else {
+      setErrorBranding('No pudimos guardar. Probá de nuevo -- si sigue fallando, avisame.')
+    }
   }
 
   if (cargandoCliente || cargando) {
@@ -502,6 +514,7 @@ export default function PuntosVenta() {
                 />
               </div>
             </div>
+            {errorBranding && <p className="text-sm text-red-500">{errorBranding}</p>}
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
             <Button variant="ghost" onClick={quitarBrandingPropio} disabled={guardandoBranding}>
