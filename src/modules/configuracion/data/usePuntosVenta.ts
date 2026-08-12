@@ -182,10 +182,25 @@ export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
       if ('nombreVisible' in datos) patch.nombre_visible = datos.nombreVisible ?? null
       if ('colorMarca' in datos) patch.color_marca = datos.colorMarca ?? null
 
-      const { error: errUpdate } = await supabase.from('puntos_venta').update(patch).eq('id', id)
+      // Ojo -- sin .select(), Postgrest devuelve "sin error" aunque RLS
+      // haya bloqueado la fila y no se haya tocado nada (0 filas
+      // afectadas no es un error para Postgrest). Con .select() se ve
+      // si realmente hubo una fila devuelta, así se puede distinguir un
+      // guardado real de uno que la política de seguridad frenó en
+      // silencio (ej. alguien sin permiso de admin del cliente).
+      const { data: filaActualizada, error: errUpdate } = await supabase
+        .from('puntos_venta')
+        .update(patch)
+        .eq('id', id)
+        .select('id')
 
       if (errUpdate) {
         setError('No pudimos actualizar el branding del local.')
+        return false
+      }
+
+      if (!filaActualizada || filaActualizada.length === 0) {
+        setError('No tenés permiso para editar este local, o la fila no existe.')
         return false
       }
 
