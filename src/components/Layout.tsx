@@ -21,7 +21,8 @@ function iniciales(nombre: string): string {
 }
 
 export function DashboardLayout() {
-  const { cliente, modulosActivos, debeCambiarEmail, cargando, error } = useClienteActual()
+  const { cliente, modulosActivos, brandingActual, debeCambiarEmail, cargando, error } =
+    useClienteActual()
   const { esStaff, cargando: cargandoStaff } = usePersonalEdgy()
   const navigate = useNavigate()
 
@@ -78,7 +79,14 @@ export function DashboardLayout() {
     return <CambiarEmailObligatorio />
   }
 
-  const colorMarca = cliente.color_marca ?? '#0C1A2E'
+  // Fase 36: brandingActual ya resuelve local propio vs. cliente -- acá
+  // solo se arma el contraste/bordes a partir de ese resultado.
+  const branding = brandingActual ?? {
+    nombre: cliente.nombre,
+    logoUrl: cliente.logo_url,
+    colorMarca: cliente.color_marca ?? '#0C1A2E',
+  }
+  const colorMarca = branding.colorMarca
   const contraste = colorDeContraste(colorMarca)
   const bordeLogo = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.5)' : 'rgba(32,31,27,0.35)'
   const fondoAvatar = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.18)' : 'rgba(32,31,27,0.12)'
@@ -90,7 +98,7 @@ export function DashboardLayout() {
 
   return (
     <div className="flex h-screen">
-      <Sidebar colorMarca={cliente.color_marca} modulos={modulosActivos} />
+      <Sidebar colorMarca={branding.colorMarca} modulos={modulosActivos} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <header
@@ -101,10 +109,10 @@ export function DashboardLayout() {
             className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[10px] border-[1.5px] border-dashed bg-white"
             style={{ borderColor: bordeLogo }}
           >
-            {cliente.logo_url ? (
+            {branding.logoUrl ? (
               <img
-                src={cliente.logo_url}
-                alt={cliente.nombre}
+                src={branding.logoUrl}
+                alt={branding.nombre}
                 className="h-full w-full rounded-[10px] object-cover"
               />
             ) : (
@@ -112,7 +120,7 @@ export function DashboardLayout() {
             )}
           </div>
           <span className="min-w-0 flex-1 truncate text-base font-medium" style={{ color: contraste }}>
-            {cliente.nombre}
+            {branding.nombre}
           </span>
 
           {/* Cuenta -- por ahora solo Cerrar sesión. Alertas (campana) y el
@@ -125,7 +133,7 @@ export function DashboardLayout() {
                 style={{ backgroundColor: fondoAvatar, color: contraste }}
                 title="Cuenta"
               >
-                {iniciales(cliente.nombre)}
+                {iniciales(branding.nombre)}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">

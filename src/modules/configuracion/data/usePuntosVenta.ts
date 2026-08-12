@@ -24,6 +24,13 @@ interface UsePuntosVentaResult {
    * todavía no tienen slug -- permite cargarlo/editarlo después sin
    * tener que recrear el punto de venta. */
   actualizarSlug: (id: string, slug: string | null) => Promise<boolean>
+  /** Fase 36: branding propio del local (logo/nombre visible/color).
+   * Cualquier campo en null borra el override y ese local vuelve a
+   * usar el branding del cliente. */
+  actualizarBranding: (
+    id: string,
+    datos: { logoUrl?: string | null; nombreVisible?: string | null; colorMarca?: string | null },
+  ) => Promise<boolean>
 }
 
 export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
@@ -164,5 +171,38 @@ export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
     [cargar],
   )
 
-  return { puntosVenta, cargando, error, crear, marcarPorDefecto, darDeBaja, actualizarSlug }
+  const actualizarBranding = useCallback(
+    async (
+      id: string,
+      datos: { logoUrl?: string | null; nombreVisible?: string | null; colorMarca?: string | null },
+    ) => {
+      setError(null)
+      const patch: Record<string, string | null> = {}
+      if ('logoUrl' in datos) patch.logo_url = datos.logoUrl ?? null
+      if ('nombreVisible' in datos) patch.nombre_visible = datos.nombreVisible ?? null
+      if ('colorMarca' in datos) patch.color_marca = datos.colorMarca ?? null
+
+      const { error: errUpdate } = await supabase.from('puntos_venta').update(patch).eq('id', id)
+
+      if (errUpdate) {
+        setError('No pudimos actualizar el branding del local.')
+        return false
+      }
+
+      await cargar()
+      return true
+    },
+    [cargar],
+  )
+
+  return {
+    puntosVenta,
+    cargando,
+    error,
+    crear,
+    marcarPorDefecto,
+    darDeBaja,
+    actualizarSlug,
+    actualizarBranding,
+  }
 }

@@ -105,6 +105,13 @@ export interface PuntoVenta {
    * (un local sin slug simplemente no tiene link propio todavía). */
   slug: string | null
   createdAt: string
+  /** Fase 36: branding propio de este local, para clientes multi-marca
+   * (ej. Punto Tex / Rúa bajo el mismo cliente). null en cualquiera de
+   * los tres = se usa el branding del cliente (clientes.logo_url/
+   * nombre/color_marca), sin cambios respecto a antes. */
+  logoUrl: string | null
+  nombreVisible: string | null
+  colorMarca: string | null
 }
 
 export const CATEGORIAS_IMPOSITIVAS: { value: CategoriaImpositiva; label: string }[] = [

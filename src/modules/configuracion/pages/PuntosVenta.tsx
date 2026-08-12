@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Loader2, MapPin, Plus, Star, StarOff, Trash2, Link2, Copy, Check } from 'lucide-react'
+import { Loader2, MapPin, Plus, Star, StarOff, Trash2, Link2, Copy, Check, Palette } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 import {
   Card,
   CardContent,
@@ -13,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -33,10 +35,30 @@ import { useClienteActual } from '@/hooks/useClienteActual'
 import { generarSlug, slugValido } from '@/lib/slug'
 import type { PuntoVenta } from '../types'
 
+// Fase 36: mismo bucket y convención de nombre de archivo que
+// Empresa.tsx (subirLogo) -- un logo de local y uno de cliente no
+// chocan porque el nombre de archivo lleva timestamp.
+async function subirLogoLocal(file: File): Promise<string | null> {
+  const ruta = `${Date.now()}-${file.name}`
+  const { data: subida, error } = await supabase.storage.from('logos-clientes').upload(ruta, file)
+  if (error || !subida) return null
+  return supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
+}
+
+const COLOR_MARCA_DEFAULT = '#D4537E'
+
 export default function PuntosVenta() {
   const { clienteId, cargando: cargandoCliente } = useClienteId()
-  const { puntosVenta, cargando, error, crear, marcarPorDefecto, darDeBaja, actualizarSlug } =
-    usePuntosVenta(clienteId)
+  const {
+    puntosVenta,
+    cargando,
+    error,
+    crear,
+    marcarPorDefecto,
+    darDeBaja,
+    actualizarSlug,
+    actualizarBranding,
+  } = usePuntosVenta(clienteId)
   // Fase 27d-2: necesitamos el slug del CLIENTE para armar el link
   // completo de cada local (`/menu/<slug cliente>/<slug local>`).
   const { cliente } = useClienteActual()
@@ -125,6 +147,61 @@ export default function PuntosVenta() {
     await navigator.clipboard.writeText(link)
     setCopiadoId(pv.id)
     setTimeout(() => setCopiadoId(null), 2000)
+  }
+
+  // Fase 36: branding propio por local -- solo tiene sentido ofrecerlo
+  // cuando ya hay más de un punto de venta (mismo criterio que el
+  // selector de puntos_venta en ClienteDetalle.tsx). Un cliente de un
+  // solo local sigue usando nada más el branding de Configuración >
+  // Empresa, sin este botón de más.
+  const [brandingAbiertoId, setBrandingAbiertoId] = useState<string | null>(null)
+  const [nombreVisible, setNombreVisible] = useState('')
+  const [colorMarcaLocal, setColorMarcaLocal] = useState(COLOR_MARCA_DEFAULT)
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoUrlActual, setLogoUrlActual] = useState<string | null>(null)
+  const [subiendoLogo, setSubiendoLogo] = useState(false)
+  const [guardandoBranding, setGuardandoBranding] = useState(false)
+
+  function abrirBranding(pv: PuntoVenta) {
+    setBrandingAbiertoId(pv.id)
+    setNombreVisible(pv.nombreVisible ?? '')
+    setColorMarcaLocal(pv.colorMarca ?? COLOR_MARCA_DEFAULT)
+    setLogoUrlActual(pv.logoUrl)
+    setLogoFile(null)
+  }
+
+  async function handleSubirLogo(file: File) {
+    setSubiendoLogo(true)
+    const url = await subirLogoLocal(file)
+    setSubiendoLogo(false)
+    if (url) {
+      setLogoFile(file)
+      setLogoUrlActual(url)
+    }
+  }
+
+  async function guardarBranding() {
+    if (!brandingAbiertoId) return
+    setGuardandoBranding(true)
+    await actualizarBranding(brandingAbiertoId, {
+      nombreVisible: nombreVisible.trim() || null,
+      colorMarca: colorMarcaLocal || null,
+      logoUrl: logoUrlActual,
+    })
+    setGuardandoBranding(false)
+    setBrandingAbiertoId(null)
+  }
+
+  async function quitarBrandingPropio() {
+    if (!brandingAbiertoId) return
+    setGuardandoBranding(true)
+    await actualizarBranding(brandingAbiertoId, {
+      nombreVisible: null,
+      colorMarca: null,
+      logoUrl: null,
+    })
+    setGuardandoBranding(false)
+    setBrandingAbiertoId(null)
   }
 
   if (cargandoCliente || cargando) {
@@ -332,11 +409,23 @@ export default function PuntosVenta() {
                       </Button>
                     </TableCell>
                     <TableCell className="text-right">
-                      {pv.activo && !pv.porDefecto && (
-                        <Button variant="ghost" size="sm" onClick={() => darDeBaja(pv.id)}>
-                          <Trash2 className="text-muted-foreground h-4 w-4" />
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-1">
+                        {puntosVenta.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Logo, nombre y color propios de este local"
+                            onClick={() => abrirBranding(pv)}
+                          >
+                            <Palette className="text-muted-foreground h-4 w-4" />
+                          </Button>
+                        )}
+                        {pv.activo && !pv.porDefecto && (
+                          <Button variant="ghost" size="sm" onClick={() => darDeBaja(pv.id)}>
+                            <Trash2 className="text-muted-foreground h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -345,6 +434,91 @@ export default function PuntosVenta() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Fase 36: branding propio del local (logo/nombre/color) -- para
+          clientes multi-marca (ej. Punto Tex / Rúa) donde cada
+          sucursal debe verse distinta al loguearse, sin tocar el
+          branding general de Configuración > Empresa. */}
+      <Dialog
+        open={brandingAbiertoId !== null}
+        onOpenChange={(v) => {
+          if (!v) setBrandingAbiertoId(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Marca de este local</DialogTitle>
+            <DialogDescription>
+              Si lo cargás, esto es lo que ve quien esté logueado con acceso restringido a este
+              local (header y sidebar) en vez del logo/nombre/color general del negocio.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white">
+                {logoUrlActual ? (
+                  <img src={logoUrlActual} alt="Logo del local" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-muted-foreground text-xs">Sin logo</span>
+                )}
+              </div>
+              <label className="text-sm font-medium text-brand-500 cursor-pointer">
+                {subiendoLogo ? 'Subiendo...' : 'Cambiar logo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={subiendoLogo}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleSubirLogo(file)
+                  }}
+                />
+              </label>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="nombre-visible-pv">Nombre visible (opcional)</Label>
+              <Input
+                id="nombre-visible-pv"
+                value={nombreVisible}
+                onChange={(e) => setNombreVisible(e.target.value)}
+                placeholder="Se ve en el header en vez del nombre del negocio"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="color-marca-pv">Color de marca</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="color-marca-pv"
+                  type="color"
+                  value={colorMarcaLocal}
+                  onChange={(e) => setColorMarcaLocal(e.target.value)}
+                  className="h-9 w-12 cursor-pointer rounded border"
+                />
+                <Input
+                  value={colorMarcaLocal}
+                  onChange={(e) => setColorMarcaLocal(e.target.value)}
+                  className="max-w-32"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="ghost" onClick={quitarBrandingPropio} disabled={guardandoBranding}>
+              Usar branding del negocio
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setBrandingAbiertoId(null)}>
+                Cancelar
+              </Button>
+              <Button onClick={guardarBranding} disabled={guardandoBranding || subiendoLogo}>
+                {guardandoBranding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Guardar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

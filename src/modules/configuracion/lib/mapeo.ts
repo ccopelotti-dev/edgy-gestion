@@ -85,5 +85,8 @@ export function filaAPuntoVenta(fila: Record<string, any>): PuntoVenta {
     fechaBaja: fila.fecha_baja,
     slug: fila.slug,
     createdAt: fila.created_at,
+    logoUrl: fila.logo_url,
+    nombreVisible: fila.nombre_visible,
+    colorMarca: fila.color_marca,
   }
 }

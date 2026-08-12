@@ -25,6 +25,20 @@ interface PuntoVentaLiviano {
   id: string
   alias: string
   activo: boolean
+  /** Fase 36: branding propio del local (null = usa el del cliente). */
+  logoUrl: string | null
+  nombreVisible: string | null
+  colorMarca: string | null
+}
+
+/** Fase 36: branding efectivo a mostrar en el header -- si el usuario
+ * está restringido a un punto de venta con branding propio cargado, se
+ * usa ese; si no, se cae al branding del cliente (comportamiento de
+ * siempre, sin cambios para clientes de un solo local). */
+interface BrandingActual {
+  nombre: string
+  logoUrl: string | null
+  colorMarca: string
 }
 
 interface UseClienteActualResult {
@@ -39,6 +53,9 @@ interface UseClienteActualResult {
    * null significa acceso global (ve/opera todos). No confundir con
    * rolActual.esAdmin: son restricciones independientes. */
   puntoVentaUsuarioId: string | null
+  /** Fase 36: branding ya resuelto (local propio si tiene, si no el
+   * del cliente) -- lo que debe pintar el header, no cliente.* directo. */
+  brandingActual: BrandingActual | null
   /** Fase 30: true = hay que interceptar la navegación y pedirle un
    * email nuevo antes de mostrarle cualquier pantalla del dashboard --
    * ver DashboardLayout (components/Layout.tsx). */
@@ -59,6 +76,7 @@ export function useClienteActual(): UseClienteActualResult {
   const [rolActual, setRolActual] = useState<RolActual | null>(null)
   const [puntosVenta, setPuntosVenta] = useState<PuntoVentaLiviano[]>([])
   const [puntoVentaUsuarioId, setPuntoVentaUsuarioId] = useState<string | null>(null)
+  const [brandingActual, setBrandingActual] = useState<BrandingActual | null>(null)
   const [debeCambiarEmail, setDebeCambiarEmail] = useState(false)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -78,6 +96,7 @@ export function useClienteActual(): UseClienteActualResult {
           setRolActual(null)
           setPuntosVenta([])
           setPuntoVentaUsuarioId(null)
+          setBrandingActual(null)
           setDebeCambiarEmail(false)
           setCargando(false)
         }
@@ -121,15 +140,38 @@ export function useClienteActual(): UseClienteActualResult {
       // no rompe nada).
       const { data: puntosVentaData } = await supabase
         .from('puntos_venta')
-        .select('id, alias, activo')
+        .select('id, alias, activo, logo_url, nombre_visible, color_marca')
         .eq('cliente_id', usuarioCliente.cliente_id)
         .order('alias')
 
       if (!activo) return
 
-      setCliente((clienteData as Cliente) ?? null)
-      setPuntosVenta((puntosVentaData as PuntoVentaLiviano[]) ?? [])
+      const puntosVentaLivianos: PuntoVentaLiviano[] = (puntosVentaData ?? []).map((fila: any) => ({
+        id: fila.id,
+        alias: fila.alias,
+        activo: fila.activo,
+        logoUrl: fila.logo_url,
+        nombreVisible: fila.nombre_visible,
+        colorMarca: fila.color_marca,
+      }))
+
+      const puntoVentaUsuario = usuarioCliente.punto_venta_id
+        ? puntosVentaLivianos.find((pv) => pv.id === usuarioCliente.punto_venta_id)
+        : null
+
+      const clienteResuelto = (clienteData as Cliente) ?? null
+      setCliente(clienteResuelto)
+      setPuntosVenta(puntosVentaLivianos)
       setPuntoVentaUsuarioId((usuarioCliente.punto_venta_id as string | null) ?? null)
+      setBrandingActual(
+        clienteResuelto
+          ? {
+              nombre: puntoVentaUsuario?.nombreVisible ?? clienteResuelto.nombre,
+              logoUrl: puntoVentaUsuario?.logoUrl ?? clienteResuelto.logo_url ?? null,
+              colorMarca: puntoVentaUsuario?.colorMarca ?? clienteResuelto.color_marca ?? '#0C1A2E',
+            }
+          : null,
+      )
       setDebeCambiarEmail(!!usuarioCliente.debe_cambiar_email)
       setModulosActivos(
         (clienteModulos ?? []).map((row: any) => ({
@@ -162,6 +204,7 @@ export function useClienteActual(): UseClienteActualResult {
     rolActual,
     puntosVenta,
     puntoVentaUsuarioId,
+    brandingActual,
     debeCambiarEmail,
     cargando,
     error,
