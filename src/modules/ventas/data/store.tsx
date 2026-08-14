@@ -556,7 +556,13 @@ function comprobanteToRow(c: Comprobante, clienteId: string) {
     tipo: c.tipo,
     modo_emision: c.modoEmision,
     numero: c.numero,
-    cliente_venta_id: c.clienteId,
+    // Fix (migración 0081): "Consumidor Final" es un cliente virtual
+    // (CONSUMIDOR_FINAL_ID, no persiste en clientes_venta) -- mandar
+    // ese id inventado a una columna uuid hacía fallar el INSERT en
+    // silencio (fire-and-forget, ver logErr) y el comprobante nunca
+    // llegaba a la base ni a ARCA. esClienteReal() ya existía para
+    // este caso, solo faltaba aplicarlo acá.
+    cliente_venta_id: esClienteReal(c.clienteId) ? c.clienteId : null,
     orden_id: c.ordenId ?? null,
     // Fase 27c: qué punto de venta (local/sucursal) emite este
     // comprobante -- null = fallback legado (clientes_arca_config.punto_venta),
