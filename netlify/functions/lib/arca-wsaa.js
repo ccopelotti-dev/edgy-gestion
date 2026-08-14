@@ -16,8 +16,15 @@
 // (arca-autorizar-comprobante.js) decide cómo cachearlo.
 // ============================================================
 
+import https from 'node:https'
 import forge from 'node-forge'
 import soap from 'soap'
+
+// Mismo workaround que arca-wsfev1.js: WSAA (wsaahomo/wsaa.afip.gov.ar)
+// también negocia TLS con parámetros DH viejos que OpenSSL 3 rechaza
+// por defecto ("dh key too small"). Ver el comentario en
+// arca-wsfev1.js para el detalle.
+https.globalAgent.options.ciphers = 'DEFAULT@SECLEVEL=1'
 
 export const WSAA_WSDL = {
   homologacion: 'https://wsaahomo.afip.gov.ar/ws/services/LoginCms?wsdl',

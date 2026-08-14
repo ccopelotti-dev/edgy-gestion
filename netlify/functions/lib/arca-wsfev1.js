@@ -25,7 +25,20 @@
 // en cualquier integración con ARCA.
 // ============================================================
 
+import https from 'node:https'
 import soap from 'soap'
+
+// Los servidores WS de ARCA/AFIP (wswhomo/servicios1) todavía negocian
+// TLS con parámetros Diffie-Hellman viejos (<2048 bits). OpenSSL 3 (el
+// que trae Node 18+ por defecto, incluido el runtime de Netlify
+// Functions) los rechaza de entrada con "dh key too small" -- error de
+// infraestructura de ARCA, no nuestro. Bajar el nivel de seguridad de
+// TLS a SECLEVEL=1 (el comportamiento por defecto de OpenSSL 1.1.1)
+// es el workaround estándar para integrar con este tipo de servicios
+// legacy desde Node moderno. Como cada función de Netlify corre en su
+// propio contenedor por invocación, esto no afecta a otras funciones
+// ni al resto del sitio.
+https.globalAgent.options.ciphers = 'DEFAULT@SECLEVEL=1'
 
 export const WSFEV1_WSDL = {
   homologacion: 'https://wswhomo.afip.gov.ar/wsfev1/service.asmx?WSDL',
