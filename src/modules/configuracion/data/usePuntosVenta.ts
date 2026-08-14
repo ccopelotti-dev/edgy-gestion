@@ -31,6 +31,16 @@ interface UsePuntosVentaResult {
     id: string,
     datos: { logoUrl?: string | null; nombreVisible?: string | null; colorMarca?: string | null },
   ) => Promise<boolean>
+  /** Fase 37: editar alias/número fiscal/dirección de un punto de venta
+   * ya existente -- hasta esta fase solo se podían cargar al crearlo,
+   * lo que hacía imposible corregir o asignar el número AFIP de una
+   * sucursal después (ej. Rúa en Punto Tex). Solo se mandan al patch
+   * los campos presentes en `datos` (mismo criterio que
+   * actualizarBranding). */
+  actualizarDatos: (
+    id: string,
+    datos: { alias?: string; numero?: string | null; direccion?: string | null },
+  ) => Promise<boolean>
 }
 
 export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
@@ -210,6 +220,42 @@ export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
     [cargar],
   )
 
+  const actualizarDatos = useCallback(
+    async (id: string, datos: { alias?: string; numero?: string | null; direccion?: string | null }) => {
+      setError(null)
+      const patch: Record<string, string | null> = {}
+      if ('alias' in datos && datos.alias !== undefined) patch.alias = datos.alias
+      if ('numero' in datos) patch.numero = datos.numero || null
+      if ('direccion' in datos) patch.direccion = datos.direccion || null
+
+      // Mismo patrón que actualizarBranding: pedimos .select() para
+      // distinguir "0 filas tocadas por RLS" de un guardado real.
+      const { data: filaActualizada, error: errUpdate } = await supabase
+        .from('puntos_venta')
+        .update(patch)
+        .eq('id', id)
+        .select('id')
+
+      if (errUpdate) {
+        setError(
+          errUpdate.code === '23505'
+            ? 'Ya existe un punto de venta con ese número.'
+            : 'No pudimos actualizar el punto de venta.',
+        )
+        return false
+      }
+
+      if (!filaActualizada || filaActualizada.length === 0) {
+        setError('No tenés permiso para editar este local, o la fila no existe.')
+        return false
+      }
+
+      await cargar()
+      return true
+    },
+    [cargar],
+  )
+
   return {
     puntosVenta,
     cargando,
@@ -219,5 +265,6 @@ export function usePuntosVenta(clienteId: string | null): UsePuntosVentaResult {
     darDeBaja,
     actualizarSlug,
     actualizarBranding,
+    actualizarDatos,
   }
 }

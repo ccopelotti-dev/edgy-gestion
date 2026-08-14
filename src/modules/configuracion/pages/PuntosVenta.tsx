@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, MapPin, Plus, Star, StarOff, Trash2, Link2, Copy, Check, Palette } from 'lucide-react'
+import { Loader2, MapPin, Plus, Star, StarOff, Trash2, Link2, Copy, Check, Palette, Pencil } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import {
   Card,
@@ -58,6 +58,7 @@ export default function PuntosVenta() {
     darDeBaja,
     actualizarSlug,
     actualizarBranding,
+    actualizarDatos,
   } = usePuntosVenta(clienteId)
   // Fase 27d-2: necesitamos el slug del CLIENTE para armar el link
   // completo de cada local (`/menu/<slug cliente>/<slug local>`).
@@ -147,6 +148,46 @@ export default function PuntosVenta() {
     await navigator.clipboard.writeText(link)
     setCopiadoId(pv.id)
     setTimeout(() => setCopiadoId(null), 2000)
+  }
+
+  // Fase 37: editar alias/número fiscal/dirección de un punto de venta
+  // ya existente -- hasta esta fase esos 3 campos solo se podían
+  // cargar al crear el punto de venta, así que era imposible corregir
+  // o asignar el número AFIP de una sucursal después de creada.
+  const [editarAbiertoId, setEditarAbiertoId] = useState<string | null>(null)
+  const [editAlias, setEditAlias] = useState('')
+  const [editNumero, setEditNumero] = useState('')
+  const [editDireccion, setEditDireccion] = useState('')
+  const [editGuardando, setEditGuardando] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  function abrirEditar(pv: PuntoVenta) {
+    setEditarAbiertoId(pv.id)
+    setEditAlias(pv.alias)
+    setEditNumero(pv.numero ?? '')
+    setEditDireccion(pv.direccion ?? '')
+    setEditError(null)
+  }
+
+  async function guardarEdicion() {
+    if (!editarAbiertoId) return
+    if (!editAlias.trim()) {
+      setEditError('El alias es obligatorio.')
+      return
+    }
+    setEditGuardando(true)
+    setEditError(null)
+    const ok = await actualizarDatos(editarAbiertoId, {
+      alias: editAlias.trim(),
+      numero: editNumero.trim() || null,
+      direccion: editDireccion.trim() || null,
+    })
+    setEditGuardando(false)
+    if (ok) {
+      setEditarAbiertoId(null)
+    } else {
+      setEditError('No pudimos guardar. Revisá que el número no esté repetido en otro local.')
+    }
   }
 
   // Fase 36: branding propio por local -- solo tiene sentido ofrecerlo
@@ -422,6 +463,14 @@ export default function PuntosVenta() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Editar alias, número fiscal y dirección"
+                          onClick={() => abrirEditar(pv)}
+                        >
+                          <Pencil className="text-muted-foreground h-4 w-4" />
+                        </Button>
                         {puntosVenta.length > 1 && (
                           <Button
                             variant="ghost"
@@ -529,6 +578,61 @@ export default function PuntosVenta() {
                 Guardar
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fase 37: editar alias/número fiscal/dirección de un punto de
+          venta ya existente (ej. asignarle o corregir el número AFIP
+          de una sucursal después de creada). */}
+      <Dialog
+        open={editarAbiertoId !== null}
+        onOpenChange={(v) => {
+          if (!v) setEditarAbiertoId(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar punto de venta</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-alias">Alias</Label>
+              <Input
+                id="edit-alias"
+                value={editAlias}
+                onChange={(e) => setEditAlias(e.target.value)}
+                placeholder="Casa Central, Sucursal Norte..."
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-numero">Número fiscal (opcional)</Label>
+              <Input
+                id="edit-numero"
+                value={editNumero}
+                onChange={(e) => setEditNumero(e.target.value)}
+                placeholder="0001"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-direccion">Dirección comercial (opcional)</Label>
+              <Input
+                id="edit-direccion"
+                value={editDireccion}
+                onChange={(e) => setEditDireccion(e.target.value)}
+                placeholder="Calle, número, localidad de este local"
+              />
+            </div>
+            {editError && <p className="text-sm text-red-500">{editError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditarAbiertoId(null)}>
+              Cancelar
+            </Button>
+            <Button onClick={guardarEdicion} disabled={editGuardando}>
+              {editGuardando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Guardar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

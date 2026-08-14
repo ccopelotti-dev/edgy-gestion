@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save, ShieldCheck, Zap, CreditCard, Clock, Tag } from 'lucide-react'
+import { Loader2, Save, ShieldCheck, Zap, CreditCard, Clock, Tag, Pencil, Lock } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -158,6 +158,14 @@ export default function Empresa() {
   const [guardandoArca, setGuardandoArca] = useState(false)
   const [mensajeArca, setMensajeArca] = useState<string | null>(null)
   const [errorArca, setErrorArca] = useState<string | null>(null)
+
+  // Fase 37b: Provincia/Localidad/CP quedan bloqueados por defecto --
+  // cambian poco (solo si el negocio se muda de domicilio) y un click
+  // sin querer ahí puede desalinear la factura real con lo que ARCA
+  // tiene registrado. Categoría impositiva/Personería/Inicio de
+  // actividades/N° IIBB directamente pasan a "Datos protegidos"
+  // (solo Edgy los edita) porque esos NUNCA deberían cambiar solos.
+  const [domicilioEditable, setDomicilioEditable] = useState(false)
 
   const [pagoEstado, setPagoEstado] = useState<EstadoPago | null>(null)
   const [formPago, setFormPago] = useState<FormPago>(FORM_PAGO_VACIO)
@@ -584,6 +592,47 @@ export default function Empresa() {
             <Label>Subdominio</Label>
             <Input value={empresa.slug ?? '—'} disabled />
           </div>
+          {/* Fase 37b: estos cuatro salen de la constancia de ARCA y no
+              deberían cambiar nunca por su cuenta -- un edit accidental
+              acá puede romper la facturación real. Si el negocio migra
+              de categoría o corrige el N° de IIBB, que nos escriban. */}
+          <div className="flex flex-col gap-1.5">
+            <Label>Categoría impositiva</Label>
+            <Input
+              value={
+                CATEGORIAS_IMPOSITIVAS.find((c) => c.value === empresa.categoriaImpositiva)?.label ??
+                empresa.categoriaImpositiva ??
+                '—'
+              }
+              disabled
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Personería</Label>
+            <Input
+              value={
+                PERSONERIAS.find((p) => p.value === empresa.personeria)?.label ??
+                empresa.personeria ??
+                '—'
+              }
+              disabled
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Inicio de actividades</Label>
+            <Input
+              value={
+                empresa.inicioActividades
+                  ? new Date(`${empresa.inicioActividades}T00:00:00`).toLocaleDateString('es-AR')
+                  : '—'
+              }
+              disabled
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>N.º de inscripción en IIBB</Label>
+            <Input value={empresa.ingresosBrutosNumero ?? '—'} disabled />
+          </div>
         </CardContent>
       </Card>
 
@@ -595,58 +644,36 @@ export default function Empresa() {
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label>Categoría impositiva</Label>
-            <Select
-              value={form.categoriaImpositiva}
-              onValueChange={(v) => setForm({ ...form, categoriaImpositiva: v })}
+          {/* Fase 37b: domicilio fiscal bloqueado por defecto -- cambia
+              poco (solo ante una mudanza) pero no tan poco como para
+              mandarlo a Datos protegidos; el dueño del negocio lo puede
+              corregir él mismo, con un click de más de por medio para
+              evitar un edit accidental. */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-3 sm:col-span-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Lock className="text-muted-foreground h-3.5 w-3.5" />
+              <span className="text-muted-foreground">
+                Provincia, localidad y código postal están bloqueados. Editalos solo si el negocio
+                cambió de domicilio.
+              </span>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDomicilioEditable((v) => !v)}
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccioná una categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                {CATEGORIAS_IMPOSITIVAS.map((c) => (
-                  <SelectItem key={c.value} value={c.value}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <Pencil className="mr-1.5 h-3.5 w-3.5" />
+              {domicilioEditable ? 'Bloquear' : 'Editar'}
+            </Button>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Personería</Label>
-            <Select
-              value={form.personeria}
-              onValueChange={(v) => setForm({ ...form, personeria: v })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccioná" />
-              </SelectTrigger>
-              <SelectContent>
-                {PERSONERIAS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="inicio">Inicio de actividades</Label>
-            <Input
-              id="inicio"
-              type="date"
-              value={form.inicioActividades}
-              onChange={(e) => setForm({ ...form, inicioActividades: e.target.value })}
-            />
-          </div>
-          <div />
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="provincia">Provincia</Label>
             <Input
               id="provincia"
               value={form.provincia}
               onChange={(e) => setForm({ ...form, provincia: e.target.value })}
+              disabled={!domicilioEditable}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -655,6 +682,7 @@ export default function Empresa() {
               id="localidad"
               value={form.localidad}
               onChange={(e) => setForm({ ...form, localidad: e.target.value })}
+              disabled={!domicilioEditable}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -663,6 +691,7 @@ export default function Empresa() {
               id="cp"
               value={form.codigoPostal}
               onChange={(e) => setForm({ ...form, codigoPostal: e.target.value })}
+              disabled={!domicilioEditable}
             />
           </div>
           {/* Fase 28: Ingresos Brutos -- exigido por el Anexo II de la RG
@@ -686,19 +715,6 @@ export default function Empresa() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="iibb-numero">N.º de inscripción en IIBB</Label>
-            <Input
-              id="iibb-numero"
-              placeholder="Igual al CUIT si es Convenio Multilateral"
-              value={form.ingresosBrutosNumero}
-              onChange={(e) => setForm({ ...form, ingresosBrutosNumero: e.target.value })}
-              disabled={
-                form.ingresosBrutosCondicion === 'exento' ||
-                form.ingresosBrutosCondicion === 'no_contribuyente'
-              }
-            />
           </div>
           {/* Fase 28: RG 5614/2024 -- Régimen de Transparencia Fiscal al
               Consumidor. Algunas provincias que adhirieron exigen mostrar
