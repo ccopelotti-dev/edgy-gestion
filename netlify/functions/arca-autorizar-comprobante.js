@@ -196,8 +196,12 @@ export default async (req) => {
   }
 
   // ── 3) Receptor (cliente_venta, o Consumidor Final) ─────────────
+  // Fix (migración 0081): cliente_venta_id ahora llega en null para
+  // Consumidor Final (antes llegaba el id inventado '__consumidor_final__',
+  // que rompía el INSERT por no ser un uuid válido) -- hay que tratar
+  // ambos casos como "sin cliente real" acá.
   let receptor
-  if (comprobante.cliente_venta_id === CONSUMIDOR_FINAL_ID) {
+  if (!comprobante.cliente_venta_id || comprobante.cliente_venta_id === CONSUMIDOR_FINAL_ID) {
     receptor = CONSUMIDOR_FINAL
   } else {
     const { data: clienteVenta, error: clienteError } = await supabaseAdmin
