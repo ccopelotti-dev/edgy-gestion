@@ -446,10 +446,6 @@ export async function generarComprobantePdf(
   // Nota de crédito/débito) -- el Presupuesto no manda `letraFiscal`.
   if (conRecuadroFiscal) {
     const yBox = y
-    // Fase 38c: 28 -> 34 -- la fila de contactos pasó de horizontal a
-    // vertical (WhatsApp / Instagram / Web, uno debajo del otro, en
-    // ese orden), así que la columna del emisor necesita más alto.
-    const hBox = 34
     const xColA = marginX
     const xDivisor1 = marginX + 94
     const xDivisor2 = xDivisor1 + 22
@@ -460,12 +456,10 @@ export async function generarComprobantePdf(
     // finas separando las 3 zonas (emisor / letra / comprobante), estilo
     // minimalista. La línea horizontal de cierre (antes de "Cliente:")
     // es la que reemplaza al borde inferior, más abajo.
-    // Fase 38f: las líneas ya no bajan hasta el final de la caja (que
-    // ahora es alta por la lista vertical de contactos) -- solo
-    // acompañan al bloque de la letra fiscal, arriba, más cortas.
-    // Fase 38g: Carlos las quiso todavía más ceñidas al bloque
-    // letra+COD/S/N (que termina en yBox+17.5) -- casi sin aire debajo.
-    const hLineas = 18.5
+    // Fase 38f/38g/38h: las líneas ya no bajan hasta el final de la
+    // caja -- acompañan solo al bloque de la letra fiscal (que ahora
+    // arranca más arriba y más compacto, ver yLetra más abajo).
+    const hLineas = 15
     doc.setDrawColor(190, 190, 190)
     doc.setLineWidth(0.25)
     doc.line(xDivisor1, yBox, xDivisor1, yBox + hLineas)
@@ -545,16 +539,18 @@ export async function generarComprobantePdf(
     // quedar centrada en todo el alto de la caja (que ahora es alta
     // por la lista vertical de contactos).
     const xLetra = (xDivisor1 + xDivisor2) / 2
-    const yLetra = yBox + 12
+    // Fase 38h: bloque letra+código más compacto (20->18, gap 5.5->4)
+    // para que quepa entero dentro de hLineas=15 con un pelo de aire.
+    const yLetra = yBox + 10.5
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(20)
+    doc.setFontSize(18)
     doc.setTextColor('#222222')
     doc.text(comprobante.letraFiscal!, xLetra, yLetra, { align: 'center' })
     doc.setFontSize(6)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor('#777777')
     const cod = comprobante.afip?.tipoComprobanteAfip
-    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, yLetra + 5.5, { align: 'center' })
+    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, yLetra + 4, { align: 'center' })
 
     // (b) Comprobante -- Fase 38c: tamaños bajados en línea con el
     // resto de la caja superior.
@@ -594,26 +590,48 @@ export async function generarComprobantePdf(
     // Fase 38c: línea fina de cierre de la zona superior -- reemplaza
     // al borde inferior del recuadro que sacamos arriba, separa el
     // bloque emisor/comprobante del bloque de datos del cliente.
+    // Fase 38h: antes usaba una altura fija (hBox=34, pensada para el
+    // peor caso -- titular + dirección + condición IVA + 3 contactos a
+    // la vez). Carlos pidió subir esta línea para no regalarle espacio
+    // de más a la tabla de ítems cuando el negocio no tiene tantos
+    // datos cargados -- ahora se calcula según lo que realmente se
+    // dibujó en cada columna (yA/yB), con un margen chico.
+    const yCierre = Math.max(yA, yB) + 3
     doc.setDrawColor(210, 210, 210)
     doc.setLineWidth(0.2)
-    doc.line(xColA, yBox + hBox, xColBFin, yBox + hBox)
+    doc.line(xColA, yCierre, xColBFin, yCierre)
 
-    y = yBox + hBox + 6
+    y = yCierre + 5
   }
 
   // ─── Datos del cliente + condición de venta ──────────────────
   // Fase 38b: se agregan dirección/teléfono/condición de IVA cuando
   // están cargados -- antes solo se mostraba nombre y documento.
-  doc.setTextColor('#3a3a3a')
+  // Fase 38h: Carlos pidió unificar tamaños -- "Cliente:" y "Cond. de
+  // venta:" pasan al tamaño chico estándar (7.2, igual que "25 de Mayo
+  // 152"/CUIT/IIBB de la caja de arriba), y el NOMBRE del cliente en
+  // particular pasa a negrita al mismo tamaño que el titular (8.3),
+  // para que se note quién es el destinatario del comprobante.
+  const labelCliente = 'Cliente: '
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9.5)
-  doc.text(`Cliente: ${comprobante.clienteNombre}`, marginX, y)
+  doc.setFontSize(7.2)
+  doc.setTextColor('#555555')
+  doc.text(labelCliente, marginX, y)
+  const anchoLabelCliente = doc.getTextWidth(labelCliente)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(8.3)
+  doc.setTextColor('#222222')
+  doc.text(comprobante.clienteNombre, marginX + anchoLabelCliente, y)
   if (comprobante.condicionVenta) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.2)
+    doc.setTextColor('#555555')
     doc.text(`Cond. de venta: ${comprobante.condicionVenta}`, pageWidth - marginX, y, { align: 'right' })
   }
-  y += 5
+  y += 4.5
 
-  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7.2)
   doc.setTextColor('#666666')
   if (comprobante.clienteDireccion || comprobante.clienteTelefono) {
     const partesContacto = [
@@ -621,12 +639,15 @@ export async function generarComprobantePdf(
       comprobante.clienteTelefono ? `Tel. ${comprobante.clienteTelefono}` : null,
     ].filter(Boolean)
     doc.text(partesContacto.join('  ·  '), marginX, y)
-    y += 4.5
+    y += 4
   }
   if (comprobante.clienteDocumento || comprobante.clienteCondicionIva) {
+    // Fase 38h: `clienteDocumento` ya viene con el prefijo del tipo de
+    // documento resuelto ("CUIT 20227014734", "DNI 30111222", etc.) --
+    // ver pdfComprobantes.ts, que es quien conoce la tabla de tipos.
     const partesFiscales = [comprobante.clienteDocumento, comprobante.clienteCondicionIva].filter(Boolean)
     doc.text(partesFiscales.join('  ·  '), marginX, y)
-    y += 4.5
+    y += 4
   }
   y += 1
 

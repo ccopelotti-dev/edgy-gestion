@@ -25,7 +25,13 @@ import { generarReciboPdf } from '@/lib/comprobantes-pdf/generarReciboPdf';
 import type { Cliente as ClienteEmpresa } from '@/types';
 import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE } from './format';
 import type { Cliente, Cobro, Comprobante, Presupuesto } from '../types';
-import { CONDICION_IVA_LABEL, CONSUMIDOR_FINAL_ID, MEDIO_PAGO_LABEL, labelTipoComprobante } from '../types';
+import {
+  CONDICION_IVA_LABEL,
+  CONSUMIDOR_FINAL_ID,
+  MEDIO_PAGO_LABEL,
+  TIPO_DOCUMENTO_LABEL,
+  labelTipoComprobante,
+} from '../types';
 
 // Fase 38b: forma mínima de un punto de venta que necesita el PDF --
 // solo id + dirección, para no acoplar este lib al tipo completo
@@ -107,8 +113,15 @@ export async function descargarComprobantePdf(
     numero: formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
     fecha: formatDate(comp.fecha),
     clienteNombre: cliente?.nombre ?? clienteNombreFallback,
+    // Fase 38h: prefijo con el tipo real de documento (CUIT/CUIL/DNI/
+    // Otro) en vez de mostrar el número pelado -- Carlos lo pidió
+    // explícito ("Agregar la palabra CUIT antes del número"). Se
+    // resuelve acá (no en el motor de PDF) porque es este módulo el
+    // que conoce `Cliente.tipoDocumento` y su tabla de labels.
     clienteDocumento:
-      cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.documento : null,
+      cliente && cliente.id !== CONSUMIDOR_FINAL_ID
+        ? `${TIPO_DOCUMENTO_LABEL[cliente.tipoDocumento]} ${cliente.documento}`
+        : null,
     // Fase 38b: datos de contacto/fiscales del cliente, cuando están
     // cargados -- antes el PDF solo mostraba nombre y documento.
     clienteDireccion: cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.direccion ?? null : null,
