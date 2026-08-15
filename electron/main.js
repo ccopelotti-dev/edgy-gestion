@@ -81,6 +81,29 @@ function crearVentanaPrincipal() {
   // navegador, como TradingView Desktop / X Desktop.
   Menu.setApplicationMenu(null);
 
+  // Bug real (15/08/2026): un archivo faltante en el empaquetado
+  // (onboarding.html no estaba en `files` de electron/package.json) hizo
+  // que loadFile() fallara y la ventana quedara en blanco SIN ningún
+  // error visible -- nada avisaba qué había pasado. Este handler cubre
+  // cualquier fallo de carga futuro (falta de internet, sitio caído,
+  // archivo faltante de vuelta, etc.): en vez de blanco silencioso,
+  // muestra un mensaje legible con botón de reintentar.
+  ventanaPrincipal.webContents.on('did-fail-load', (_evt, errorCode, errorDescription) => {
+    if (errorCode === -3) return; // ERR_ABORTED -- navegación cancelada, no es un fallo real
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Edgy Gestión</title></head>
+      <body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+        font-family:system-ui,sans-serif;background:#f8fafc;color:#334155;text-align:center;">
+        <div style="max-width:420px;padding:24px;">
+          <h2 style="margin:0 0 8px;color:#0f172a;">No se pudo cargar Edgy Gestión</h2>
+          <p style="margin:0 0 16px;font-size:14px;">${errorDescription || 'Error de carga'} (código ${errorCode}).<br>
+            Revisá tu conexión a internet e intentá de nuevo.</p>
+          <button onclick="location.reload()" style="padding:10px 20px;border:0;border-radius:6px;
+            background:#0f6e56;color:#fff;font-size:14px;cursor:pointer;">Reintentar</button>
+        </div>
+      </body></html>`;
+    ventanaPrincipal.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  });
+
   const config = leerConfig();
   const urlApp = urlDelNegocio(config);
   if (urlApp) {

@@ -16,7 +16,8 @@
     },
     "files": [
       "main.js",
-      "preload.js"
+      "preload.js",
+      "onboarding.html"
     ],
     "win": {
       "target": "nsis"
