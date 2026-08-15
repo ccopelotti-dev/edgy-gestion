@@ -8,6 +8,7 @@ import {
   DollarSign,
   PackagePlus,
   SlidersHorizontal,
+  Search,
 } from 'lucide-react'
 import {
   Dialog,
@@ -49,6 +50,10 @@ interface StockItem {
   varianteId?: string
   /** Para el filtro por Rubro (ambos, Producto e Insumo, tienen rubroId). */
   rubroId?: string
+  /** Solo Producto tiene código/código de barras -- Insumo no. Se suman acá
+   * para poder buscarlos junto con el nombre (igual que en Productos.tsx). */
+  codigo?: string
+  codigoBarras?: string
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -58,6 +63,7 @@ export default function Stock() {
 
   const [soloAlertas, setSoloAlertas] = useState(false)
   const [rubroFilter, setRubroFilter] = useState('')
+  const [search, setSearch] = useState('')
 
   // Modal states
   const [recibirItem, setRecibirItem] = useState<StockItem | null>(null)
@@ -89,6 +95,8 @@ export default function Stock() {
             productoId: p.id,
             varianteId: v.id,
             rubroId: p.rubroId,
+            codigo: p.codigo,
+            codigoBarras: p.codigoBarras,
           }))
         }
         return [
@@ -101,6 +109,8 @@ export default function Stock() {
             costo: p.costo,
             unidadAbrev: unidadAbrev(p.unidadVenta),
             rubroId: p.rubroId,
+            codigo: p.codigo,
+            codigoBarras: p.codigoBarras,
           },
         ]
       })
@@ -140,12 +150,22 @@ export default function Stock() {
 
   // Filtered list
   const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase()
     return items.filter((i) => {
       if (soloAlertas && !(i.stock <= 0 || i.stock < i.minimo)) return false
       if (rubroFilter && i.rubroId !== rubroFilter) return false
+      if (
+        q &&
+        !(
+          i.nombre.toLowerCase().includes(q) ||
+          (i.codigo ?? '').toLowerCase().includes(q) ||
+          (i.codigoBarras ?? '').toLowerCase().includes(q)
+        )
+      )
+        return false
       return true
     })
-  }, [items, soloAlertas, rubroFilter])
+  }, [items, soloAlertas, rubroFilter, search])
 
   // Handlers
   function handleRecibir() {
@@ -224,6 +244,15 @@ export default function Stock() {
 
       {/* Filter toggle */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 w-full sm:max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            className={cn(inputClass, 'pl-9')}
+            placeholder="Buscar por nombre, codigo o cód. de barras..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
           <input
             type="checkbox"
