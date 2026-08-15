@@ -52,6 +52,10 @@ const PAGE_HEIGHT = 150
 export interface EmpresaParaPdf {
   nombre: string
   cuit?: string | null
+  /** Domicilio FISCAL -- Fase 38b: dejó de imprimirse en el PDF (era
+   * un dato que Carlos no quería publicar). Se mantiene en el tipo por
+   * si algún otro documento del motor lo sigue necesitando, pero
+   * `generarComprobantePdf` ya no lo dibuja en ningún lado. */
   direccion?: string | null
   telefono?: string | null
   /** URL pública (Supabase Storage). Si falla la descarga o el
@@ -72,6 +76,16 @@ export interface EmpresaParaPdf {
    * se imprime la alícuota de IIBB declarada acá. */
   mostrarIibbAlicuota?: boolean
   iibbAlicuota?: number | null
+  /** Fase 38b: nombre y apellido (o razón social) del titular tal como
+   * figura ante ARCA -- Carlos lo pidió explícito en el recuadro
+   * emisor, además del nombre de fantasía que ya va en la banda. */
+  titular?: string | null
+  /** Fase 38b: info comercial opcional (Configuración > Empresa),
+   * distinta de los datos fiscales -- se imprime con un pictograma al
+   * lado en el recuadro emisor. */
+  sitioWeb?: string | null
+  instagram?: string | null
+  whatsappComercial?: string | null
 }
 
 /** Leyenda de condición de IVA del emisor -- Anexo II RG 1415, espacio
@@ -157,11 +171,26 @@ export interface ComprobanteParaPdf {
   fechaIso?: string
   clienteNombre: string
   clienteDocumento?: string | null
+  /** Fase 38b: datos adicionales del cliente, todos opcionales -- si
+   * no están cargados, esa línea simplemente no se dibuja. */
+  clienteDireccion?: string | null
+  clienteTelefono?: string | null
+  /** Ya resuelta a texto (ej. "IVA Responsable Inscripto"), no el
+   * código -- el motor de PDF no conoce la tabla de condiciones de IVA
+   * del dominio de Ventas. */
+  clienteCondicionIva?: string | null
   /** Anexo II RG 1415, inciso e) -- condición de venta (Contado,
    * Cuenta corriente, o el medio de pago puntual). Opcional: los
    * Presupuestos no tienen medio de pago todavía, así que no la
    * incluyen y esa línea simplemente no se dibuja. */
   condicionVenta?: string
+  /** Fase 38b: dirección del PUNTO DE VENTA que emitió este
+   * comprobante (no el domicilio fiscal del cliente/empresa, que dejó
+   * de publicarse) -- se resuelve en pdfComprobantes.ts a partir de
+   * `Comprobante.puntoVentaId`. Si el comprobante no tiene punto de
+   * venta asociado (clientes de un solo local, o comprobantes viejos)
+   * queda undefined y esa línea del recuadro simplemente no se dibuja. */
+  puntoVentaDireccion?: string | null
   items: ItemParaPdf[]
   subtotal: number
   descuentoGeneral?: number
@@ -217,9 +246,13 @@ function hexToRgb(hex: string): [number, number, number] {
 /** Mezcla un color con blanco (0 = el color tal cual, 1 = blanco puro) -- se
  * usa para el fondo clarito del total, sin depender de canal alpha (jsPDF no
  * soporta fill con transparencia de forma simple). */
-function aclarar(hex: string, factor: number): [number, number, number] {
+// Fase 38b: oscurece el color de marca hacia el negro un `factor`
+// (0-1). Se usa en el recuadro de Total para lograr contraste real
+// contra el texto blanco (antes se aclaraba el color y se escribía
+// en ese mismo color, con poco contraste).
+function oscurecer(hex: string, factor: number): [number, number, number] {
   const [r, g, b] = hexToRgb(hex)
-  const mezclar = (canal: number) => Math.round(canal + (255 - canal) * factor)
+  const mezclar = (canal: number) => Math.round(canal * (1 - factor))
   return [mezclar(r), mezclar(g), mezclar(b)]
 }
 
@@ -249,6 +282,52 @@ async function logoADataUrl(
  * gráfica: PtoVta a 4 dígitos - CbteNro a 8 dígitos (ej "0001-00000094"). */
 function formatNumeroFiscal(puntoVenta: number, numeroComprobante: number): string {
   return `${String(puntoVenta).padStart(4, '0')}-${String(numeroComprobante).padStart(8, '0')}`
+}
+
+/**
+ * Fase 38b: pictogramas genéricos para la línea de info comercial
+ * (web/Instagram/WhatsApp) -- dibujados a mano con las primitivas
+ * vectoriales de jsPDF, a propósito NO son los logos de marca reales
+ * (esos son assets con derechos de autor/marca registrada que no
+ * corresponde reproducir acá). Solo dan una referencia visual rápida
+ * de qué tipo de dato es cada uno.
+ */
+function dibujarIconoContacto(
+  doc: jsPDF,
+  tipo: 'web' | 'instagram' | 'whatsapp',
+  x: number,
+  y: number,
+  size: number,
+): void {
+  doc.setDrawColor(120, 120, 120)
+  doc.setLineWidth(0.2)
+  const r = size / 2
+  const cx = x + r
+  const cy = y + r
+  switch (tipo) {
+    case 'web':
+      // Globo terráqueo simplificado: círculo + meridiano + ecuador.
+      doc.circle(cx, cy, r, 'S')
+      doc.line(x, cy, x + size, cy)
+      doc.ellipse(cx, cy, r * 0.45, r, 'S')
+      break
+    case 'instagram':
+      // Pictograma tipo "cámara": cuadrado redondeado + lente + punto.
+      doc.roundedRect(x, y, size, size, size * 0.28, size * 0.28, 'S')
+      doc.circle(cx, cy, r * 0.5, 'S')
+      doc.circle(x + size * 0.8, y + size * 0.2, size * 0.06, 'F')
+      break
+    case 'whatsapp':
+      // Globo de diálogo genérico con colita.
+      doc.roundedRect(x, y, size, size * 0.8, size * 0.32, size * 0.32, 'S')
+      doc.triangle(
+        x + size * 0.18, y + size * 0.78,
+        x + size * 0.4, y + size * 0.78,
+        x + size * 0.18, y + size * 1.02,
+        'S',
+      )
+      break
+  }
 }
 
 /**
@@ -300,13 +379,12 @@ export async function generarComprobantePdf(
 
   doc.setTextColor('#ffffff')
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(12)
-  doc.text(empresa.nombre, textoX, 9)
-  if (empresa.direccion) {
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.5)
-    doc.text(empresa.direccion, textoX, 14.5)
-  }
+  doc.setFontSize(13)
+  // Fase 38b: la banda ya NO muestra el domicilio fiscal (Carlos lo
+  // sacó explícitamente -- "esa no se publica"). Queda solo el nombre
+  // de fantasía; el resto de los datos del emisor vive en el recuadro
+  // de abajo.
+  doc.text(empresa.nombre, textoX, 11)
 
   // Sin recuadro fiscal (Presupuesto) -- encabezado simple clásico,
   // tipo/número/fecha arriba a la derecha de la banda.
@@ -342,23 +420,46 @@ export async function generarComprobantePdf(
     doc.line(xDivisor1, yBox, xDivisor1, yBox + hBox)
     doc.line(xDivisor2, yBox, xDivisor2, yBox + hBox)
 
-    // (a) Emisor
+    // (a) Emisor -- Fase 38b: titular como figura en ARCA (no el
+    // nombre de fantasía, que ya va en la banda), dirección del punto
+    // de venta que emitió ESTE comprobante (no el domicilio fiscal),
+    // condición de IVA, e info comercial con pictograma. Cada línea es
+    // opcional y solo suma si hay dato -- así nunca queda un renglón
+    // en blanco esperando un dato que no está cargado.
     let yA = yBox + 6
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(9)
     doc.setTextColor('#222222')
-    doc.text(empresa.nombre, xColA + 3, yA)
-    yA += 5.5
+    doc.text(empresa.titular || empresa.nombre, xColA + 3, yA)
+    yA += 5
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(7.5)
     doc.setTextColor('#555555')
-    if (empresa.direccion) {
-      doc.text(empresa.direccion, xColA + 3, yA)
-      yA += 5.5
+    if (comprobante.puntoVentaDireccion) {
+      doc.text(comprobante.puntoVentaDireccion, xColA + 3, yA)
+      yA += 5
     }
     if (comprobante.afip?.condicionIvaEmisor) {
       const leyenda = leyendaCondicionIva(comprobante.afip.condicionIvaEmisor)
-      if (leyenda) doc.text(leyenda, xColA + 3, yA)
+      if (leyenda) {
+        doc.text(leyenda, xColA + 3, yA)
+        yA += 5
+      }
+    }
+    const contactos: { tipo: 'web' | 'instagram' | 'whatsapp'; texto: string }[] = []
+    if (empresa.sitioWeb) contactos.push({ tipo: 'web', texto: empresa.sitioWeb })
+    if (empresa.instagram) contactos.push({ tipo: 'instagram', texto: empresa.instagram })
+    if (empresa.whatsappComercial) contactos.push({ tipo: 'whatsapp', texto: empresa.whatsappComercial })
+    if (contactos.length > 0) {
+      let xIcono = xColA + 3
+      const iconoSize = 2.6
+      doc.setFontSize(6.5)
+      doc.setTextColor('#555555')
+      for (const c of contactos) {
+        dibujarIconoContacto(doc, c.tipo, xIcono, yA - iconoSize + 0.8, iconoSize)
+        doc.text(c.texto, xIcono + iconoSize + 1, yA)
+        xIcono += iconoSize + 1 + doc.getTextWidth(c.texto) + 3.5
+      }
     }
 
     // Letra fiscal destacada
@@ -411,6 +512,8 @@ export async function generarComprobantePdf(
   }
 
   // ─── Datos del cliente + condición de venta ──────────────────
+  // Fase 38b: se agregan dirección/teléfono/condición de IVA cuando
+  // están cargados -- antes solo se mostraba nombre y documento.
   doc.setTextColor('#3a3a3a')
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9.5)
@@ -419,11 +522,21 @@ export async function generarComprobantePdf(
     doc.text(`Cond. de venta: ${comprobante.condicionVenta}`, pageWidth - marginX, y, { align: 'right' })
   }
   y += 5
-  if (comprobante.clienteDocumento) {
-    doc.setFontSize(8)
-    doc.setTextColor('#666666')
-    doc.text(comprobante.clienteDocumento, marginX, y)
-    y += 5
+
+  doc.setFontSize(8)
+  doc.setTextColor('#666666')
+  if (comprobante.clienteDireccion || comprobante.clienteTelefono) {
+    const partesContacto = [
+      comprobante.clienteDireccion,
+      comprobante.clienteTelefono ? `Tel. ${comprobante.clienteTelefono}` : null,
+    ].filter(Boolean)
+    doc.text(partesContacto.join('  ·  '), marginX, y)
+    y += 4.5
+  }
+  if (comprobante.clienteDocumento || comprobante.clienteCondicionIva) {
+    const partesFiscales = [comprobante.clienteDocumento, comprobante.clienteCondicionIva].filter(Boolean)
+    doc.text(partesFiscales.join('  ·  '), marginX, y)
+    y += 4.5
   }
   y += 1
 
@@ -498,14 +611,24 @@ export async function generarComprobantePdf(
   }
 
   y += 1.5
-  const [rBg, gBg, bBg] = aclarar(color, 0.88)
+  // Fase 38b: antes el recuadro usaba un tinte muy claro del color de
+  // marca con el texto en ese mismo color -- poco contraste, y el
+  // importe quedaba pegado al borde derecho (el ancho de la caja
+  // terminaba justo en colSub, donde el texto se alineaba a la
+  // derecha). Ahora: relleno sólido oscuro + texto blanco, y la caja
+  // se extiende `padTotal` más allá de colPU/colSub para que ni la
+  // palabra "Total" ni el importe toquen los bordes.
+  const padTotal = 4
+  const boxTotalX = colPU - 5 - padTotal
+  const boxTotalW = colSub - colPU + 5 + padTotal * 2
+  const [rBg, gBg, bBg] = oscurecer(color, 0.35)
   doc.setFillColor(rBg, gBg, bBg)
-  doc.roundedRect(colPU - 5, y - 5.5, colSub - colPU + 5, 9, 1.5, 1.5, 'F')
+  doc.roundedRect(boxTotalX, y - 5.5, boxTotalW, 9, 1.5, 1.5, 'F')
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10.5)
-  doc.setTextColor(color)
+  doc.setTextColor('#ffffff')
   doc.text('Total', colPU, y)
-  doc.text(formatARS(comprobante.total), colSub, y, { align: 'right' })
+  doc.text(formatARS(comprobante.total), colSub + padTotal, y, { align: 'right' })
   y += 10
 
   // ─── Notas ──────────────────────────────────────────────────

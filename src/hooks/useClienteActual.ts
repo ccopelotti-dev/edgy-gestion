@@ -29,6 +29,10 @@ interface PuntoVentaLiviano {
   logoUrl: string | null
   nombreVisible: string | null
   colorMarca: string | null
+  /** Fase 38b: dirección física de este local -- la que se imprime en
+   * el recuadro fiscal del PDF de factura (Anexo II RG 1415), en vez
+   * de la dirección fiscal del cliente (que dejó de publicarse ahí). */
+  direccion: string | null
 }
 
 /** Fase 36: branding efectivo a mostrar en el header -- si el usuario
@@ -140,7 +144,7 @@ export function useClienteActual(): UseClienteActualResult {
       // no rompe nada).
       const { data: puntosVentaData } = await supabase
         .from('puntos_venta')
-        .select('id, alias, activo, logo_url, nombre_visible, color_marca')
+        .select('id, alias, activo, logo_url, nombre_visible, color_marca, direccion')
         .eq('cliente_id', usuarioCliente.cliente_id)
         .order('alias')
 
@@ -153,6 +157,7 @@ export function useClienteActual(): UseClienteActualResult {
         logoUrl: fila.logo_url,
         nombreVisible: fila.nombre_visible,
         colorMarca: fila.color_marca,
+        direccion: fila.direccion,
       }))
 
       const puntoVentaUsuario = usuarioCliente.punto_venta_id

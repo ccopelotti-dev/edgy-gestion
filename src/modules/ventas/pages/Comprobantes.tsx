@@ -100,7 +100,7 @@ export default function Comprobantes() {
   // Fase 10: motor de PDF -- id del comprobante que se está generando
   // en este momento (deshabilita su botón mientras descarga el logo).
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
-  const { cliente: empresaActual } = useClienteActual();
+  const { cliente: empresaActual, puntosVenta } = useClienteActual();
   // Fase 11: mensaje del último intento de autorización ARCA (aprobado,
   // rechazado, o error técnico) -- se muestra arriba del listado hasta
   // que el usuario emite otro comprobante electrónico.
@@ -302,7 +302,7 @@ export default function Comprobantes() {
     setGenerandoPdfId(comp.id);
     try {
       const cliente = clienteById(comp.clienteId);
-      await descargarComprobantePdf(empresaActual, cliente, comp, clienteNombre(comp.clienteId));
+      await descargarComprobantePdf(empresaActual, cliente, comp, clienteNombre(comp.clienteId), puntosVenta);
     } finally {
       setGenerandoPdfId(null);
     }

@@ -72,6 +72,12 @@ export interface Cliente {
   ingresos_brutos_numero: string | null
   mostrar_iibb_alicuota: boolean
   iibb_alicuota: number | null
+  // Fase 38b: info comercial para el recuadro del PDF de factura --
+  // mismo motivo que el bloque de arriba (ya existe en Supabase vía
+  // select('*'), esto solo lo declara en el tipo).
+  sitio_web: string | null
+  instagram: string | null
+  whatsapp_comercial: string | null
   created_at: string
 }
 

@@ -25,7 +25,16 @@ import { generarReciboPdf } from '@/lib/comprobantes-pdf/generarReciboPdf';
 import type { Cliente as ClienteEmpresa } from '@/types';
 import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE } from './format';
 import type { Cliente, Cobro, Comprobante, Presupuesto } from '../types';
-import { CONSUMIDOR_FINAL_ID, MEDIO_PAGO_LABEL, labelTipoComprobante } from '../types';
+import { CONDICION_IVA_LABEL, CONSUMIDOR_FINAL_ID, MEDIO_PAGO_LABEL, labelTipoComprobante } from '../types';
+
+// Fase 38b: forma mínima de un punto de venta que necesita el PDF --
+// solo id + dirección, para no acoplar este lib al tipo completo
+// (PuntoVenta de configuracion/types, o el PuntoVentaLiviano de
+// useClienteActual, cualquiera de los dos calza acá tal cual).
+interface PuntoVentaParaPdf {
+  id: string;
+  direccion: string | null;
+}
 
 function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
   return {
@@ -42,6 +51,12 @@ function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
     provincia: empresaActual.provincia,
     mostrarIibbAlicuota: empresaActual.mostrar_iibb_alicuota,
     iibbAlicuota: empresaActual.iibb_alicuota,
+    // Fase 38b: nombre del titular tal como figura en ARCA (recuadro
+    // emisor) + info comercial opcional (web/IG/WhatsApp).
+    titular: empresaActual.titular,
+    sitioWeb: empresaActual.sitio_web,
+    instagram: empresaActual.instagram,
+    whatsappComercial: empresaActual.whatsapp_comercial,
   };
 }
 
@@ -71,7 +86,17 @@ export async function descargarComprobantePdf(
   cliente: Cliente | undefined,
   comp: Comprobante,
   clienteNombreFallback: string,
+  // Fase 38b: lista de puntos de venta del cliente, para resolver la
+  // dirección del local que emitió ESTE comprobante (comp.puntoVentaId)
+  // -- no la dirección fiscal, que dejó de publicarse en el PDF.
+  // Default [] para no romper ningún llamador existente que todavía no
+  // la pasa (clientes de un solo local, o código no actualizado).
+  puntosVenta: PuntoVentaParaPdf[] = [],
 ): Promise<void> {
+  const puntoVenta = comp.puntoVentaId
+    ? puntosVenta.find((pv) => pv.id === comp.puntoVentaId)
+    : undefined;
+
   const datosComprobante = {
     tipoLabel: labelTipoComprobante(comp.tipo, comp.modoEmision),
     numero: formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
@@ -79,6 +104,15 @@ export async function descargarComprobantePdf(
     clienteNombre: cliente?.nombre ?? clienteNombreFallback,
     clienteDocumento:
       cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.documento : null,
+    // Fase 38b: datos de contacto/fiscales del cliente, cuando están
+    // cargados -- antes el PDF solo mostraba nombre y documento.
+    clienteDireccion: cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.direccion ?? null : null,
+    clienteTelefono: cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.telefono ?? null : null,
+    clienteCondicionIva:
+      cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? CONDICION_IVA_LABEL[cliente.condicionIva] : null,
+    // Fase 38b: dirección del punto de venta que emitió el comprobante
+    // (en blanco si no tiene uno asignado -- no se cae a la fiscal).
+    puntoVentaDireccion: puntoVenta?.direccion ?? null,
     // Fase 38 (Anexo II RG 1415, inciso e) -- condición de venta. Solo
     // la usa el motor nuevo; el Clásico simplemente no tiene ese campo
     // en su tipo y lo ignora.

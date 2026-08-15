@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save, ShieldCheck, Zap, CreditCard, Clock, Tag, Pencil, Lock } from 'lucide-react'
+import { Loader2, Save, ShieldCheck, Zap, CreditCard, Clock, Tag, Pencil, Lock, Globe } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -66,6 +66,9 @@ interface FormEmpresa {
   horarioCierre: string
   horarioDias: number[]
   combosTituloSeccion: string
+  sitioWeb: string
+  instagram: string
+  whatsappComercial: string
 }
 
 const FORM_VACIO: FormEmpresa = {
@@ -89,6 +92,9 @@ const FORM_VACIO: FormEmpresa = {
   horarioCierre: '23:00',
   horarioDias: [0, 1, 2, 3, 4, 5, 6],
   combosTituloSeccion: 'Combos',
+  sitioWeb: '',
+  instagram: '',
+  whatsappComercial: '',
 }
 
 // Fase 16: días de la semana, misma convención que JS Date.getDay().
@@ -198,6 +204,9 @@ export default function Empresa() {
       horarioCierre: (empresa.horarioCierre ?? '23:00').slice(0, 5),
       horarioDias: empresa.horarioDias.length > 0 ? empresa.horarioDias : [0, 1, 2, 3, 4, 5, 6],
       combosTituloSeccion: empresa.combosTituloSeccion || 'Combos',
+      sitioWeb: empresa.sitioWeb ?? '',
+      instagram: empresa.instagram ?? '',
+      whatsappComercial: empresa.whatsappComercial ?? '',
     })
   }, [empresa])
 
@@ -367,6 +376,9 @@ export default function Empresa() {
       horarioCierre: form.horarioCierre || null,
       horarioDias: form.horarioDias,
       combosTituloSeccion: form.combosTituloSeccion.trim() || 'Combos',
+      sitioWeb: form.sitioWeb.trim() || null,
+      instagram: form.instagram.trim() || null,
+      whatsappComercial: form.whatsappComercial.trim() || null,
       // Solo se manda si se subió un logo nuevo en esta sesión -- si
       // no, `guardar` no incluye logoUrl en el payload y se conserva
       // el que ya estaba.
@@ -468,6 +480,49 @@ export default function Empresa() {
               value={form.colorMarca}
               onChange={(e) => setForm({ ...form, colorMarca: e.target.value })}
               className="w-32"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="text-muted-foreground h-4 w-4" />
+            Info comercial
+          </CardTitle>
+          <CardDescription>
+            Fase 38b — sitio web, Instagram y WhatsApp comercial. Se muestran en el recuadro del
+            PDF de factura (con su ícono al lado), separado de tu domicilio y teléfono fiscal.
+            Dejá en blanco lo que no uses.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="sitioWeb">Sitio web</Label>
+            <Input
+              id="sitioWeb"
+              value={form.sitioWeb}
+              onChange={(e) => setForm({ ...form, sitioWeb: e.target.value })}
+              placeholder="www.tunegocio.com"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="instagram">Instagram</Label>
+            <Input
+              id="instagram"
+              value={form.instagram}
+              onChange={(e) => setForm({ ...form, instagram: e.target.value })}
+              placeholder="@tunegocio"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="whatsappComercial">WhatsApp</Label>
+            <Input
+              id="whatsappComercial"
+              value={form.whatsappComercial}
+              onChange={(e) => setForm({ ...form, whatsappComercial: e.target.value })}
+              placeholder="2954232323"
             />
           </div>
         </CardContent>

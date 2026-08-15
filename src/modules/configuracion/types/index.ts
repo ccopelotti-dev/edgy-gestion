@@ -79,6 +79,13 @@ export interface DatosEmpresa {
   // Fase 19 (prep): título personalizable de la sección de Combos en el
   // catálogo público y demás listados. Default 'Combos'.
   combosTituloSeccion: string
+  // Fase 38b: info comercial para el recuadro del PDF de factura (RG
+  // 1415) -- distinta de `direccion`/`telefono`, que son datos
+  // fiscales. Todos opcionales: si no se cargan, esa línea del PDF
+  // simplemente no se dibuja.
+  sitioWeb: string | null
+  instagram: string | null
+  whatsappComercial: string | null
 }
 
 /**
@@ -94,6 +101,10 @@ export interface PuntoVenta {
   clienteId: string
   numero: string | null
   alias: string
+  /** Dirección física de ESTE local -- la que se imprime en el
+   * recuadro fiscal del PDF de factura (Fase 38b), a diferencia de la
+   * dirección fiscal del cliente (`DatosEmpresa.direccion`), que dejó
+   * de publicarse. */
   direccion: string | null
   activo: boolean
   porDefecto: boolean

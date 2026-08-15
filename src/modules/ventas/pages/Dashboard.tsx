@@ -49,7 +49,7 @@ export default function Dashboard() {
   const stats = useDashboardStats();
   const comprobantes = useComprobantes();
   const clientes = useClientes();
-  const { cliente: empresaActual } = useClienteActual();
+  const { cliente: empresaActual, puntosVenta } = useClienteActual();
   // Fase 17: ícono de descarga de PDF también en este listado -- id
   // del comprobante que se está generando (deshabilita su botón
   // mientras descarga el logo).
@@ -103,7 +103,7 @@ export default function Dashboard() {
     setGenerandoPdfId(comp.id);
     try {
       const cliente = clientes.find((c) => c.id === comp.clienteId);
-      await descargarComprobantePdf(empresaActual, cliente, comp, nombreCliente(comp.clienteId));
+      await descargarComprobantePdf(empresaActual, cliente, comp, nombreCliente(comp.clienteId), puntosVenta);
     } finally {
       setGenerandoPdfId(null);
     }
