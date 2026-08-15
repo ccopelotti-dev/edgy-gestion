@@ -134,6 +134,17 @@ export default function PuntoDeVenta() {
   const [contactoNombre, setContactoNombre] = useState('');
   const [contactoTelefono, setContactoTelefono] = useState('');
 
+  // Fase: quitar flechitas de incremento/decremento en Cantidad/Precio/Dto.
+  // + habilitar el punto del teclado numérico como coma decimal (mismo
+  // fix que ya tiene el modal "Nuevo comprobante" -- ver
+  // handleCantidadTexto/handlePrecioTexto en dialogs.tsx). Con
+  // type="number" el navegador rechaza directamente la "," que el teclado
+  // numérico produce en layout es-AR, así que estos campos pasan a ser
+  // type="text" con un buffer de string propio por fila (clave = linea.id).
+  const [textoCantidad, setTextoCantidad] = useState<Record<string, string>>({});
+  const [textoPrecio, setTextoPrecio] = useState<Record<string, string>>({});
+  const [textoDescuento, setTextoDescuento] = useState<Record<string, string>>({});
+
   // Reloj en vivo
   useEffect(() => {
     const timer = setInterval(() => setAhora(nowISO()), 30_000);
@@ -356,6 +367,18 @@ export default function PuntoDeVenta() {
 
   const handleEliminarLinea = useCallback((id: string) => {
     setLineas((prev) => prev.filter((l) => l.id !== id));
+    setTextoCantidad((prev) => {
+      const { [id]: _omit, ...rest } = prev;
+      return rest;
+    });
+    setTextoPrecio((prev) => {
+      const { [id]: _omit, ...rest } = prev;
+      return rest;
+    });
+    setTextoDescuento((prev) => {
+      const { [id]: _omit, ...rest } = prev;
+      return rest;
+    });
   }, []);
 
   const handleCambioLinea = useCallback(
@@ -372,6 +395,37 @@ export default function PuntoDeVenta() {
     },
     [],
   );
+
+  // Fase: mismo patrón que dialogs.tsx (handleCantidadTexto/handlePrecioTexto)
+  // -- sanitiza a dígitos/./, y guarda el buffer de texto por separado del
+  // valor numérico real en `lineas`, para no perder el "," mientras el
+  // operador todavía está escribiendo.
+  const handleCantidadTexto = useCallback((id: string, raw: string) => {
+    const limpio = raw.replace(/[^0-9.,]/g, '');
+    setTextoCantidad((prev) => ({ ...prev, [id]: limpio }));
+    const parsed = parseFloat(limpio.replace(',', '.'));
+    setLineas((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, cantidad: isNaN(parsed) ? 0 : Math.max(0, parsed) } : l)),
+    );
+  }, []);
+
+  const handlePrecioTexto = useCallback((id: string, raw: string) => {
+    const limpio = raw.replace(/[^0-9.,]/g, '');
+    setTextoPrecio((prev) => ({ ...prev, [id]: limpio }));
+    const parsed = parseFloat(limpio.replace(',', '.'));
+    setLineas((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, precioUnitario: isNaN(parsed) ? 0 : Math.max(0, parsed) } : l)),
+    );
+  }, []);
+
+  const handleDescuentoTexto = useCallback((id: string, raw: string) => {
+    const limpio = raw.replace(/[^0-9.,]/g, '');
+    setTextoDescuento((prev) => ({ ...prev, [id]: limpio }));
+    const parsed = parseFloat(limpio.replace(',', '.'));
+    setLineas((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, descuento: isNaN(parsed) ? 0 : Math.max(0, parsed) } : l)),
+    );
+  }, []);
 
   // ── Validación de stock (bloqueante) ──────────────────────
 
@@ -595,6 +649,9 @@ export default function PuntoDeVenta() {
     setBusquedaProducto('');
     setContactoNombre('');
     setContactoTelefono('');
+    setTextoCantidad({});
+    setTextoPrecio({});
+    setTextoDescuento({});
     setFacturando(false);
   }, [
     lineas,
@@ -801,38 +858,28 @@ export default function PuntoDeVenta() {
                         </td>
                         <td className="px-4 py-2">
                           <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={linea.cantidad}
-                            onChange={(e) =>
-                              handleCambioLinea(linea.id, 'cantidad', e.target.value)
-                            }
+                            type="text"
+                            inputMode="decimal"
+                            value={textoCantidad[linea.id] ?? String(linea.cantidad || '')}
+                            onChange={(e) => handleCantidadTexto(linea.id, e.target.value)}
                             className="w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 text-right focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                         </td>
                         <td className="px-4 py-2">
                           <input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            value={linea.precioUnitario}
-                            onChange={(e) =>
-                              handleCambioLinea(linea.id, 'precioUnitario', e.target.value)
-                            }
+                            type="text"
+                            inputMode="decimal"
+                            value={textoPrecio[linea.id] ?? String(linea.precioUnitario || '')}
+                            onChange={(e) => handlePrecioTexto(linea.id, e.target.value)}
                             className="w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 text-right focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                         </td>
                         <td className="px-4 py-2">
                           <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={0.5}
-                            value={linea.descuento}
-                            onChange={(e) =>
-                              handleCambioLinea(linea.id, 'descuento', e.target.value)
-                            }
+                            type="text"
+                            inputMode="decimal"
+                            value={textoDescuento[linea.id] ?? String(linea.descuento || '')}
+                            onChange={(e) => handleDescuentoTexto(linea.id, e.target.value)}
                             className="w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 text-right focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                         </td>
