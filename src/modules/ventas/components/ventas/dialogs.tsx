@@ -423,6 +423,18 @@ function filaItemIncompleta(item: ItemRow): boolean {
   return !item.descripcion.trim() || item.precioUnitario <= 0;
 }
 
+/** Una fila "vacía" es la fila manual en blanco que arranca el modal (o
+ * cualquier fila agregada con "+Agregar" que el operador todavía no tocó):
+ * sin descripción y sin vínculo a catálogo. Al elegir un producto o combo
+ * desde el buscador, esa fila se reutiliza en vez de sumar una fila nueva y
+ * dejarla en blanco -- si no, esa fila vacía bloqueaba el guardado con
+ * "Falta descripción y/o precio en la fila 1" hasta que el operador la
+ * borrara a mano (mismo criterio que PresupuestoDialog, ver
+ * filaPresupuestoVacia). */
+function filaItemVacia(item: ItemRow): boolean {
+  return !item.descripcion.trim() && !item.productoId && !item.comboId;
+}
+
 // Fase 18: selector de catálogo en "Nuevo comprobante" -- versión simplificada
 // (sin variantes ni garantía) del mismo patrón ya usado en Punto de Venta
 // (Fase 6c del refactor de Productos). El precio de cada producto se
@@ -482,6 +494,16 @@ export function ComprobanteDialog({
   const [intentoGuardar, setIntentoGuardar] = useState(false);
   const itemsSectionRef = useRef<HTMLDivElement>(null);
 
+  // Buffers de texto para Cant./Precio (Fase: quitar flechitas de
+  // incremento/decremento + habilitar coma decimal desde el teclado
+  // numérico) -- mismo patrón que combo-dialogs.tsx (handleCantidadFijoTexto):
+  // con type="number" el navegador rechaza directamente la "," que el
+  // teclado numérico produce en layout es-AR, así que estos campos pasan a
+  // ser type="text" con un buffer de string propio por fila (clave =
+  // item.key), separado del valor numérico real en `items`.
+  const [textoCantidad, setTextoCantidad] = useState<Record<string, string>>({});
+  const [textoPrecio, setTextoPrecio] = useState<Record<string, string>>({});
+
   // Fase 18: catálogo de productos para el buscador (ver ProductoCatalogoItem
   // arriba). Se carga solo mientras el diálogo está abierto.
   // Fase 27c: puntosVenta/puntoVentaUsuarioId vienen del mismo hook -- ya
@@ -503,6 +525,8 @@ export function ComprobanteDialog({
       setErrors({});
       setIntentoGuardar(false);
       setBusquedaProducto('');
+      setTextoCantidad({});
+      setTextoPrecio({});
       // Fase 27c: precarga el punto de venta al que está restringido el
       // usuario logueado (si tiene uno); si tiene acceso global y el
       // cliente solo tiene un local cargado, ese es el único elegible.
@@ -642,34 +666,38 @@ export function ComprobanteDialog({
   }, [busquedaProducto, productosCatalogo, combosCatalogo]);
 
   const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogoItem) => {
-    setItems((prev) => [
-      ...prev,
-      {
-        key: generarId(),
-        descripcion: producto.nombre,
-        cantidad: 1,
-        precioUnitario: producto.precioVenta,
-        descuento: 0,
-        alicuotaIva: 21,
-        productoId: producto.id,
-      },
-    ]);
+    const nuevaLinea: ItemRow = {
+      key: generarId(),
+      descripcion: producto.nombre,
+      cantidad: 1,
+      precioUnitario: producto.precioVenta,
+      descuento: 0,
+      alicuotaIva: 21,
+      productoId: producto.id,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaItemVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
     setBusquedaProducto('');
   }, []);
 
   const handleAgregarLineaCombo = useCallback((combo: ComboCatalogoItem) => {
-    setItems((prev) => [
-      ...prev,
-      {
-        key: generarId(),
-        descripcion: combo.etiqueta ? `${combo.nombre} (${combo.etiqueta})` : combo.nombre,
-        cantidad: 1,
-        precioUnitario: combo.precioVenta,
-        descuento: 0,
-        alicuotaIva: 21,
-        comboId: combo.id,
-      },
-    ]);
+    const nuevaLinea: ItemRow = {
+      key: generarId(),
+      descripcion: combo.etiqueta ? `${combo.nombre} (${combo.etiqueta})` : combo.nombre,
+      cantidad: 1,
+      precioUnitario: combo.precioVenta,
+      descuento: 0,
+      alicuotaIva: 21,
+      comboId: combo.id,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaItemVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
     setBusquedaProducto('');
   }, []);
 
@@ -679,10 +707,30 @@ export function ComprobanteDialog({
     );
   };
 
+  // Acepta "," o "." como separador decimal -- ver buffers arriba.
+  function handleCantidadTexto(key: string, index: number, raw: string) {
+    const limpio = raw.replace(/[^0-9.,]/g, '');
+    setTextoCantidad((prev) => ({ ...prev, [key]: limpio }));
+    const parsed = parseFloat(limpio.replace(',', '.'));
+    updateItem(index, 'cantidad', isNaN(parsed) ? 0 : parsed);
+  }
+
+  function handlePrecioTexto(key: string, index: number, raw: string) {
+    const limpio = raw.replace(/[^0-9.,]/g, '');
+    setTextoPrecio((prev) => ({ ...prev, [key]: limpio }));
+    const parsed = parseFloat(limpio.replace(',', '.'));
+    updateItem(index, 'precioUnitario', isNaN(parsed) ? 0 : parsed);
+  }
+
   const addItem = () => setItems((prev) => [...prev, newItemRow()]);
 
   const removeItem = (index: number) => {
     if (items.length <= 1) return;
+    const key = items[index]?.key;
+    if (key) {
+      setTextoCantidad((prev) => { const { [key]: _omit, ...rest } = prev; return rest; });
+      setTextoPrecio((prev) => { const { [key]: _omit, ...rest } = prev; return rest; });
+    }
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -1025,20 +1073,19 @@ export function ComprobanteDialog({
                           <td className="px-2 py-1.5">
                             <input
                               className="w-full text-right border-0 bg-transparent text-sm focus:outline-none"
-                              type="number"
-                              min={1}
-                              value={item.cantidad}
-                              onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
+                              type="text"
+                              inputMode="decimal"
+                              value={textoCantidad[item.key] ?? String(item.cantidad || '')}
+                              onChange={(e) => handleCantidadTexto(item.key, idx, e.target.value)}
                             />
                           </td>
                           <td className="px-2 py-1.5">
                             <input
                               className={`w-full text-right border-0 bg-transparent text-sm focus:outline-none ${precioInvalido ? 'ring-1 ring-red-400 rounded' : ''}`}
-                              type="number"
-                              min={0}
-                              step={0.01}
-                              value={item.precioUnitario}
-                              onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))}
+                              type="text"
+                              inputMode="decimal"
+                              value={textoPrecio[item.key] ?? String(item.precioUnitario || '')}
+                              onChange={(e) => handlePrecioTexto(item.key, idx, e.target.value)}
                             />
                           </td>
                           <td className="px-2 py-1.5">

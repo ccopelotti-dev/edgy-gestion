@@ -146,6 +146,9 @@ export async function descargarComprobantePdf(
     montoIva: comp.montoIva,
     total: comp.total,
     fechaIso: comp.fecha,
+    // Leyenda obligatoria de ARCA (Factura A a Monotributista) + notas
+    // libres del comprobante, si las hay -- ver DatosAfip.leyendaEspecial.
+    notas: [comp.notas, comp.afip?.leyendaEspecial].filter(Boolean).join(' — ') || null,
     // Fase 38: letra a mostrar en el recuadro fiscal del motor nuevo --
     // la que ya resolvió ARCA (A/B/C) una vez que hay CAE, o 'X'
     // mientras el comprobante es interno o todavía no fue autorizado.

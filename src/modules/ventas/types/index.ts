@@ -340,6 +340,12 @@ export interface DatosAfip {
    * la usa para imprimir la leyenda ("IVA Responsable Inscripto",
    * etc.) sin tener que volver a consultar clientes_arca_config. */
   condicionIvaEmisor?: 'responsable_inscripto' | 'monotributista' | 'exento';
+  /** Leyenda obligatoria que ARCA exige imprimir en ciertos casos
+   * puntuales -- hoy el único caso es Factura A a Monotributista (RG
+   * vigente desde 01/07/2021): "El crédito fiscal discriminado..."
+   * (ver LEYENDA_FACTURA_A_MONOTRIBUTISTA en
+   * arca-autorizar-comprobante.js). undefined en el resto de los casos. */
+  leyendaEspecial?: string;
 }
 
 export interface Comprobante {

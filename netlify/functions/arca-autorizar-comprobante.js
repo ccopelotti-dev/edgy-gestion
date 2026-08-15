@@ -33,9 +33,26 @@ const CONSUMIDOR_FINAL = {
   condicion_iva: 'consumidor_final',
 }
 
+// Leyenda obligatoria (RG ARCA, vigente desde 01/07/2021) que debe
+// imprimirse en toda Factura A que un Responsable Inscripto le emite a
+// un Monotributista -- ver letraComprobante() más abajo.
+const LEYENDA_FACTURA_A_MONOTRIBUTISTA =
+  'El crédito fiscal discriminado en el presente comprobante, solo podrá ser computado a efectos del ' +
+  'Régimen de Sostenimiento e Inclusión Fiscal para Pequeños Contribuyentes de la Ley N.º 27.618'
+
 function letraComprobante(condicionEmisor, condicionReceptor) {
   if (condicionEmisor === 'responsable_inscripto') {
-    return condicionReceptor === 'responsable_inscripto' ? 'A' : 'B'
+    if (condicionReceptor === 'responsable_inscripto') return 'A'
+    // Desde el 01/07/2021, ARCA exige que un Responsable Inscripto le
+    // facture SIEMPRE con Factura A (IVA discriminado) a un
+    // Monotributista -- ya no corresponde Factura B en este caso, pese
+    // a que el receptor no sea Responsable Inscripto. Bug real
+    // detectado en FAC-00006 (rechazo 10243 "Condicion IVA receptor no
+    // es valido para la clase de comprobante informado"): el código
+    // devolvía 'B' acá, pero CondicionIVAReceptorId=6 (Monotributista)
+    // solo es válido para clases A/M/C, no para B -- de ahí el rechazo.
+    if (condicionReceptor === 'monotributista') return 'A'
+    return 'B'
   }
   // Monotributista y Exento emiten siempre C.
   return 'C'
@@ -354,6 +371,12 @@ export default async (req) => {
     // podría cambiar más adelante) en vez de pegarle a otro endpoint
     // para volver a preguntarla.
     condicionIvaEmisor: config.condicion_iva,
+    // Factura A a Monotributista (ver letraComprobante) exige imprimir
+    // esta leyenda en el comprobante -- se guarda acá, junto al resto
+    // del resultado ARCA, para que el motor de PDF la muestre sin tener
+    // que volver a recalcular la condición del receptor.
+    leyendaEspecial:
+      letra === 'A' && receptor.condicion_iva === 'monotributista' ? LEYENDA_FACTURA_A_MONOTRIBUTISTA : undefined,
   }
 
   const { error: updateError } = await supabaseAdmin
