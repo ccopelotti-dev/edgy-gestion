@@ -1,19 +1,25 @@
 // ============================================================
 // Fase 26 · Modo Mostrador — Consultar artículo
-// Edgy Gestión · Buscador rápido de producto, solo lectura
+// Edgy Gestión · Buscador rápido de producto/combo, solo lectura
 // ============================================================
 //
 // A diferencia de Productos y Stock (que tiene edición completa y no es
 // apto para dejarlo en manos de un Cajero), esto es un buscador directo
-// contra la tabla `productos` -- sin pasar por ningún módulo ni
-// Provider -- que muestra todo el dato disponible del artículo tal
-// como pidió el usuario: precio, costo, stock (con desglose por
-// variante si aplica), rubro, marca y estado. Solo lectura, no permite
-// editar nada desde acá.
+// contra las tablas `productos` y `combos` -- sin pasar por ningún
+// módulo ni Provider -- que muestra todo el dato disponible del
+// artículo tal como pidió el usuario: precio, costo, stock (con
+// desglose por variante si aplica), rubro, marca y estado para
+// productos; precio, descuento, etiqueta de promo y qué incluye para
+// combos. Solo lectura, no permite editar nada desde acá.
+//
+// Fase (16/08/2026): se suma la búsqueda de Combos -- Carlos avisó que
+// Punto Tex va a cargar combos/promos y el cajero necesita poder
+// consultarlos igual que un producto suelto (antes esta pantalla solo
+// buscaba en `productos`, así que un combo cargado era invisible acá).
 
 import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Search } from 'lucide-react';
+import { X, Search, Tag } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { formatARS } from '@/modules/ventas/lib/format';
@@ -31,6 +37,7 @@ interface VarianteRow {
 }
 
 interface ProductoDetalle {
+  tipoArticulo: 'producto';
   id: string;
   codigo: string;
   nombre: string;
@@ -51,6 +58,33 @@ interface ProductoDetalle {
   variantes: VarianteRow[];
 }
 
+interface ComboComponenteRow {
+  id: string;
+  productoNombre: string;
+  cantidad: number;
+}
+
+interface ComboDetalle {
+  tipoArticulo: 'combo';
+  id: string;
+  nombre: string;
+  descripcion: string;
+  precioVenta: number;
+  descuentoPorcentaje: number;
+  etiqueta?: string;
+  disponible: boolean;
+  componentes: ComboComponenteRow[];
+}
+
+type Detalle = ProductoDetalle | ComboDetalle;
+
+interface Candidato {
+  id: string;
+  nombre: string;
+  precioVenta: number;
+  tipo: 'producto' | 'combo';
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -63,8 +97,8 @@ function etiquetaVariante(v: VarianteRow): string {
 export function ConsultarArticulo({ open, onOpenChange }: Props) {
   const { cliente: clienteTenant } = useClienteActual();
   const [busqueda, setBusqueda] = useState('');
-  const [candidatos, setCandidatos] = useState<{ id: string; nombre: string; precioVenta: number }[]>([]);
-  const [detalle, setDetalle] = useState<ProductoDetalle | null>(null);
+  const [candidatos, setCandidatos] = useState<Candidato[]>([]);
+  const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
 
   // Reset al abrir/cerrar
@@ -76,7 +110,8 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
     }
   }, [open]);
 
-  // Sugerencias en vivo mientras escribe
+  // Sugerencias en vivo mientras escribe -- busca en productos y combos
+  // en paralelo y las mezcla en una sola lista (con badge distintivo).
   useEffect(() => {
     if (!open || !clienteTenant?.id) return;
     const q = busqueda.trim();
@@ -86,15 +121,36 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
     }
     let activo = true;
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from('productos')
-        .select('id, nombre, precio_venta')
-        .eq('cliente_id', clienteTenant.id)
-        .ilike('nombre', `%${q}%`)
-        .order('nombre')
-        .limit(10);
+      const [productosRes, combosRes] = await Promise.all([
+        supabase
+          .from('productos')
+          .select('id, nombre, precio_venta')
+          .eq('cliente_id', clienteTenant.id)
+          .ilike('nombre', `%${q}%`)
+          .order('nombre')
+          .limit(10),
+        supabase
+          .from('combos')
+          .select('id, nombre, precio_venta')
+          .eq('cliente_id', clienteTenant.id)
+          .ilike('nombre', `%${q}%`)
+          .order('nombre')
+          .limit(10),
+      ]);
       if (activo) {
-        setCandidatos((data ?? []).map((p) => ({ id: p.id, nombre: p.nombre, precioVenta: Number(p.precio_venta) })));
+        const productos: Candidato[] = (productosRes.data ?? []).map((p) => ({
+          id: p.id,
+          nombre: p.nombre,
+          precioVenta: Number(p.precio_venta),
+          tipo: 'producto',
+        }));
+        const combos: Candidato[] = (combosRes.data ?? []).map((c) => ({
+          id: c.id,
+          nombre: c.nombre,
+          precioVenta: Number(c.precio_venta),
+          tipo: 'combo',
+        }));
+        setCandidatos([...productos, ...combos].sort((a, b) => a.nombre.localeCompare(b.nombre)));
       }
     }, 250);
     return () => {
@@ -103,9 +159,7 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
     };
   }, [busqueda, open, clienteTenant?.id]);
 
-  async function verDetalle(productoId: string) {
-    setCargandoDetalle(true);
-    setDetalle(null);
+  async function verDetalleProducto(productoId: string) {
     const [productoRes, variantesRes] = await Promise.all([
       supabase
         .from('productos')
@@ -120,6 +174,7 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
     const p = productoRes.data as any;
     if (p) {
       setDetalle({
+        tipoArticulo: 'producto',
         id: p.id,
         codigo: p.codigo ?? '',
         nombre: p.nombre,
@@ -144,6 +199,48 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
           stock: Number(v.stock),
         })),
       });
+    }
+  }
+
+  async function verDetalleCombo(comboId: string) {
+    const comboRes = await supabase
+      .from('combos')
+      .select('id, nombre, descripcion, precio_venta, descuento_porcentaje, etiqueta, disponible')
+      .eq('id', comboId)
+      .maybeSingle();
+
+    const c = comboRes.data as any;
+    if (!c) return;
+
+    const componentesRes = await supabase
+      .from('combo_componentes_fijos')
+      .select('id, cantidad, producto_id, productos(nombre)')
+      .eq('combo_id', comboId);
+
+    setDetalle({
+      tipoArticulo: 'combo',
+      id: c.id,
+      nombre: c.nombre,
+      descripcion: c.descripcion ?? '',
+      precioVenta: Number(c.precio_venta),
+      descuentoPorcentaje: Number(c.descuento_porcentaje ?? 0),
+      etiqueta: c.etiqueta ?? undefined,
+      disponible: !!c.disponible,
+      componentes: (componentesRes.data ?? []).map((comp: any) => ({
+        id: comp.id,
+        productoNombre: comp.productos?.nombre ?? 'Producto eliminado',
+        cantidad: Number(comp.cantidad),
+      })),
+    });
+  }
+
+  async function verDetalle(candidato: Candidato) {
+    setCargandoDetalle(true);
+    setDetalle(null);
+    if (candidato.tipo === 'combo') {
+      await verDetalleCombo(candidato.id);
+    } else {
+      await verDetalleProducto(candidato.id);
     }
     setCargandoDetalle(false);
   }
@@ -179,11 +276,18 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
             <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
               {candidatos.map((c) => (
                 <button
-                  key={c.id}
-                  onClick={() => verDetalle(c.id)}
+                  key={`${c.tipo}-${c.id}`}
+                  onClick={() => verDetalle(c)}
                   className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm hover:bg-gray-50"
                 >
-                  <span className="text-gray-900">{c.nombre}</span>
+                  <span className="flex items-center gap-2 text-gray-900">
+                    {c.tipo === 'combo' && (
+                      <span className="flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+                        <Tag className="h-3 w-3" /> Combo
+                      </span>
+                    )}
+                    {c.nombre}
+                  </span>
                   <span className="text-gray-500">{formatARS(c.precioVenta)}</span>
                 </button>
               ))}
@@ -196,7 +300,7 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
 
           {cargandoDetalle && <p className="py-6 text-center text-sm text-gray-400">Buscando...</p>}
 
-          {detalle && (
+          {detalle && detalle.tipoArticulo === 'producto' && (
             <div className="space-y-4">
               <button
                 onClick={() => setDetalle(null)}
@@ -280,6 +384,71 @@ export function ConsultarArticulo({ open, onOpenChange }: Props) {
                   }
                 >
                   {detalle.disponible && detalle.estado === 'activo' ? 'Disponible' : 'No disponible'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {detalle && detalle.tipoArticulo === 'combo' && (
+            <div className="space-y-4">
+              <button
+                onClick={() => setDetalle(null)}
+                className="text-xs font-medium text-gray-500 hover:text-gray-700"
+              >
+                ← Volver a la búsqueda
+              </button>
+
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+                    <Tag className="h-3 w-3" /> Combo
+                  </span>
+                  {detalle.etiqueta && (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                      {detalle.etiqueta}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-base font-semibold text-gray-900">{detalle.nombre}</p>
+                {detalle.descripcion && <p className="text-sm text-gray-500">{detalle.descripcion}</p>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Precio del combo</p>
+                  <p className="text-lg font-semibold text-gray-900">{formatARS(detalle.precioVenta)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Descuento</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {detalle.descuentoPorcentaje > 0 ? `${detalle.descuentoPorcentaje}%` : '—'}
+                  </p>
+                </div>
+              </div>
+
+              {detalle.componentes.length > 0 && (
+                <div>
+                  <p className="mb-2 text-xs uppercase tracking-wide text-gray-400">Incluye</p>
+                  <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                    {detalle.componentes.map((comp) => (
+                      <div key={comp.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <span className="text-gray-700">{comp.productoNombre}</span>
+                        <span className="font-medium text-gray-900">× {comp.cantidad}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 text-xs">
+                <span
+                  className={
+                    detalle.disponible
+                      ? 'rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700'
+                      : 'rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-500'
+                  }
+                >
+                  {detalle.disponible ? 'Disponible' : 'No disponible'}
                 </span>
               </div>
             </div>

@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Receipt, Banknote, Search, UserPlus, FileText, ShoppingBag, CircleCheck, CircleAlert } from 'lucide-react';
+import { Receipt, Banknote, Search, UserPlus, FileText, ShoppingBag, ClipboardList, CircleCheck, CircleAlert } from 'lucide-react';
 import { VentasProvider, useVentas, useVentasDispatch } from '@/modules/ventas/data/store';
 import { ClienteDialog, CobroDialog, PresupuestoDialog } from '@/modules/ventas/components/ventas/dialogs';
 import {
@@ -34,7 +34,7 @@ import { todayISO, nowISO, formatARS } from '@/modules/ventas/lib/format';
 // botón "Comprar" no está condicionado a ningún módulo activo, a diferencia
 // del resto de esta pantalla (que sí depende de que Ventas esté activo).
 import { ComprasProvider, useCompras, useComprasDispatch, useProveedores } from '@/modules/compras/data/store';
-import { ComprobanteCompraDialog } from '@/modules/compras/components/compras/dialogs';
+import { ComprobanteCompraDialog, CotizacionDialog } from '@/modules/compras/components/compras/dialogs';
 import { actualizarStockPorCompra } from '@/modules/compras/lib/actualizarStockCompra';
 import { formatNumero, PREFIJO_COMPROBANTE_COMPRA } from '@/modules/compras/lib/format';
 import type {
@@ -44,6 +44,7 @@ import type {
   ControlRemision,
   ImpuestoOrdenCompra,
 } from '@/modules/compras/types';
+import type { UnidadMedida } from '@/modules/productos-stock/types';
 import { useClienteActual, type ModuloActivo } from '@/hooks/useClienteActual';
 import { supabase } from '@/lib/supabase';
 import { ModoMostradorToggle } from './ModoMostradorToggle';
@@ -235,10 +236,63 @@ function ModoMostradorInterior({
   const [articuloOpen, setArticuloOpen] = useState(false);
 
   // ── Comprar ───────────────────────────────────────────────
+  // "Comprar" agrupa 3 acciones bien distintas del ciclo de compra --
+  // pedir presupuesto, generar una orden de compra y cargar el
+  // comprobante ya recibido -- así que primero se elige cuál, en vez de
+  // ir directo a un solo dialog (mismo criterio del selector previo de
+  // "Cobrar"). "Generar orden de compra" no tiene un dialog reutilizable
+  // propio todavía (ese formulario vive embebido en OrdenesCompra.tsx),
+  // así que ahí se navega a Compras en vez de duplicar el formulario acá.
+  const [selectorCompraOpen, setSelectorCompraOpen] = useState(false);
+
   // Espejo exacto de handleSaveComprobante en compras/pages/Comprobantes.tsx
   // -- alta manual (sin ordenCompra) del mismo comprobante de compra, con el
   // mismo flujo opcional de "Actualizar stock" contra Recepción.
   const [compraDialogOpen, setCompraDialogOpen] = useState(false);
+
+  // Espejo exacto de handleSaveCotizacion en compras/pages/Cotizaciones.tsx
+  // (rama de alta -- acá no hay edición, solo carga nueva).
+  const [cotizacionCompraDialogOpen, setCotizacionCompraDialogOpen] = useState(false);
+
+  function handleSaveCotizacionCompra(data: {
+    proveedorId: string;
+    fecha: string;
+    validezDias: number;
+    notas: string;
+    items: {
+      descripcion: string; cantidad: number; precioUnitario: number; descuento: number; subtotal: number;
+      insumoId?: string; productoId?: string; unidad?: UnidadMedida;
+    }[];
+  }) {
+    const now = nowISO();
+    const fechaVenc = new Date(data.fecha);
+    fechaVenc.setDate(fechaVenc.getDate() + data.validezDias);
+    dispatchCompras({
+      type: 'ADD_COTIZACION',
+      payload: {
+        id: generarId(),
+        proveedorId: data.proveedorId,
+        fecha: data.fecha,
+        validezDias: data.validezDias,
+        fechaVencimiento: fechaVenc.toISOString().split('T')[0],
+        estado: 'borrador',
+        items: data.items.map((it) => ({ ...it, id: generarId() })),
+        subtotal: data.items.reduce((s, i) => s + i.subtotal, 0),
+        total: data.items.reduce((s, i) => s + i.subtotal, 0),
+        notas: data.notas || undefined,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    setCotizacionCompraDialogOpen(false);
+  }
+
+  // Sin dialog propio (ver comentario arriba) -- se navega directo a
+  // Compras > Órdenes de compra, mismo criterio que "Facturar".
+  function irAOrdenCompra() {
+    setSelectorCompraOpen(false);
+    navigate('/m/compras/ordenes-compra');
+  }
 
   async function handleSaveCompra(data: {
     tipo: TipoComprobanteCompra;
@@ -347,7 +401,7 @@ function ModoMostradorInterior({
         <BotonGrande icon={Search} label="Consultar artículo" accent="blue" onClick={() => setArticuloOpen(true)} />
         <BotonGrande icon={UserPlus} label="Cargar cliente" accent="violet" onClick={() => setClienteDialogOpen(true)} />
         <BotonGrande icon={FileText} label="Cotización" accent="amber" onClick={() => setPresupuestoDialogOpen(true)} />
-        <BotonGrande icon={ShoppingBag} label="Comprar" accent="orange" onClick={() => setCompraDialogOpen(true)} />
+        <BotonGrande icon={ShoppingBag} label="Comprar" accent="orange" onClick={() => setSelectorCompraOpen(true)} />
       </div>
 
       <EvolucionMostrador
@@ -410,6 +464,69 @@ function ModoMostradorInterior({
           onSave={handleSaveCobro}
         />
       )}
+
+      {/* ── Selector de acción previo a Comprar ─────────────── */}
+      {selectorCompraOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-base font-semibold text-gray-900">¿Qué querés hacer?</p>
+              <button
+                onClick={() => setSelectorCompraOpen(false)}
+                className="text-sm text-gray-400 hover:text-gray-600"
+              >
+                Cerrar
+              </button>
+            </div>
+            <div className="space-y-2">
+              <button
+                onClick={() => {
+                  setSelectorCompraOpen(false);
+                  setCotizacionCompraDialogOpen(true);
+                }}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-3 text-left text-sm hover:border-amber-300 hover:bg-amber-50"
+              >
+                <FileText className="h-5 w-5 text-amber-600" />
+                <span>
+                  <span className="block font-medium text-gray-900">Pedir presupuesto</span>
+                  <span className="block text-xs text-gray-500">Cotización a un proveedor</span>
+                </span>
+              </button>
+              <button
+                onClick={irAOrdenCompra}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-3 text-left text-sm hover:border-orange-300 hover:bg-orange-50"
+              >
+                <ClipboardList className="h-5 w-5 text-orange-600" />
+                <span>
+                  <span className="block font-medium text-gray-900">Generar orden de compra</span>
+                  <span className="block text-xs text-gray-500">Te lleva a Compras &gt; Órdenes de compra</span>
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setSelectorCompraOpen(false);
+                  setCompraDialogOpen(true);
+                }}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-200 px-3 py-3 text-left text-sm hover:border-red-300 hover:bg-red-50"
+              >
+                <Receipt className="h-5 w-5 text-red-600" />
+                <span>
+                  <span className="block font-medium text-gray-900">Cargar comprobante</span>
+                  <span className="block text-xs text-gray-500">La mercadería ya llegó, con factura del proveedor</span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <CotizacionDialog
+        open={cotizacionCompraDialogOpen}
+        onOpenChange={setCotizacionCompraDialogOpen}
+        proveedores={proveedores.filter((p) => p.activo)}
+        validezDefault={comprasState.config.validezCotizacionDias}
+        onSave={handleSaveCotizacionCompra}
+      />
 
       <ClienteDialog open={clienteDialogOpen} onOpenChange={setClienteDialogOpen} onSave={handleSaveCliente} />
 
