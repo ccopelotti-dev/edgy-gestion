@@ -42,12 +42,18 @@ import { construirUrlQrFiscal, type DatosQrFiscal } from './arcaQr'
 
 const COLOR_DEFAULT = '#0F6E56'
 
-// A5 apaisada, tal como la definió Carlos (20 x 15 cm). jsPDF toma un
-// array `format` como [ancho, alto] literal en la unidad indicada --
-// no hace falta "orientation: landscape", alcanza con pasar el ancho
-// primero.
-const PAGE_WIDTH = 200
-const PAGE_HEIGHT = 150
+// Fase 38m: A5 apaisada (20x15cm) se descartó -- con el pie fiscal
+// obligatorio (QR + CAE + Régimen de Transparencia Fiscal, y a veces
+// la leyenda de Factura A a Monotributista) ya no entraba en una sola
+// hoja ni con UN solo ítem: se iba a una segunda página aun en el caso
+// más simple. No era un problema de "muchos artículos" para ajustar
+// con más compactación -- el bloque fiscal en sí ya no entraba. Se
+// pasa a A4 vertical (21x29,7cm), manteniendo el ancho de página
+// prácticamente igual (200mm -> 210mm, así que el layout horizontal
+// -- recuadro fiscal, columnas de la tabla -- se traslada con cambios
+// menores) y casi duplicando el alto disponible.
+const PAGE_WIDTH = 210
+const PAGE_HEIGHT = 297
 
 export interface EmpresaParaPdf {
   nombre: string
@@ -382,12 +388,12 @@ export async function generarComprobantePdf(
   nombreArchivo: string,
   copias = 1,
 ): Promise<void> {
-  // OJO: jsPDF por defecto asume orientation='portrait', y si el
-  // ancho del array `format` es mayor que el alto, LO VUELVE A
-  // INVERTIR para forzar vertical -- pasar [200, 150] sin más
-  // terminaba dando una página de 150x200 (vertical), no la apaisada
-  // que pidió Carlos. Hay que declarar 'landscape' explícitamente.
-  const doc = new jsPDF({ unit: 'mm', format: [PAGE_WIDTH, PAGE_HEIGHT], orientation: 'landscape' })
+  // Fase 38m: A4 vertical -- ancho (210) menor que alto (297), así que
+  // acá "portrait" es explícito pero también lo que jsPDF asume por
+  // default; se deja declarado igual, por prolijidad y para que quede
+  // claro que es intencional (antes, en A5 apaisada, hacía falta
+  // declarar 'landscape' a mano porque si no jsPDF invertía el array).
+  const doc = new jsPDF({ unit: 'mm', format: [PAGE_WIDTH, PAGE_HEIGHT], orientation: 'portrait' })
   const color = empresa.colorMarca || COLOR_DEFAULT
   const pageWidth = PAGE_WIDTH
   const pageHeight = PAGE_HEIGHT
@@ -447,7 +453,11 @@ export async function generarComprobantePdf(
   if (conRecuadroFiscal) {
     const yBox = y
     const xColA = marginX
-    const xDivisor1 = marginX + 94
+    // Fase 38m: proporcional al nuevo ancho de página (210mm, antes
+    // 200mm) para que la letra fiscal mantenga la misma posición
+    // relativa dentro del recuadro (antes: 94mm sobre 184mm de área
+    // útil ≈ 51%; ahora: mismo 51% sobre 194mm de área útil).
+    const xDivisor1 = marginX + 99
     const xDivisor2 = xDivisor1 + 22
     const xColBFin = pageWidth - marginX
 
@@ -674,7 +684,7 @@ export async function generarComprobantePdf(
   y += 5
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(6.5)
+  doc.setFontSize(8.5)
   doc.setTextColor('#6b6b6b')
   doc.text('Descripción', colDesc, y)
   doc.text('Cant.', colCant, y, { align: 'right' })
@@ -683,17 +693,18 @@ export async function generarComprobantePdf(
   y += 2
   doc.setDrawColor(230, 230, 230)
   doc.line(marginX, y, pageWidth - marginX, y)
-  y += 4
+  y += 5.5
 
-  // Fase 38i: fuente de la fila de artículos bajada a 5pt (pedido
-  // explícito) e interlineado "standar" -- antes 4.8mm por línea, tuneado
-  // para la fuente de 9pt anterior, quedaba muy espaciado para 5pt. El
-  // salto de línea ahora es proporcional a la altura real del texto
-  // (fontSize en pt -> mm, con un pequeño margen de aire).
+  // Fase 38m: con el cambio de A5 apaisada a A4 vertical sobra alto de
+  // sobra, así que la fuente de la fila de artículos vuelve de 5pt a
+  // 7.2pt -- la medida "estándar" que ya usa el resto de las líneas de
+  // bajada del documento (dirección, condición IVA, etc.). El
+  // interlineado (4mm) copia el mismo ritmo que esas otras líneas de
+  // 7.2pt (ver "Cliente:"/dirección más arriba, también en pasos de 4mm).
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(5)
+  doc.setFontSize(7.2)
   doc.setTextColor('#222222')
-  const lineHeightItem = 2.4
+  const lineHeightItem = 4
 
   const alturaMaxima = pageHeight - 50
   for (const item of comprobante.items) {
