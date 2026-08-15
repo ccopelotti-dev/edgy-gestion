@@ -25,6 +25,8 @@ const SLUGS_PIE = ['utilidades', 'configuracion']
 const ORDEN_PRINCIPALES = [
   // Fase 31: Agenda va primera -- inmediatamente debajo de Dashboard.
   'agenda',
+  // Kit "A Medida" -- va justo debajo de Agenda (Fase 0082).
+  'fichas-medida',
   'tesoreria',
   'productos-stock',
   'servicios',

@@ -11,18 +11,21 @@
 // `vertical` viene de la tabla `modulos` (columna `vertical`, texto
 // libre desde el día 1 -- ver 0001_init.sql): 'core' es el núcleo
 // administrativo (Tesorería, Ventas, Compras, etc.), cualquier otro
-// valor identifica un kit vendible por separado. Hoy solo existe
-// 'gastronomico'; los kits sin entrada acá todavía (futuros) caen en un
+// valor identifica un kit vendible por separado. Existen 'gastronomico'
+// y 'a-medida' (Fichas de medida -- Fase 0082, primer cliente Punto
+// Tex); los kits sin entrada acá todavía (futuros) caen en un
 // label/color genérico en vez de romper o quedar sin agrupar.
 // ============================================================
 
 export const LABEL_POR_VERTICAL: Record<string, string> = {
   core: 'Núcleo',
   gastronomico: 'Kit Gastronómico',
+  'a-medida': 'Kit A Medida',
 }
 
 export const COLOR_POR_VERTICAL: Record<string, string> = {
   gastronomico: '#F97316', // naranja cálido
+  'a-medida': '#0D9488', // teal
 }
 
 export const COLOR_KIT_DEFAULT = '#64748B' // slate -- fallback para kits futuros sin color asignado

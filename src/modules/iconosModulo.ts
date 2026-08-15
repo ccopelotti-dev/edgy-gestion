@@ -19,6 +19,7 @@ import {
   CalendarDays,
   Landmark,
   ScrollText,
+  Ruler,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -29,6 +30,7 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   agenda: CalendarDays,
   'gastos-fijos': Landmark,
   impuestos: ScrollText,
+  'fichas-medida': Ruler,
   tesoreria: Wallet,
   'productos-stock': Package,
   ventas: ShoppingCart,

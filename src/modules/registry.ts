@@ -14,6 +14,10 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   // Fase 34: Impuestos (núcleo) -- Libro IVA, posición mensual,
   // retenciones y percepciones.
   'impuestos': lazy(() => import('./impuestos')),
+  // Kit "A Medida" (no núcleo) -- toma de medidas a domicilio para
+  // presupuestar productos hechos a medida (cortinas, etc). Primer
+  // cliente: Punto Tex -- ver migración 0082_fichas_medida.sql.
+  'fichas-medida': lazy(() => import('./fichas-medida')),
   tesoreria: lazy(() => import('@/modules/tesoreria')),
   'productos-stock': lazy(() => import('@/modules/productos-stock')),
   'ventas': lazy(() => import('./ventas')),
