@@ -323,6 +323,19 @@ export default async (req) => {
   }
 
   // ── 7) Guardar resultado en comprobantes_venta.afip ─────────────
+  // Fix (bug detectado por Carlos en la 1ra factura real, FAC-00003):
+  // ARCA devuelve CAEFchVto en formato AAAAMMDD sin separadores (ej.
+  // "20260910"), no en ISO. Guardarlo tal cual rompía el parseo de
+  // fecha en el PDF ("Vencimiento CAE: Invalid Date") porque
+  // "20260910T00:00:00" no es un formato ISO válido para `new Date()`.
+  // Se normaliza acá, una única vez, para que todo lo que consuma
+  // vencimientoCae después (PDF, DB, futuros reportes) reciba siempre
+  // YYYY-MM-DD.
+  const vencimientoCaeIso =
+    resultadoCae.vencimientoCae && /^\d{8}$/.test(resultadoCae.vencimientoCae)
+      ? `${resultadoCae.vencimientoCae.slice(0, 4)}-${resultadoCae.vencimientoCae.slice(4, 6)}-${resultadoCae.vencimientoCae.slice(6, 8)}`
+      : resultadoCae.vencimientoCae
+
   const afip = {
     puntoVenta,
     tipoFiscal: letra,
@@ -330,7 +343,7 @@ export default async (req) => {
     numeroComprobante: resultadoCae.cbteNro,
     docTipoReceptor: docTipo,
     cae: resultadoCae.cae,
-    vencimientoCae: resultadoCae.vencimientoCae,
+    vencimientoCae: vencimientoCaeIso,
     fechaEmisionAfip: new Date().toISOString().slice(0, 10),
     resultado: resultadoCae.resultado,
     observaciones: resultadoCae.observaciones,

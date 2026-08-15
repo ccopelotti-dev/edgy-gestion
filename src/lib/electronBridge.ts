@@ -36,8 +36,10 @@ export interface ElectronAPI {
   esElectron: true;
   /** Imprime un PDF (bytes crudos, tal cual sale de jsPDF) en la
    * impresora predeterminada configurada en la app -- sin diálogo, sin
-   * que el usuario tenga que tocar nada. */
-  imprimir: (pdfBytes: ArrayBuffer, nombreArchivo: string) => Promise<ResultadoImpresion>;
+   * que el usuario tenga que tocar nada. `copias` (Fase 38): cuántas
+   * veces mandarlo al buffer de impresión -- default 1 en el preload
+   * si no se pasa nada. */
+  imprimir: (pdfBytes: ArrayBuffer, nombreArchivo: string, copias?: number) => Promise<ResultadoImpresion>;
   /** Impresoras USB/red que Windows ve instaladas en esta PC. */
   listarImpresoras: () => Promise<ImpresoraDisponible[]>;
   obtenerImpresoraPredeterminada: () => Promise<string | null>;

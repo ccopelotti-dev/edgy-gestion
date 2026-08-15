@@ -15,7 +15,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   esElectron: true,
   guardarNegocio: (slug) => ipcRenderer.invoke('guardar-negocio', slug),
-  imprimir: (pdfBytes, nombreArchivo) => ipcRenderer.invoke('imprimir-pdf', pdfBytes, nombreArchivo),
+  // Fase 38: `copias` -- cuántas veces mandarlo a la impresora
+  // (Carlos definió 2 por defecto para comprobantes: cliente + local).
+  imprimir: (pdfBytes, nombreArchivo, copias) => ipcRenderer.invoke('imprimir-pdf', pdfBytes, nombreArchivo, copias),
   listarImpresoras: () => ipcRenderer.invoke('listar-impresoras'),
   obtenerImpresoraPredeterminada: () => ipcRenderer.invoke('obtener-impresora-predeterminada'),
   guardarImpresoraPredeterminada: (nombre) => ipcRenderer.invoke('guardar-impresora-predeterminada', nombre),

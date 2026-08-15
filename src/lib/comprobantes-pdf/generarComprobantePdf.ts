@@ -8,26 +8,31 @@
 // adelante -- no hace falta reescribir el motor por módulo, alcanza
 // con armar el objeto `ComprobanteParaPdf` correspondiente.
 //
-// Diseño "Moderno" (elegido por el usuario sobre la alternativa
-// "Clásico" que se le mostró como mockup): banda de color en el
-// encabezado con el logo y el nombre del comercio, usando el color de
-// marca (`clientes.color_marca`, editable en Configuración > Empresa)
-// como acento. Si el cliente no cargó logo o color, cae en un color y
-// layout default prolijos -- nunca rompe la descarga por falta de
-// esos datos opcionales.
+// Fase 38 (rediseño gráfico -- normativa ARCA): antes de esta fase el
+// PDF era A4 vertical con un layout "moderno" libre, sin zonas
+// definidas. A partir de acá el comprobante fiscal (Factura/Nota de
+// crédito/Nota de débito) sigue el Anexo II Apartado B de la RG
+// 1415 -- zona superior izquierda = emisor, zona superior derecha =
+// datos del comprobante (numeración, fecha, CUIT, IIBB, inicio de
+// actividades), letra fiscal destacada en un recuadro central -- con
+// el tamaño y la orientación que definió Carlos según su experiencia
+// de 20 años en gráfica (1998-2011): A5 apaisada, 20x15cm. El CAE +
+// QR fiscal (RG 4892/2020) sigue siendo el mismo bloque de siempre.
 //
-// Se generó con jsPDF (agregado en esta fase, antes no había ninguna
-// librería de PDF en el proyecto) construyendo el layout a mano
-// (texto + rectángulos + líneas) en vez de jspdf-autotable, porque los
-// comprobantes de Edgy suelen tener pocas líneas y no justifica sumar
-// una dependencia más.
+// Clave de esta fase: el comprobante INTERNO (sin CAE, sin validar
+// contra ARCA) usa EXACTAMENTE el mismo template visual -- letra "X"
+// en el recuadro, numeración interna en vez de la fiscal, y una
+// leyenda "COMPROBANTE NO VÁLIDO COMO FACTURA" en vez del bloque de
+// CAE/QR. Así Carlos puede iterar el diseño con comprobantes internos
+// sin gastar numeración real de ARCA en cada prueba. El Presupuesto
+// (que también pasa por este motor, sin `letraFiscal`) sigue usando
+// un encabezado simple, sin el recuadro fiscal -- no es un comprobante
+// y no tiene sentido simular una letra ahí.
 //
-// Fase 11 (ARCA): si el comprobante ya tiene CAE (electrónico y
-// aprobado), se agrega al pie el bloque obligatorio de CAE +
-// vencimiento + QR fiscal (RG 4892/2020, ver ./arcaQr.ts). Para
-// comprobantes internos o electrónicos todavía sin CAE, ese bloque
-// simplemente no se dibuja -- el PDF nunca falla por faltar datos
-// fiscales opcionales.
+// Se generó con jsPDF (agregado en Fase 10) construyendo el layout a
+// mano (texto + rectángulos + líneas) en vez de jspdf-autotable,
+// porque los comprobantes de Edgy suelen tener pocas líneas y no
+// justifica sumar una dependencia más.
 // ============================================================
 
 import { jsPDF } from 'jspdf'
@@ -36,6 +41,13 @@ import QRCode from 'qrcode'
 import { construirUrlQrFiscal, type DatosQrFiscal } from './arcaQr'
 
 const COLOR_DEFAULT = '#0F6E56'
+
+// A5 apaisada, tal como la definió Carlos (20 x 15 cm). jsPDF toma un
+// array `format` como [ancho, alto] literal en la unidad indicada --
+// no hace falta "orientation: landscape", alcanza con pasar el ancho
+// primero.
+const PAGE_WIDTH = 200
+const PAGE_HEIGHT = 150
 
 export interface EmpresaParaPdf {
   nombre: string
@@ -132,7 +144,10 @@ export interface DatosAfipParaPdf {
 export interface ComprobanteParaPdf {
   /** Ej: "Factura B", "Recibo", "Nota de crédito", "Presupuesto". */
   tipoLabel: string
-  /** Ya formateado, ej: "FAC-00042". */
+  /** Número interno de Edgy, ya formateado, ej: "FAC-00042". Se
+   * muestra siempre como referencia; cuando hay `afip` con numeración
+   * fiscal, esa pasa a ser el número principal del recuadro y este
+   * queda como referencia chica al pie. */
   numero: string
   /** Ya formateada, ej: "11/07/2026". */
   fecha: string
@@ -142,15 +157,26 @@ export interface ComprobanteParaPdf {
   fechaIso?: string
   clienteNombre: string
   clienteDocumento?: string | null
+  /** Anexo II RG 1415, inciso e) -- condición de venta (Contado,
+   * Cuenta corriente, o el medio de pago puntual). Opcional: los
+   * Presupuestos no tienen medio de pago todavía, así que no la
+   * incluyen y esa línea simplemente no se dibuja. */
+  condicionVenta?: string
   items: ItemParaPdf[]
   subtotal: number
   descuentoGeneral?: number
   montoIva?: number
   total: number
   notas?: string | null
+  /** Fase 38: letra fiscal a mostrar en el recuadro superior --
+   * 'A'|'B'|'C' cuando ARCA ya la resolvió, 'X' para comprobantes
+   * internos o electrónicos todavía sin CAE. Si se omite (caso de
+   * Presupuesto, que no es un comprobante fiscal) el motor usa el
+   * encabezado simple, sin el recuadro Anexo II RG 1415. */
+  letraFiscal?: 'A' | 'B' | 'C' | 'X'
   /** Fase 11: presente solo si ARCA ya aprobó el comprobante (CAE
    * obtenido). Dispara el bloque de CAE + QR fiscal obligatorio al
-   * pie del PDF. */
+   * pie del PDF y la numeración fiscal en el recuadro superior. */
   afip?: DatosAfipParaPdf
 }
 
@@ -161,9 +187,19 @@ function formatARS(n: number): string {
   }).format(n)
 }
 
-function formatFechaCorta(iso: string): string {
-  if (!iso) return '—'
+/** Convierte a fecha corta es-AR. Acepta tanto ISO (YYYY-MM-DD) como
+ * el formato crudo de ARCA (YYYYMMDD, ej. CAEFchVto) -- comprobantes
+ * emitidos antes de la Fase 38 pueden tener quedado guardado el
+ * formato crudo en la base, así que el motor lo tolera acá en vez de
+ * mostrar "Invalid Date". Si de última no se puede parsear, se
+ * muestra el valor tal cual en vez de romper. */
+function formatFechaCorta(valor: string): string {
+  if (!valor) return '—'
+  const iso = /^\d{8}$/.test(valor)
+    ? `${valor.slice(0, 4)}-${valor.slice(4, 6)}-${valor.slice(6, 8)}`
+    : valor
   const d = new Date(iso + (iso.includes('T') ? '' : 'T00:00:00'))
+  if (isNaN(d.getTime())) return valor
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
@@ -209,23 +245,42 @@ async function logoADataUrl(
   }
 }
 
+/** Número fiscal formateado como lo exige ARCA en la representación
+ * gráfica: PtoVta a 4 dígitos - CbteNro a 8 dígitos (ej "0001-00000094"). */
+function formatNumeroFiscal(puntoVenta: number, numeroComprobante: number): string {
+  return `${String(puntoVenta).padStart(4, '0')}-${String(numeroComprobante).padStart(8, '0')}`
+}
+
 /**
- * Genera y dispara la descarga del PDF de un comprobante.
+ * Genera y dispara la descarga (o impresión silenciosa, ver
+ * imprimirOGuardarPdf) del PDF de un comprobante.
  * `nombreArchivo` va sin extensión (se le agrega .pdf acá).
+ * `copias`: cuántas veces mandarlo al buffer de impresión dentro de la
+ * app de escritorio (Fase 38 -- Carlos definió 2 por defecto para
+ * comprobantes: una para el cliente, otra para el local). No tiene
+ * efecto en navegador normal, donde `imprimirOGuardarPdf` solo
+ * descarga el archivo una vez.
  */
 export async function generarComprobantePdf(
   empresa: EmpresaParaPdf,
   comprobante: ComprobanteParaPdf,
   nombreArchivo: string,
+  copias = 1,
 ): Promise<void> {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  // OJO: jsPDF por defecto asume orientation='portrait', y si el
+  // ancho del array `format` es mayor que el alto, LO VUELVE A
+  // INVERTIR para forzar vertical -- pasar [200, 150] sin más
+  // terminaba dando una página de 150x200 (vertical), no la apaisada
+  // que pidió Carlos. Hay que declarar 'landscape' explícitamente.
+  const doc = new jsPDF({ unit: 'mm', format: [PAGE_WIDTH, PAGE_HEIGHT], orientation: 'landscape' })
   const color = empresa.colorMarca || COLOR_DEFAULT
-  const pageWidth = doc.internal.pageSize.getWidth()
-  const pageHeight = doc.internal.pageSize.getHeight()
-  const marginX = 15
-  const anchoBanda = 32
+  const pageWidth = PAGE_WIDTH
+  const pageHeight = PAGE_HEIGHT
+  const marginX = 8
+  const conRecuadroFiscal = !!comprobante.letraFiscal
 
   // ─── Banda de encabezado ───────────────────────────────────
+  const anchoBanda = 18
   doc.setFillColor(color)
   doc.rect(0, 0, pageWidth, anchoBanda, 'F')
 
@@ -233,10 +288,10 @@ export async function generarComprobantePdf(
   if (empresa.logoUrl) {
     logoInfo = await logoADataUrl(empresa.logoUrl)
   }
-  const textoX = logoInfo ? marginX + 24 : marginX
+  const textoX = logoInfo ? marginX + 16 : marginX
   if (logoInfo) {
     try {
-      doc.addImage(logoInfo.dataUrl, logoInfo.formato, marginX, 6, 20, 20)
+      doc.addImage(logoInfo.dataUrl, logoInfo.formato, marginX, 2, 14, 14)
     } catch {
       // Formato de imagen no soportado por jsPDF -- seguimos sin logo
       // en vez de romper la descarga del comprobante.
@@ -245,69 +300,132 @@ export async function generarComprobantePdf(
 
   doc.setTextColor('#ffffff')
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
-  doc.text(empresa.nombre, textoX, 14)
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
-  let yEmpresa = 20
-  if (empresa.cuit) {
-    doc.text(`CUIT ${empresa.cuit}`, textoX, yEmpresa)
-    yEmpresa += 5
-  }
+  doc.setFontSize(12)
+  doc.text(empresa.nombre, textoX, 9)
   if (empresa.direccion) {
-    doc.text(empresa.direccion, textoX, yEmpresa)
-  }
-
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(13)
-  doc.text(comprobante.tipoLabel, pageWidth - marginX, 14, { align: 'right' })
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.text(`N.º ${comprobante.numero}`, pageWidth - marginX, 20, { align: 'right' })
-  doc.text(comprobante.fecha, pageWidth - marginX, 26, { align: 'right' })
-
-  // ─── Franja fiscal del emisor (Fase 28 -- Anexo II RG 1415) ──
-  // IIBB + Inicio de actividades + condición de IVA, en una sola línea
-  // chica debajo de la banda de color. Cada dato es opcional -- si
-  // falta alguno (todavía no se cargó en Configuración > Empresa, o el
-  // comprobante es de antes de esta fase), simplemente no se imprime
-  // esa parte, nunca rompe el PDF.
-  let y = anchoBanda + 6
-  const partesFiscales: string[] = []
-  const iibbTexto = leyendaIngresosBrutos(
-    empresa.ingresosBrutosCondicion,
-    empresa.ingresosBrutosNumero,
-    empresa.provincia,
-  )
-  if (iibbTexto) partesFiscales.push(iibbTexto)
-  if (empresa.inicioActividades) {
-    partesFiscales.push(`Inicio activ. ${formatFechaCorta(empresa.inicioActividades)}`)
-  }
-  if (comprobante.afip?.condicionIvaEmisor) {
-    const leyenda = leyendaCondicionIva(comprobante.afip.condicionIvaEmisor)
-    if (leyenda) partesFiscales.push(leyenda)
-  }
-  if (partesFiscales.length > 0) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(7.5)
-    doc.setTextColor('#8a8a8a')
-    doc.text(partesFiscales.join('  ·  '), marginX, y)
-    y += 6
-  } else {
-    // Sin datos fiscales para mostrar -- mismo espaciado que antes de
-    // esta fase (anchoBanda + 10), para no correr el resto del layout.
-    y += 4
+    doc.text(empresa.direccion, textoX, 14.5)
   }
 
-  // ─── Datos del cliente ──────────────────────────────────────
+  // Sin recuadro fiscal (Presupuesto) -- encabezado simple clásico,
+  // tipo/número/fecha arriba a la derecha de la banda.
+  if (!conRecuadroFiscal) {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(11)
+    doc.text(comprobante.tipoLabel, pageWidth - marginX, 8, { align: 'right' })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.text(`N.º ${comprobante.numero}`, pageWidth - marginX, 13, { align: 'right' })
+    doc.text(comprobante.fecha, pageWidth - marginX, 17.5, { align: 'right' })
+  }
+
+  let y = anchoBanda + 3
+
+  // ─── Recuadro fiscal (Anexo II RG 1415, Apartado B) ──────────
+  // Tres columnas dentro de un mismo recuadro: (a) emisor -- nombre,
+  // domicilio, condición de IVA; letra destacada A/B/C/X; (b)
+  // comprobante -- numeración, fecha, CUIT, IIBB, inicio de
+  // actividades. Solo se dibuja para comprobantes reales (Factura,
+  // Nota de crédito/débito) -- el Presupuesto no manda `letraFiscal`.
+  if (conRecuadroFiscal) {
+    const yBox = y
+    const hBox = 28
+    const xColA = marginX
+    const xDivisor1 = marginX + 94
+    const xDivisor2 = xDivisor1 + 22
+    const xColBFin = pageWidth - marginX
+
+    doc.setDrawColor(150, 150, 150)
+    doc.setLineWidth(0.35)
+    doc.rect(xColA, yBox, xColBFin - xColA, hBox, 'S')
+    doc.line(xDivisor1, yBox, xDivisor1, yBox + hBox)
+    doc.line(xDivisor2, yBox, xDivisor2, yBox + hBox)
+
+    // (a) Emisor
+    let yA = yBox + 6
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor('#222222')
+    doc.text(empresa.nombre, xColA + 3, yA)
+    yA += 5.5
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor('#555555')
+    if (empresa.direccion) {
+      doc.text(empresa.direccion, xColA + 3, yA)
+      yA += 5.5
+    }
+    if (comprobante.afip?.condicionIvaEmisor) {
+      const leyenda = leyendaCondicionIva(comprobante.afip.condicionIvaEmisor)
+      if (leyenda) doc.text(leyenda, xColA + 3, yA)
+    }
+
+    // Letra fiscal destacada
+    const xLetra = (xDivisor1 + xDivisor2) / 2
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(22)
+    doc.setTextColor('#222222')
+    doc.text(comprobante.letraFiscal!, xLetra, yBox + 18, { align: 'center' })
+    doc.setFontSize(6)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor('#777777')
+    const cod = comprobante.afip?.tipoComprobanteAfip
+    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, yBox + hBox - 3, { align: 'center' })
+
+    // (b) Comprobante
+    const xColB = xDivisor2 + 3
+    let yB = yBox + 6
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9.5)
+    doc.setTextColor('#222222')
+    doc.text(comprobante.tipoLabel.toUpperCase(), xColB, yB)
+    yB += 5.5
+    const numeroFiscal = comprobante.afip
+      ? formatNumeroFiscal(comprobante.afip.puntoVenta, comprobante.afip.numeroComprobante)
+      : comprobante.numero
+    doc.setFontSize(9)
+    doc.text(`N.º ${numeroFiscal}`, xColB, yB)
+    yB += 5
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor('#555555')
+    doc.text(`Fecha: ${comprobante.fecha}`, xColB, yB)
+    yB += 4.5
+    doc.setFontSize(6.5)
+    if (empresa.cuit) {
+      doc.text(`CUIT: ${empresa.cuit}`, xColB, yB)
+      yB += 4
+    }
+    const iibbTexto = leyendaIngresosBrutos(
+      empresa.ingresosBrutosCondicion,
+      empresa.ingresosBrutosNumero,
+      empresa.provincia,
+    )
+    const partesB: string[] = []
+    if (iibbTexto) partesB.push(iibbTexto)
+    if (empresa.inicioActividades) partesB.push(`Inicio activ. ${formatFechaCorta(empresa.inicioActividades)}`)
+    if (partesB.length > 0) doc.text(partesB.join(' · '), xColB, yB)
+
+    y = yBox + hBox + 6
+  }
+
+  // ─── Datos del cliente + condición de venta ──────────────────
   doc.setTextColor('#3a3a3a')
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.text(comprobante.clienteNombre, marginX, y)
-  if (comprobante.clienteDocumento) {
-    doc.text(comprobante.clienteDocumento, pageWidth - marginX, y, { align: 'right' })
+  doc.setFontSize(9.5)
+  doc.text(`Cliente: ${comprobante.clienteNombre}`, marginX, y)
+  if (comprobante.condicionVenta) {
+    doc.text(`Cond. de venta: ${comprobante.condicionVenta}`, pageWidth - marginX, y, { align: 'right' })
   }
-  y += 8
+  y += 5
+  if (comprobante.clienteDocumento) {
+    doc.setFontSize(8)
+    doc.setTextColor('#666666')
+    doc.text(comprobante.clienteDocumento, marginX, y)
+    y += 5
+  }
+  y += 1
 
   // ─── Tabla de ítems ─────────────────────────────────────────
   const colDesc = marginX
@@ -321,7 +439,7 @@ export async function generarComprobantePdf(
   y += 5
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
+  doc.setFontSize(8.5)
   doc.setTextColor('#6b6b6b')
   doc.text('Descripción', colDesc, y)
   doc.text('Cant.', colCant, y, { align: 'right' })
@@ -330,109 +448,104 @@ export async function generarComprobantePdf(
   y += 2
   doc.setDrawColor(230, 230, 230)
   doc.line(marginX, y, pageWidth - marginX, y)
-  y += 6
+  y += 5.5
 
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9.5)
+  doc.setFontSize(9)
   doc.setTextColor('#222222')
 
-  const alturaMaxima = pageHeight - 55
+  const alturaMaxima = pageHeight - 50
   for (const item of comprobante.items) {
     if (y > alturaMaxima) {
-      doc.addPage()
-      y = 20
+      doc.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+      y = 15
     }
     const lineasDesc = doc.splitTextToSize(item.descripcion, colCant - colDesc - 5)
     doc.text(lineasDesc, colDesc, y)
     doc.text(String(item.cantidad), colCant, y, { align: 'right' })
     doc.text(formatARS(item.precioUnitario), colPU, y, { align: 'right' })
     doc.text(formatARS(item.subtotal), colSub, y, { align: 'right' })
-    y += 5 * (Array.isArray(lineasDesc) ? lineasDesc.length : 1)
+    y += 4.8 * (Array.isArray(lineasDesc) ? lineasDesc.length : 1)
   }
 
-  y += 4
+  y += 3
   doc.setDrawColor(230, 230, 230)
   doc.line(marginX, y, pageWidth - marginX, y)
-  y += 8
+  y += 6
 
   // ─── Totales ────────────────────────────────────────────────
-  if (y > pageHeight - 45) {
-    doc.addPage()
-    y = 20
+  if (y > pageHeight - 40) {
+    doc.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+    y = 15
   }
 
-  doc.setFontSize(9.5)
+  doc.setFontSize(8.5)
   doc.setTextColor('#555555')
   doc.text('Subtotal', colPU, y, { align: 'right' })
   doc.text(formatARS(comprobante.subtotal), colSub, y, { align: 'right' })
-  y += 6
+  y += 5
 
   if (comprobante.montoIva && comprobante.montoIva > 0) {
     doc.text('IVA', colPU, y, { align: 'right' })
     doc.text(formatARS(comprobante.montoIva), colSub, y, { align: 'right' })
-    y += 6
+    y += 5
   }
 
   if (comprobante.descuentoGeneral && comprobante.descuentoGeneral > 0) {
     doc.text(`Descuento (${comprobante.descuentoGeneral}%)`, colPU, y, { align: 'right' })
     doc.text(`-${formatARS((comprobante.subtotal + (comprobante.montoIva ?? 0)) * (comprobante.descuentoGeneral / 100))}`, colSub, y, { align: 'right' })
-    y += 6
+    y += 5
   }
 
-  y += 2
+  y += 1.5
   const [rBg, gBg, bBg] = aclarar(color, 0.88)
   doc.setFillColor(rBg, gBg, bBg)
-  doc.roundedRect(colPU - 5, y - 6, colSub - colPU + 5, 10, 1.5, 1.5, 'F')
+  doc.roundedRect(colPU - 5, y - 5.5, colSub - colPU + 5, 9, 1.5, 1.5, 'F')
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(11)
+  doc.setFontSize(10.5)
   doc.setTextColor(color)
   doc.text('Total', colPU, y)
   doc.text(formatARS(comprobante.total), colSub, y, { align: 'right' })
-  y += 16
+  y += 10
 
   // ─── Notas ──────────────────────────────────────────────────
   if (comprobante.notas) {
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
+    doc.setFontSize(8.5)
     doc.setTextColor('#666666')
     const lineasNotas = doc.splitTextToSize(comprobante.notas, pageWidth - marginX * 2)
     doc.text(lineasNotas, marginX, y)
-    y += 6 * (Array.isArray(lineasNotas) ? lineasNotas.length : 1)
+    y += 5 * (Array.isArray(lineasNotas) ? lineasNotas.length : 1)
   }
 
   // ─── Transparencia Fiscal al Consumidor (Fase 28 -- RG 5614/2024) ──
   // Solo aplica a facturas tipo B (Responsable Inscripto vendiéndole a
   // alguien que no es Responsable Inscripto -- consumidor final,
-  // monotributista, exento) con IVA > 0. Monotributistas/Exentos
-  // (letra C) quedan afuera por diseño: la propia norma los excluye
-  // (no discriminan IVA en ningún comprobante). Se apoya en
-  // `comprobante.afip.tipoFiscal`, que solo existe cuando ARCA ya
-  // aprobó el comprobante (CAE obtenido) -- antes de eso no hay letra
-  // resuelta todavía, así que el bloque simplemente no se dibuja.
+  // monotributista, exento) con IVA > 0.
   if (
     comprobante.afip?.tipoFiscal === 'B' &&
     comprobante.montoIva &&
     comprobante.montoIva > 0
   ) {
-    if (y > pageHeight - 40) {
-      doc.addPage()
-      y = 20
+    if (y > pageHeight - 34) {
+      doc.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+      y = 15
     }
     doc.setDrawColor(230, 230, 230)
     doc.setLineWidth(0.3)
-    doc.rect(marginX, y, pageWidth - marginX * 2, empresa.mostrarIibbAlicuota && empresa.iibbAlicuota ? 22 : 16)
-    y += 6
+    doc.rect(marginX, y, pageWidth - marginX * 2, empresa.mostrarIibbAlicuota && empresa.iibbAlicuota ? 18 : 13)
+    y += 5
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(8)
+    doc.setFontSize(7.5)
     doc.setTextColor('#555555')
     doc.text('Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)', marginX + 3, y)
-    y += 6
+    y += 5
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8.5)
+    doc.setFontSize(8)
     doc.setTextColor('#222222')
     doc.text(`IVA Contenido: $ ${formatARS(comprobante.montoIva)}`, marginX + 3, y)
     if (empresa.mostrarIibbAlicuota && empresa.iibbAlicuota) {
-      y += 6
+      y += 5
       const juris = empresa.provincia ? ` (${empresa.provincia})` : ''
       doc.text(
         `Ingresos Brutos${juris}: alícuota ${empresa.iibbAlicuota}% incluida en el precio`,
@@ -440,19 +553,17 @@ export async function generarComprobantePdf(
         y,
       )
     }
-    y += 10
+    y += 8
   }
 
-  // ─── CAE + QR fiscal (Fase 11 -- RG 4892/2020) ───────────────
-  // Solo se dibuja si el comprobante ya tiene CAE (electrónico y
-  // aprobado por ARCA). Si falta algún dato o falla la generación del
-  // QR, se muestra igual el CAE en texto -- es válido como respaldo
-  // aunque no salga la imagen.
+  // ─── Pie fiscal: CAE + QR, o leyenda "no válido como factura" ──
   if (comprobante.afip && comprobante.fechaIso) {
-    const altoBloque = 32
-    if (y > pageHeight - altoBloque - 12) {
-      doc.addPage()
-      y = 20
+    // Fase 11 (RG 4892/2020) -- solo se dibuja si el comprobante ya
+    // tiene CAE (electrónico y aprobado por ARCA).
+    const altoBloque = 26
+    if (y > pageHeight - altoBloque - 8) {
+      doc.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+      y = 15
     }
 
     let qrDataUrl: string | null = null
@@ -480,9 +591,9 @@ export async function generarComprobantePdf(
 
     doc.setDrawColor(230, 230, 230)
     doc.line(marginX, y, pageWidth - marginX, y)
-    y += 8
+    y += 6
 
-    const qrSize = 26
+    const qrSize = 20
     if (qrDataUrl) {
       try {
         doc.addImage(qrDataUrl, 'PNG', marginX, y, qrSize, qrSize)
@@ -491,28 +602,54 @@ export async function generarComprobantePdf(
       }
     }
 
-    const textoX2 = qrDataUrl ? marginX + qrSize + 6 : marginX
+    const textoX2 = qrDataUrl ? marginX + qrSize + 5 : marginX
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9.5)
-    doc.setTextColor('#222222')
-    doc.text(`CAE: ${comprobante.afip.cae}`, textoX2, y + 6)
-    doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
+    doc.setTextColor('#222222')
+    doc.text(`CAE: ${comprobante.afip.cae}`, textoX2, y + 5)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
     doc.setTextColor('#555555')
-    doc.text(`Vencimiento CAE: ${formatFechaCorta(comprobante.afip.vencimientoCae)}`, textoX2, y + 12)
-    doc.text('Comprobante autorizado por ARCA', textoX2, y + 18)
+    doc.text(`Vencimiento CAE: ${formatFechaCorta(comprobante.afip.vencimientoCae)}`, textoX2, y + 10)
+    doc.text('Comprobante autorizado por ARCA', textoX2, y + 15)
 
-    y += qrSize + 6
+    y += qrSize + 4
+  } else if (comprobante.letraFiscal === 'X') {
+    // Fase 38 -- comprobante interno o electrónico todavía sin CAE:
+    // mismo template, sin bloque fiscal. Leyenda estándar de documento
+    // no fiscal en vez del CAE/QR.
+    const altoBloque = 14
+    if (y > pageHeight - altoBloque - 8) {
+      doc.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+      y = 15
+    }
+    doc.setDrawColor(210, 210, 210)
+    doc.setLineWidth(0.3)
+    doc.rect(marginX, y, pageWidth - marginX * 2, altoBloque, 'S')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8.5)
+    doc.setTextColor('#999999')
+    doc.text('COMPROBANTE NO VÁLIDO COMO FACTURA', pageWidth / 2, y + 6, { align: 'center' })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(6.5)
+    doc.text('Documento interno / sin autorización de ARCA', pageWidth / 2, y + 10.5, { align: 'center' })
+    y += altoBloque + 4
   }
 
   // ─── Pie de página ────────────────────────────────────────────
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
+  doc.setFontSize(7)
   doc.setTextColor('#999999')
   const pieTexto = empresa.telefono
     ? `${empresa.nombre} · ${empresa.telefono}`
     : empresa.nombre
-  doc.text(pieTexto, marginX, pageHeight - 10)
+  doc.text(pieTexto, marginX, pageHeight - 6)
+  // Referencia al número interno de Edgy -- solo tiene sentido cuando
+  // arriba se mostró la numeración fiscal en su lugar (si no hay
+  // `afip`, el número interno ya es el que se ve en el recuadro).
+  if (comprobante.afip) {
+    doc.text(`Ref. interna: ${comprobante.numero}`, pageWidth - marginX, pageHeight - 6, { align: 'right' })
+  }
 
-  await imprimirOGuardarPdf(doc, nombreArchivo)
+  await imprimirOGuardarPdf(doc, nombreArchivo, copias)
 }

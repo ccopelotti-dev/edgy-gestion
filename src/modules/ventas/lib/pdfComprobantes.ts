@@ -16,6 +16,7 @@ import {
   generarComprobantePdf,
   type EmpresaParaPdf,
 } from '@/lib/comprobantes-pdf/generarComprobantePdf';
+import { generarComprobantePdfClasico } from '@/lib/comprobantes-pdf/generarComprobantePdfClasico';
 import {
   generarResumenCuentaPdf,
   type MovimientoResumenCuenta,
@@ -44,6 +45,18 @@ function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
   };
 }
 
+// Fase 38 -- corte de formato: cualquier Comprobante creado ANTES de
+// este momento (los que Carlos ya emitió/probó, incluidos los que ya
+// tienen CAE real cargado en la base de ARCA) se sigue descargando con
+// el motor Clásico (A4 vertical, el que estaba en producción). No
+// tiene sentido cambiarle retroactivamente el diseño a un documento
+// que ARCA ya tiene registrado con otra apariencia -- el cliente que
+// lo recibió tiene esa versión en la mano. Todo lo que se cree de acá
+// en adelante (los comprobantes Internos que Carlos usa para iterar el
+// diseño, y cualquier factura electrónica real una vez que el diseño
+// esté afinado) usa el motor nuevo (A5 apaisada, Anexo II RG 1415).
+const CORTE_FORMATO_A5 = '2026-08-16T02:59:59.999Z'; // fin del 15/08/2026 en Arg. (UTC-3)
+
 /** Descarga el PDF de un Comprobante (Factura/Recibo/Nota) -- mismo
  * mapeo que ya usaba Comprobantes.tsx, ahora reutilizable desde
  * cualquier listado que tenga el Comprobante completo en memoria. */
@@ -53,45 +66,72 @@ export async function descargarComprobantePdf(
   comp: Comprobante,
   clienteNombreFallback: string,
 ): Promise<void> {
+  const datosComprobante = {
+    tipoLabel: labelTipoComprobante(comp.tipo, comp.modoEmision),
+    numero: formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
+    fecha: formatDate(comp.fecha),
+    clienteNombre: cliente?.nombre ?? clienteNombreFallback,
+    clienteDocumento:
+      cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.documento : null,
+    // Fase 38 (Anexo II RG 1415, inciso e) -- condición de venta. Solo
+    // la usa el motor nuevo; el Clásico simplemente no tiene ese campo
+    // en su tipo y lo ignora.
+    condicionVenta: MEDIO_PAGO_LABEL[comp.medioPago],
+    items: comp.items.map((i) => ({
+      descripcion: i.descripcion,
+      cantidad: i.cantidad,
+      precioUnitario: i.precioUnitario,
+      subtotal: i.subtotal,
+    })),
+    subtotal: comp.subtotal,
+    descuentoGeneral: comp.descuentoGeneral,
+    montoIva: comp.montoIva,
+    total: comp.total,
+    fechaIso: comp.fecha,
+    // Fase 38: letra a mostrar en el recuadro fiscal del motor nuevo --
+    // la que ya resolvió ARCA (A/B/C) una vez que hay CAE, o 'X'
+    // mientras el comprobante es interno o todavía no fue autorizado.
+    letraFiscal: (comp.afip?.tipoFiscal ?? 'X') as 'A' | 'B' | 'C' | 'X',
+    afip:
+      comp.afip?.resultado === 'A' &&
+      comp.afip.cae &&
+      comp.afip.vencimientoCae &&
+      comp.afip.tipoComprobanteAfip !== undefined &&
+      comp.afip.numeroComprobante !== undefined
+        ? {
+            cae: comp.afip.cae,
+            vencimientoCae: comp.afip.vencimientoCae,
+            puntoVenta: comp.afip.puntoVenta,
+            tipoComprobanteAfip: comp.afip.tipoComprobanteAfip,
+            numeroComprobante: comp.afip.numeroComprobante,
+            docTipoReceptor: comp.afip.docTipoReceptor,
+            tipoFiscal: comp.afip.tipoFiscal,
+            condicionIvaEmisor: comp.afip.condicionIvaEmisor,
+          }
+        : undefined,
+  };
+  const nombreArchivo = formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero);
+
+  // Comparación por Date (no por string): Supabase/PostgREST puede
+  // devolver el offset UTC como "Z" o como "+00:00" según el cliente,
+  // y una comparación de strings cruda es frágil ante eso -- parsear
+  // ambos lados a instante real es lo único que da un resultado
+  // correcto siempre.
+  if (new Date(comp.createdAt).getTime() < new Date(CORTE_FORMATO_A5).getTime()) {
+    // Ya emitido con el diseño viejo -- se descarga igual que siempre.
+    await generarComprobantePdfClasico(empresaParaPdf(empresaActual), datosComprobante, nombreArchivo);
+    return;
+  }
+
   await generarComprobantePdf(
     empresaParaPdf(empresaActual),
-    {
-      tipoLabel: labelTipoComprobante(comp.tipo, comp.modoEmision),
-      numero: formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
-      fecha: formatDate(comp.fecha),
-      clienteNombre: cliente?.nombre ?? clienteNombreFallback,
-      clienteDocumento:
-        cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.documento : null,
-      items: comp.items.map((i) => ({
-        descripcion: i.descripcion,
-        cantidad: i.cantidad,
-        precioUnitario: i.precioUnitario,
-        subtotal: i.subtotal,
-      })),
-      subtotal: comp.subtotal,
-      descuentoGeneral: comp.descuentoGeneral,
-      montoIva: comp.montoIva,
-      total: comp.total,
-      fechaIso: comp.fecha,
-      afip:
-        comp.afip?.resultado === 'A' &&
-        comp.afip.cae &&
-        comp.afip.vencimientoCae &&
-        comp.afip.tipoComprobanteAfip !== undefined &&
-        comp.afip.numeroComprobante !== undefined
-          ? {
-              cae: comp.afip.cae,
-              vencimientoCae: comp.afip.vencimientoCae,
-              puntoVenta: comp.afip.puntoVenta,
-              tipoComprobanteAfip: comp.afip.tipoComprobanteAfip,
-              numeroComprobante: comp.afip.numeroComprobante,
-              docTipoReceptor: comp.afip.docTipoReceptor,
-              tipoFiscal: comp.afip.tipoFiscal,
-              condicionIvaEmisor: comp.afip.condicionIvaEmisor,
-            }
-          : undefined,
-    },
-    formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero),
+    datosComprobante,
+    nombreArchivo,
+    // Fase 38 -- 2 copias por defecto (cliente + local), definido por
+    // Carlos en base a su experiencia de 20 años en gráfica. Solo
+    // tiene efecto real dentro de la app de escritorio (Electron); en
+    // navegador se ignora y descarga una vez, como siempre.
+    2,
   );
 }
 

@@ -29,10 +29,18 @@ export const COLOR_DEFAULT = '#0F6E56'
 // navegador normal (o si Electron reporta un error, ej. no hay
 // impresora configurada todavía) cae al mismo `doc.save(...)` de
 // siempre, así nunca se pierde el documento.
-export async function imprimirOGuardarPdf(doc: jsPDF, nombreArchivo: string): Promise<void> {
+//
+// Fase 38 -- `copias`: cuántas veces mandarlo al buffer de impresión
+// dentro de la app de escritorio (Carlos definió 2 por defecto para
+// comprobantes: una para el cliente, otra para el local, en vez del
+// juego Original/Duplicado/Triplicado de la factura papel). Solo tiene
+// efecto en Electron -- en navegador no hay forma de controlar la
+// cantidad de copias del diálogo de impresión del sistema, así que
+// simplemente se ignora y se descarga el archivo una vez.
+export async function imprimirOGuardarPdf(doc: jsPDF, nombreArchivo: string, copias = 1): Promise<void> {
   if (corriendoEnElectron()) {
     const bytes = doc.output('arraybuffer') as ArrayBuffer
-    const resultado = await window.electronAPI!.imprimir(bytes, nombreArchivo)
+    const resultado = await window.electronAPI!.imprimir(bytes, nombreArchivo, copias)
     if (resultado.ok) return
     alert(
       `No se pudo imprimir automáticamente (${resultado.error ?? 'error desconocido'}).\n\n` +

@@ -134,7 +134,7 @@ ipcMain.handle('guardar-impresora-predeterminada', (_evt, nombre) => {
   guardarConfig(config);
 });
 
-ipcMain.handle('imprimir-pdf', async (_evt, pdfBytes, nombreArchivo) => {
+ipcMain.handle('imprimir-pdf', async (_evt, pdfBytes, nombreArchivo, copias) => {
   const config = leerConfig();
   const deviceName = config.impresoraPredeterminada;
   if (!deviceName) {
@@ -146,6 +146,12 @@ ipcMain.handle('imprimir-pdf', async (_evt, pdfBytes, nombreArchivo) => {
 
   const nombreSeguro = String(nombreArchivo || 'comprobante').replace(/[^a-zA-Z0-9_-]/g, '_');
   const tmpPath = path.join(os.tmpdir(), `edgy-${Date.now()}-${nombreSeguro}.pdf`);
+  // Fase 38: `copies` de Chromium duplica físicamente las hojas en la
+  // misma pasada de impresión -- así, por defecto, cada comprobante
+  // sale 2 veces (cliente + local) sin que el usuario tenga que
+  // apretar imprimir dos veces. Se clampea a un mínimo de 1 por si
+  // llega algo raro (0, undefined, NaN) desde el lado web.
+  const cantidadCopias = Number.isFinite(copias) && copias > 0 ? Math.floor(copias) : 1;
 
   try {
     fs.writeFileSync(tmpPath, Buffer.from(pdfBytes));
@@ -162,7 +168,7 @@ ipcMain.handle('imprimir-pdf', async (_evt, pdfBytes, nombreArchivo) => {
 
     await new Promise((resolve, reject) => {
       ventanaOculta.webContents.print(
-        { silent: true, deviceName, printBackground: true },
+        { silent: true, deviceName, printBackground: true, copies: cantidadCopias },
         (success, failureReason) => {
           if (success) resolve();
           else reject(new Error(failureReason || 'Fallo desconocido de impresión'));
