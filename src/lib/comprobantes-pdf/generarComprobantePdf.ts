@@ -292,6 +292,16 @@ function formatNumeroFiscal(puntoVenta: number, numeroComprobante: number): stri
  * corresponde reproducir acá). Solo dan una referencia visual rápida
  * de qué tipo de dato es cada uno.
  */
+// Fase 38c: colores de referencia para los pictogramas de Instagram y
+// WhatsApp -- Carlos pidió reconocerlos rápido por color (naranja y
+// verde). Son aproximaciones genéricas, no los colores exactos de
+// marca registrada (que además es un degradé en el caso real de
+// Instagram) -- alcanza para la asociación visual sin reproducir el
+// logo ni la paleta oficial pixel a pixel.
+const COLOR_ICONO_INSTAGRAM: [number, number, number] = [214, 96, 34] // naranja
+const COLOR_ICONO_WHATSAPP: [number, number, number] = [42, 168, 89] // verde
+const COLOR_ICONO_WEB: [number, number, number] = [120, 120, 120] // gris neutro
+
 function dibujarIconoContacto(
   doc: jsPDF,
   tipo: 'web' | 'instagram' | 'whatsapp',
@@ -299,7 +309,10 @@ function dibujarIconoContacto(
   y: number,
   size: number,
 ): void {
-  doc.setDrawColor(120, 120, 120)
+  const [dr, dg, db] =
+    tipo === 'instagram' ? COLOR_ICONO_INSTAGRAM : tipo === 'whatsapp' ? COLOR_ICONO_WHATSAPP : COLOR_ICONO_WEB
+  doc.setDrawColor(dr, dg, db)
+  doc.setFillColor(dr, dg, db)
   doc.setLineWidth(0.2)
   const r = size / 2
   const cx = x + r
@@ -379,7 +392,9 @@ export async function generarComprobantePdf(
 
   doc.setTextColor('#ffffff')
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(13)
+  // Fase 38c: tamaño bajado de 13 a 11 -- Carlos pidió tipografía más
+  // conservadora/suave en toda la zona superior, no solo acá.
+  doc.setFontSize(11)
   // Fase 38b: la banda ya NO muestra el domicilio fiscal (Carlos lo
   // sacó explícitamente -- "esa no se publica"). Queda solo el nombre
   // de fantasía; el resto de los datos del emisor vive en el recuadro
@@ -414,9 +429,13 @@ export async function generarComprobantePdf(
     const xDivisor2 = xDivisor1 + 22
     const xColBFin = pageWidth - marginX
 
-    doc.setDrawColor(150, 150, 150)
-    doc.setLineWidth(0.35)
-    doc.rect(xColA, yBox, xColBFin - xColA, hBox, 'S')
+    // Fase 38c: Carlos pidió sacar el recuadro con borde completo --
+    // "muy de formulario impreso viejo" -- y dejar solo dos líneas
+    // finas separando las 3 zonas (emisor / letra / comprobante), estilo
+    // minimalista. La línea horizontal de cierre (antes de "Cliente:")
+    // es la que reemplaza al borde inferior, más abajo.
+    doc.setDrawColor(190, 190, 190)
+    doc.setLineWidth(0.25)
     doc.line(xDivisor1, yBox, xDivisor1, yBox + hBox)
     doc.line(xDivisor2, yBox, xDivisor2, yBox + hBox)
 
@@ -428,22 +447,23 @@ export async function generarComprobantePdf(
     // en blanco esperando un dato que no está cargado.
     let yA = yBox + 6
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
+    // Fase 38c: 9 -> 8.3, en línea con el resto de la zona superior.
+    doc.setFontSize(8.3)
     doc.setTextColor('#222222')
     doc.text(empresa.titular || empresa.nombre, xColA + 3, yA)
-    yA += 5
+    yA += 4.5
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.5)
+    doc.setFontSize(7.2)
     doc.setTextColor('#555555')
     if (comprobante.puntoVentaDireccion) {
       doc.text(comprobante.puntoVentaDireccion, xColA + 3, yA)
-      yA += 5
+      yA += 4.5
     }
     if (comprobante.afip?.condicionIvaEmisor) {
       const leyenda = leyendaCondicionIva(comprobante.afip.condicionIvaEmisor)
       if (leyenda) {
         doc.text(leyenda, xColA + 3, yA)
-        yA += 5
+        yA += 4.5
       }
     }
     const contactos: { tipo: 'web' | 'instagram' | 'whatsapp'; texto: string }[] = []
@@ -462,10 +482,11 @@ export async function generarComprobantePdf(
       }
     }
 
-    // Letra fiscal destacada
+    // Letra fiscal destacada -- Fase 38c: 22 -> 20, un poco menos
+    // "gritada" para acompañar el resto de la caja, más suave.
     const xLetra = (xDivisor1 + xDivisor2) / 2
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(22)
+    doc.setFontSize(20)
     doc.setTextColor('#222222')
     doc.text(comprobante.letraFiscal!, xLetra, yBox + 18, { align: 'center' })
     doc.setFontSize(6)
@@ -474,25 +495,26 @@ export async function generarComprobantePdf(
     const cod = comprobante.afip?.tipoComprobanteAfip
     doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, yBox + hBox - 3, { align: 'center' })
 
-    // (b) Comprobante
+    // (b) Comprobante -- Fase 38c: tamaños bajados en línea con el
+    // resto de la caja superior.
     const xColB = xDivisor2 + 3
     let yB = yBox + 6
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9.5)
+    doc.setFontSize(8.8)
     doc.setTextColor('#222222')
     doc.text(comprobante.tipoLabel.toUpperCase(), xColB, yB)
-    yB += 5.5
+    yB += 5
     const numeroFiscal = comprobante.afip
       ? formatNumeroFiscal(comprobante.afip.puntoVenta, comprobante.afip.numeroComprobante)
       : comprobante.numero
-    doc.setFontSize(9)
+    doc.setFontSize(8.3)
     doc.text(`N.º ${numeroFiscal}`, xColB, yB)
-    yB += 5
+    yB += 4.5
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.5)
+    doc.setFontSize(7.2)
     doc.setTextColor('#555555')
     doc.text(`Fecha: ${comprobante.fecha}`, xColB, yB)
-    yB += 4.5
+    yB += 4.2
     doc.setFontSize(6.5)
     if (empresa.cuit) {
       doc.text(`CUIT: ${empresa.cuit}`, xColB, yB)
@@ -507,6 +529,13 @@ export async function generarComprobantePdf(
     if (iibbTexto) partesB.push(iibbTexto)
     if (empresa.inicioActividades) partesB.push(`Inicio activ. ${formatFechaCorta(empresa.inicioActividades)}`)
     if (partesB.length > 0) doc.text(partesB.join(' · '), xColB, yB)
+
+    // Fase 38c: línea fina de cierre de la zona superior -- reemplaza
+    // al borde inferior del recuadro que sacamos arriba, separa el
+    // bloque emisor/comprobante del bloque de datos del cliente.
+    doc.setDrawColor(210, 210, 210)
+    doc.setLineWidth(0.2)
+    doc.line(xColA, yBox + hBox, xColBFin, yBox + hBox)
 
     y = yBox + hBox + 6
   }
