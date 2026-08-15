@@ -44,6 +44,7 @@ import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { descontarStockPorVenta } from '../lib/descontarStockVenta';
 import { activarGarantiasPorVenta, type LineaGarantia } from '../lib/activarGarantiasVenta';
+import { autorizarComprobanteArca } from '../lib/arca';
 
 // ─── Tipos locales ──────────────────────────────────────────
 
@@ -100,7 +101,11 @@ export default function PuntoDeVenta() {
   const clientes = useClientes();
   const { config, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
-  const { cliente: clienteTenant } = useClienteActual();
+  // Fase: se suma acá el mismo trío que ya usa ComprobanteDialog (Fase 27c)
+  // para el selector de Punto de venta -- este Mostrador nunca lo tenía, por
+  // eso el comprobante quedaba sin puntoVentaId y sin poder resolver el
+  // punto de venta ARCA correspondiente al facturar Electrónica.
+  const { cliente: clienteTenant, puntosVenta, puntoVentaUsuarioId } = useClienteActual();
 
   // ── Estado del formulario ─────────────────────────────────
 
@@ -108,14 +113,21 @@ export default function PuntoDeVenta() {
   const [clienteId, setClienteId] = useState<string>(CONSUMIDOR_FINAL_ID);
   const [medioPago, setMedioPago] = useState<MedioPago>('efectivo');
   const [modoEmision, setModoEmision] = useState<ModoEmision>(config.modoEmisionDefault);
+  // Fase: mismo criterio que ComprobanteDialog -- solo importa si el cliente
+  // tiene 2+ puntos de venta cargados (Fase 27). Se precarga con el punto de
+  // venta al que está restringido el usuario logueado, o el único que haya
+  // si solo hay uno; si no, arranca vacío y el operador lo elige.
+  const [puntoVentaId, setPuntoVentaId] = useState('');
   const [busquedaProducto, setBusquedaProducto] = useState('');
   const [ahora, setAhora] = useState(nowISO());
   const [toast, setToast] = useState<string | null>(null);
+  const [mensajeArca, setMensajeArca] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
   const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogo[]>([]);
   const [erroresStock, setErroresStock] = useState<
     { nombre: string; solicitado: number; disponible: number }[] | null
   >(null);
   const [facturando, setFacturando] = useState(false);
+  const [errorPuntoVenta, setErrorPuntoVenta] = useState(false);
   // Datos de contacto para activar garantía cuando se factura a
   // "Consumidor Final" (no hay ficha de cliente de la que sacarlos) --
   // Fase 6b del refactor de Productos.
@@ -127,6 +139,14 @@ export default function PuntoDeVenta() {
     const timer = setInterval(() => setAhora(nowISO()), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  // Precarga el punto de venta -- mismo criterio que ComprobanteDialog: el
+  // que tenga asignado el usuario logueado, o el único si el cliente solo
+  // tiene un local cargado. En 2+ locales sin asignación queda vacío y hay
+  // que elegirlo a mano (ver validación en handleFacturar).
+  useEffect(() => {
+    setPuntoVentaId(puntoVentaUsuarioId ?? (puntosVenta.length === 1 ? puntosVenta[0].id : ''));
+  }, [puntosVenta, puntoVentaUsuarioId]);
 
   // Auto-ocultar toast
   useEffect(() => {
@@ -402,10 +422,16 @@ export default function PuntoDeVenta() {
   // ── Facturar ──────────────────────────────────────────────
 
   const handleFacturar = useCallback(async () => {
-    if (lineas.length === 0 || faltanVariantes || facturando || faltaContactoGarantia) return;
+    const faltaPuntoVenta = puntosVenta.length > 1 && !puntoVentaId;
+    if (lineas.length === 0 || faltanVariantes || facturando || faltaContactoGarantia || faltaPuntoVenta) {
+      if (faltaPuntoVenta) setErrorPuntoVenta(true);
+      return;
+    }
 
     setFacturando(true);
     setErroresStock(null);
+    setErrorPuntoVenta(false);
+    setMensajeArca(null);
 
     const lineasCatalogo = lineas.filter((l) => l.productoId);
     if (lineasCatalogo.length > 0) {
@@ -448,6 +474,7 @@ export default function PuntoDeVenta() {
         tipo: 'factura',
         modoEmision,
         clienteId,
+        puntoVentaId: puntoVentaId || undefined,
         fecha: hoy,
         items,
         subtotal: subtotalNeto,
@@ -532,6 +559,35 @@ export default function PuntoDeVenta() {
 
     setToast(`Factura ${formatNumero(PREFIJO_COMPROBANTE.factura, numFactura)} generada`);
 
+    // Fase 11 (mismo criterio que Comprobantes.tsx -> handleSaveComprobante):
+    // si la venta es Electrónica, pedirle el CAE a ARCA justo después de
+    // guardar. No bloquea la limpieza del formulario -- el comprobante ya
+    // quedó creado con numeración interna propia; esto solo agrega el
+    // resultado de ARCA (aprobado/rechazado) apenas llega. Este llamado era
+    // el que faltaba en Mostrador -- por eso las facturas Electrónica desde
+    // acá se quedaban sin CAE.
+    if (modoEmision === 'electronica' && clienteTenant) {
+      autorizarComprobanteArca(clienteTenant.id, comprobanteId)
+        .then((resultado) => {
+          if (resultado.ok && resultado.afip) {
+            dispatch({ type: 'SET_AFIP_COMPROBANTE', payload: { id: comprobanteId, afip: resultado.afip } });
+            setMensajeArca(
+              resultado.afip.resultado === 'A'
+                ? { tipo: 'ok', texto: `ARCA aprobó el comprobante — CAE ${resultado.afip.cae}` }
+                : { tipo: 'error', texto: `ARCA rechazó el comprobante: ${resultado.afip.observaciones ?? 'sin detalle'}` },
+            );
+          } else {
+            setMensajeArca({ tipo: 'error', texto: resultado.error ?? 'No se pudo autorizar el comprobante ante ARCA' });
+          }
+        })
+        .catch((err) => {
+          setMensajeArca({
+            tipo: 'error',
+            texto: err instanceof Error ? err.message : 'No se pudo autorizar el comprobante ante ARCA',
+          });
+        });
+    }
+
     // Limpiar formulario
     setLineas([]);
     setClienteId(CONSUMIDOR_FINAL_ID);
@@ -559,7 +615,9 @@ export default function PuntoDeVenta() {
     total,
     nextNumeroComprobante,
     dispatch,
-    clienteTenant?.id,
+    clienteTenant,
+    puntoVentaId,
+    puntosVenta.length,
   ]);
 
   // ── Render ────────────────────────────────────────────────
@@ -580,6 +638,20 @@ export default function PuntoDeVenta() {
         <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
           <Receipt className="h-4 w-4" />
           {toast}
+        </div>
+      )}
+
+      {/* Fase 11: resultado del último intento de autorización ARCA (mismo
+          criterio que Comprobantes.tsx) */}
+      {mensajeArca && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            mensajeArca.tipo === 'ok'
+              ? 'border-green-200 bg-green-50 text-green-700'
+              : 'border-red-200 bg-red-50 text-red-700'
+          }`}
+        >
+          {mensajeArca.texto}
         </div>
       )}
 
@@ -805,6 +877,38 @@ export default function PuntoDeVenta() {
               </select>
             </div>
 
+            {/* Fase: selector de Punto de venta -- mismo criterio que
+                ComprobanteDialog (Fase 27c): solo se muestra si el cliente
+                tiene 2+ locales cargados; con uno solo queda oculto y se usa
+                automáticamente. Sin esto el comprobante quedaba sin
+                puntoVentaId y ARCA no podía resolver el punto de venta
+                fiscal correspondiente al facturar Electrónica. */}
+            {puntosVenta.length > 1 && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Punto de venta *
+                </label>
+                <select
+                  value={puntoVentaId}
+                  onChange={(e) => {
+                    setPuntoVentaId(e.target.value);
+                    if (errorPuntoVenta) setErrorPuntoVenta(false);
+                  }}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="">Seleccionar...</option>
+                  {puntosVenta.filter((pv) => pv.activo).map((pv) => (
+                    <option key={pv.id} value={pv.id}>
+                      {pv.alias}
+                    </option>
+                  ))}
+                </select>
+                {errorPuntoVenta && (
+                  <p className="text-xs font-medium text-red-600 mt-1">Elegí el punto de venta</p>
+                )}
+              </div>
+            )}
+
             {/* Datos de contacto para garantía (solo Consumidor Final + hay garantía) */}
             {necesitaContactoGarantia && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-2">
@@ -909,6 +1013,12 @@ export default function PuntoDeVenta() {
               </p>
             )}
 
+            {errorPuntoVenta && puntosVenta.length > 1 && (
+              <p className="text-xs font-medium text-amber-700">
+                Elegí el punto de venta antes de facturar.
+              </p>
+            )}
+
             {/* Botón FACTURAR */}
             <button
               onClick={handleFacturar}
@@ -917,7 +1027,8 @@ export default function PuntoDeVenta() {
                 total <= 0 ||
                 faltanVariantes ||
                 facturando ||
-                faltaContactoGarantia
+                faltaContactoGarantia ||
+                (puntosVenta.length > 1 && !puntoVentaId)
               }
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-3 text-base font-bold text-white shadow-sm hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             >
