@@ -456,10 +456,16 @@ export async function generarComprobantePdf(
     // finas separando las 3 zonas (emisor / letra / comprobante), estilo
     // minimalista. La línea horizontal de cierre (antes de "Cliente:")
     // es la que reemplaza al borde inferior, más abajo.
-    // Fase 38f/38g/38h: las líneas ya no bajan hasta el final de la
-    // caja -- acompañan solo al bloque de la letra fiscal (que ahora
-    // arranca más arriba y más compacto, ver yLetra más abajo).
-    const hLineas = 15
+    // Fase 38f/38g/38h/38i: las líneas ya no bajan hasta el final de la
+    // caja -- acompañan solo al bloque de la letra fiscal. Se calculan
+    // acá, ANTES de dibujar nada, a partir de las mismas coordenadas
+    // que después usa el bloque de la letra (yLetra/ySN, más abajo) --
+    // antes eran dos números sueltos que había que mantener en sync a
+    // mano, y quedaban desalineados entre sí más fácil.
+    const xLetra = (xDivisor1 + xDivisor2) / 2
+    const yLetra = yBox + 8
+    const ySN = yLetra + 3
+    const hLineas = ySN - yBox + 0.5
     doc.setDrawColor(190, 190, 190)
     doc.setLineWidth(0.25)
     doc.line(xDivisor1, yBox, xDivisor1, yBox + hLineas)
@@ -535,22 +541,19 @@ export async function generarComprobantePdf(
 
     // Letra fiscal destacada -- Fase 38f: Carlos pidió subirla a la
     // parte superior de la caja, alineada con la primera línea de las
-    // columnas de al lado (titular / tipo de comprobante), en vez de
-    // quedar centrada en todo el alto de la caja (que ahora es alta
-    // por la lista vertical de contactos).
-    const xLetra = (xDivisor1 + xDivisor2) / 2
-    // Fase 38h: bloque letra+código más compacto (20->18, gap 5.5->4)
-    // para que quepa entero dentro de hLineas=15 con un pelo de aire.
-    const yLetra = yBox + 10.5
+    // columnas de al lado (titular / tipo de comprobante). Fase 38i:
+    // bloque todavía más compacto (18->16pt, gap 4->3mm) -- xLetra/
+    // yLetra/ySN ya se calcularon arriba, junto con hLineas, para que
+    // las líneas verticales y el texto nunca se desalineen entre sí.
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(18)
+    doc.setFontSize(16)
     doc.setTextColor('#222222')
     doc.text(comprobante.letraFiscal!, xLetra, yLetra, { align: 'center' })
     doc.setFontSize(6)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor('#777777')
     const cod = comprobante.afip?.tipoComprobanteAfip
-    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, yLetra + 4, { align: 'center' })
+    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, ySN, { align: 'center' })
 
     // (b) Comprobante -- Fase 38c: tamaños bajados en línea con el
     // resto de la caja superior.
@@ -663,7 +666,7 @@ export async function generarComprobantePdf(
   y += 5
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(8.5)
+  doc.setFontSize(6.5)
   doc.setTextColor('#6b6b6b')
   doc.text('Descripción', colDesc, y)
   doc.text('Cant.', colCant, y, { align: 'right' })
@@ -672,11 +675,17 @@ export async function generarComprobantePdf(
   y += 2
   doc.setDrawColor(230, 230, 230)
   doc.line(marginX, y, pageWidth - marginX, y)
-  y += 5.5
+  y += 4
 
+  // Fase 38i: fuente de la fila de artículos bajada a 5pt (pedido
+  // explícito) e interlineado "standar" -- antes 4.8mm por línea, tuneado
+  // para la fuente de 9pt anterior, quedaba muy espaciado para 5pt. El
+  // salto de línea ahora es proporcional a la altura real del texto
+  // (fontSize en pt -> mm, con un pequeño margen de aire).
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
+  doc.setFontSize(5)
   doc.setTextColor('#222222')
+  const lineHeightItem = 2.4
 
   const alturaMaxima = pageHeight - 50
   for (const item of comprobante.items) {
@@ -689,7 +698,7 @@ export async function generarComprobantePdf(
     doc.text(String(item.cantidad), colCant, y, { align: 'right' })
     doc.text(formatARS(item.precioUnitario), colPU, y, { align: 'right' })
     doc.text(formatARS(item.subtotal), colSub, y, { align: 'right' })
-    y += 4.8 * (Array.isArray(lineasDesc) ? lineasDesc.length : 1)
+    y += lineHeightItem * (Array.isArray(lineasDesc) ? lineasDesc.length : 1)
   }
 
   y += 3
@@ -739,7 +748,11 @@ export async function generarComprobantePdf(
   doc.setFontSize(10.5)
   doc.setTextColor('#ffffff')
   doc.text('Total', colPU, y)
-  doc.text(formatARS(comprobante.total), colSub + padTotal, y, { align: 'right' })
+  // Fase 38i: el importe va en colSub (no colSub + padTotal) para
+  // compartir el mismo eje de alineación derecho que Subtotal/IVA de
+  // arriba -- la caja igual se extiende padTotal más allá de colSub por
+  // el lado derecho, así que el texto conserva aire respecto al borde.
+  doc.text(formatARS(comprobante.total), colSub, y, { align: 'right' })
   y += 10
 
   // ─── Notas ──────────────────────────────────────────────────
