@@ -462,14 +462,22 @@ export async function generarComprobantePdf(
     // que después usa el bloque de la letra (yLetra/ySN, más abajo) --
     // antes eran dos números sueltos que había que mantener en sync a
     // mano, y quedaban desalineados entre sí más fácil.
+    // Fase 38j: el motivo por el que seguían "viéndose abiertas" pese a
+    // acortar hLineas ronda tras ronda es que arrancaban en yBox --el
+    // techo de TODA la columna-- en vez de arrancar donde realmente
+    // empieza a verse la letra. Eso dejaba ~4mm de línea "flotando" por
+    // encima del glifo, sin nada que la justifique. Ahora arrancan justo
+    // encima del alto de mayúscula de la letra y terminan justo debajo
+    // del renglón COD./S-N, envolviéndola de verdad.
     const xLetra = (xDivisor1 + xDivisor2) / 2
     const yLetra = yBox + 8
     const ySN = yLetra + 3
-    const hLineas = ySN - yBox + 0.5
+    const yLineasTop = yLetra - 4.5
+    const yLineasBottom = ySN + 1
     doc.setDrawColor(190, 190, 190)
     doc.setLineWidth(0.25)
-    doc.line(xDivisor1, yBox, xDivisor1, yBox + hLineas)
-    doc.line(xDivisor2, yBox, xDivisor2, yBox + hLineas)
+    doc.line(xDivisor1, yLineasTop, xDivisor1, yLineasBottom)
+    doc.line(xDivisor2, yLineasTop, xDivisor2, yLineasBottom)
 
     // (a) Emisor -- Fase 38b: titular como figura en ARCA (no el
     // nombre de fantasía, que ya va en la banda), dirección del punto
@@ -735,12 +743,18 @@ export async function generarComprobantePdf(
   // marca con el texto en ese mismo color -- poco contraste, y el
   // importe quedaba pegado al borde derecho (el ancho de la caja
   // terminaba justo en colSub, donde el texto se alineaba a la
-  // derecha). Ahora: relleno sólido oscuro + texto blanco, y la caja
-  // se extiende `padTotal` más allá de colPU/colSub para que ni la
-  // palabra "Total" ni el importe toquen los bordes.
+  // derecha). Ahora: relleno sólido oscuro + texto blanco.
+  // Fase 38j: el lado izquierdo de la caja sigue abriendo `padTotal`
+  // (4mm) para darle aire a la palabra "Total", pero el lado derecho
+  // usa un padding bien chico (`padTotalDer`) -- con los mismos 4mm de
+  // antes la caja se pasaba del margen derecho que respeta el resto del
+  // documento (colSub), se veía "descolgada" hacia afuera. Con esto la
+  // caja queda contenida dentro del margen y el importe (en colSub,
+  // igual que Subtotal/IVA) conserva un mínimo de aire del borde.
   const padTotal = 4
+  const padTotalDer = 1.5
   const boxTotalX = colPU - 5 - padTotal
-  const boxTotalW = colSub - colPU + 5 + padTotal * 2
+  const boxTotalW = colSub - colPU + 5 + padTotal + padTotalDer
   const [rBg, gBg, bBg] = oscurecer(color, 0.35)
   doc.setFillColor(rBg, gBg, bBg)
   doc.roundedRect(boxTotalX, y - 5.5, boxTotalW, 9, 1.5, 1.5, 'F')
@@ -748,10 +762,8 @@ export async function generarComprobantePdf(
   doc.setFontSize(10.5)
   doc.setTextColor('#ffffff')
   doc.text('Total', colPU, y)
-  // Fase 38i: el importe va en colSub (no colSub + padTotal) para
-  // compartir el mismo eje de alineación derecho que Subtotal/IVA de
-  // arriba -- la caja igual se extiende padTotal más allá de colSub por
-  // el lado derecho, así que el texto conserva aire respecto al borde.
+  // El importe va en colSub para compartir el mismo eje de alineación
+  // derecho que Subtotal/IVA de arriba.
   doc.text(formatARS(comprobante.total), colSub, y, { align: 'right' })
   y += 10
 
