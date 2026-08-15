@@ -761,7 +761,12 @@ export async function generarComprobantePdf(
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10.5)
   doc.setTextColor('#ffffff')
-  doc.text('Total', colPU, y)
+  // Fase 38k: "Total" ahora se alinea a la derecha en colPU, igual que
+  // "Subtotal"/"IVA" arriba -- antes arrancaba en colPU hacia la
+  // derecha (align por defecto = izquierda), así que su borde derecho
+  // no coincidía con el de esas etiquetas, aunque el importe sí
+  // compartiera el eje con colSub.
+  doc.text('Total', colPU, y, { align: 'right' })
   // El importe va en colSub para compartir el mismo eje de alineación
   // derecho que Subtotal/IVA de arriba.
   doc.text(formatARS(comprobante.total), colSub, y, { align: 'right' })
