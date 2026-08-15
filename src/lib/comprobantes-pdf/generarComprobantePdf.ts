@@ -744,14 +744,18 @@ export async function generarComprobantePdf(
   // importe quedaba pegado al borde derecho (el ancho de la caja
   // terminaba justo en colSub, donde el texto se alineaba a la
   // derecha). Ahora: relleno sólido oscuro + texto blanco.
-  // Fase 38j: el lado izquierdo de la caja sigue abriendo `padTotal`
-  // (4mm) para darle aire a la palabra "Total", pero el lado derecho
-  // usa un padding bien chico (`padTotalDer`) -- con los mismos 4mm de
-  // antes la caja se pasaba del margen derecho que respeta el resto del
+  // Fase 38j: el lado izquierdo de la caja abre `padTotal` para darle
+  // aire a la palabra "Total", pero el lado derecho usa un padding bien
+  // chico (`padTotalDer`) -- con el mismo valor de antes en ambos lados
+  // la caja se pasaba del margen derecho que respeta el resto del
   // documento (colSub), se veía "descolgada" hacia afuera. Con esto la
   // caja queda contenida dentro del margen y el importe (en colSub,
   // igual que Subtotal/IVA) conserva un mínimo de aire del borde.
-  const padTotal = 4
+  // Fase 38l: `padTotal` (izquierda) subió de 4 a 10mm -- Carlos pidió
+  // más "vuelo" del lado izquierdo, la caja quedaba demasiado ceñida a
+  // la palabra "Total" (menos de 1mm de aire). El lado derecho no se
+  // toca (sigue en colSub + padTotalDer, ya alineado al margen).
+  const padTotal = 10
   const padTotalDer = 1.5
   const boxTotalX = colPU - 5 - padTotal
   const boxTotalW = colSub - colPU + 5 + padTotal + padTotalDer
