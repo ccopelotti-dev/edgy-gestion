@@ -460,10 +460,14 @@ export async function generarComprobantePdf(
     // finas separando las 3 zonas (emisor / letra / comprobante), estilo
     // minimalista. La línea horizontal de cierre (antes de "Cliente:")
     // es la que reemplaza al borde inferior, más abajo.
+    // Fase 38f: las líneas ya no bajan hasta el final de la caja (que
+    // ahora es alta por la lista vertical de contactos) -- solo
+    // acompañan al bloque de la letra fiscal, arriba, más cortas.
+    const hLineas = 20
     doc.setDrawColor(190, 190, 190)
     doc.setLineWidth(0.25)
-    doc.line(xDivisor1, yBox, xDivisor1, yBox + hBox)
-    doc.line(xDivisor2, yBox, xDivisor2, yBox + hBox)
+    doc.line(xDivisor1, yBox, xDivisor1, yBox + hLineas)
+    doc.line(xDivisor2, yBox, xDivisor2, yBox + hLineas)
 
     // (a) Emisor -- Fase 38b: titular como figura en ARCA (no el
     // nombre de fantasía, que ya va en la banda), dirección del punto
@@ -533,11 +537,13 @@ export async function generarComprobantePdf(
       }
     }
 
-    // Letra fiscal destacada -- Fase 38c: 22 -> 20, un poco menos
-    // "gritada" para acompañar el resto de la caja, más suave. Se
-    // centra en el alto real de la caja (hBox ya no es fijo).
+    // Letra fiscal destacada -- Fase 38f: Carlos pidió subirla a la
+    // parte superior de la caja, alineada con la primera línea de las
+    // columnas de al lado (titular / tipo de comprobante), en vez de
+    // quedar centrada en todo el alto de la caja (que ahora es alta
+    // por la lista vertical de contactos).
     const xLetra = (xDivisor1 + xDivisor2) / 2
-    const yLetra = yBox + hBox * 0.5 + 3
+    const yLetra = yBox + 12
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(20)
     doc.setTextColor('#222222')
@@ -546,7 +552,7 @@ export async function generarComprobantePdf(
     doc.setFont('helvetica', 'normal')
     doc.setTextColor('#777777')
     const cod = comprobante.afip?.tipoComprobanteAfip
-    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, yBox + hBox - 3, { align: 'center' })
+    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, yLetra + 5.5, { align: 'center' })
 
     // (b) Comprobante -- Fase 38c: tamaños bajados en línea con el
     // resto de la caja superior.
