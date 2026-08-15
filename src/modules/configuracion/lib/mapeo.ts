@@ -34,6 +34,9 @@ export function filaAEmpresa(fila: Record<string, any>): DatosEmpresa {
     sitioWeb: fila.sitio_web,
     instagram: fila.instagram,
     whatsappComercial: fila.whatsapp_comercial,
+    sitioWebIconoUrl: fila.sitio_web_icono_url,
+    instagramIconoUrl: fila.instagram_icono_url,
+    whatsappIconoUrl: fila.whatsapp_icono_url,
   }
 }
 
@@ -76,6 +79,9 @@ export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unk
   if ('sitioWeb' in cambios) fila.sitio_web = cambios.sitioWeb
   if ('instagram' in cambios) fila.instagram = cambios.instagram
   if ('whatsappComercial' in cambios) fila.whatsapp_comercial = cambios.whatsappComercial
+  if ('sitioWebIconoUrl' in cambios) fila.sitio_web_icono_url = cambios.sitioWebIconoUrl
+  if ('instagramIconoUrl' in cambios) fila.instagram_icono_url = cambios.instagramIconoUrl
+  if ('whatsappIconoUrl' in cambios) fila.whatsapp_icono_url = cambios.whatsappIconoUrl
   return fila
 }
 

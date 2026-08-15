@@ -57,6 +57,11 @@ function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
     sitioWeb: empresaActual.sitio_web,
     instagram: empresaActual.instagram,
     whatsappComercial: empresaActual.whatsapp_comercial,
+    // Fase 38e: ícono propio subido en Configuración > Empresa (si lo
+    // hay), para no depender del pictograma genérico.
+    sitioWebIconoUrl: empresaActual.sitio_web_icono_url,
+    instagramIconoUrl: empresaActual.instagram_icono_url,
+    whatsappIconoUrl: empresaActual.whatsapp_icono_url,
   };
 }
 

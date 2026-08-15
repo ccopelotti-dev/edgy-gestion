@@ -86,6 +86,15 @@ export interface DatosEmpresa {
   sitioWeb: string | null
   instagram: string | null
   whatsappComercial: string | null
+  // Fase 38e: el negocio puede subir su propio ícono (jpg/png) para
+  // cada red en vez de usar el pictograma genérico que dibuja el motor
+  // de PDF -- evita el problema de reproducir un logo de marca
+  // registrada sin autorización, y a la vez respeta la identidad
+  // visual real del comercio (Carlos: "un logo alternativo degrada el
+  // perfil del comercio"). null = sigue usando el pictograma genérico.
+  sitioWebIconoUrl: string | null
+  instagramIconoUrl: string | null
+  whatsappIconoUrl: string | null
 }
 
 /**

@@ -78,6 +78,12 @@ export interface Cliente {
   sitio_web: string | null
   instagram: string | null
   whatsapp_comercial: string | null
+  // Fase 38e: ícono propio (jpg/png subido por el negocio) para cada
+  // red -- si está cargado, el PDF lo usa en vez del pictograma
+  // genérico que dibuja el motor. null = sigue con el genérico.
+  sitio_web_icono_url: string | null
+  instagram_icono_url: string | null
+  whatsapp_icono_url: string | null
   created_at: string
 }
 

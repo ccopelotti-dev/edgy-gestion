@@ -45,6 +45,72 @@ async function subirLogo(file: File): Promise<string | null> {
   return supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
 }
 
+// Fase 38e: mismo bucket que el logo, con un prefijo para distinguir
+// el tipo de ícono en el nombre de archivo (no hace falta un bucket
+// aparte). El negocio sube su propio jpg/png para WhatsApp/Instagram/
+// sitio web -- así el PDF puede mostrar el ícono real de cada red sin
+// que Edgy tenga que reproducir un logo de marca registrada.
+async function subirIconoContacto(file: File, prefijo: string): Promise<string | null> {
+  const ruta = `icono-${prefijo}-${Date.now()}-${file.name}`
+  const { data: subida, error } = await supabase.storage.from('logos-clientes').upload(ruta, file)
+  if (error || !subida) return null
+  return supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
+}
+
+// Fase 38e: mini-uploader reutilizado 3 veces (sitio/Instagram/
+// WhatsApp) -- mismo lenguaje visual que el logo de la Card "Marca" de
+// más arriba (miniatura + botón), pero en chico. `previewUrl` puede
+// ser un object URL local (archivo recién elegido, todavía no subido)
+// o la URL ya guardada en la base.
+function IconoContactoUploader({
+  label,
+  previewUrl,
+  hasPendingFile,
+  disabled,
+  onSelect,
+}: {
+  label: string
+  previewUrl: string | null
+  /** true si `previewUrl` viene de un archivo recién elegido en esta
+   * sesión (todavía no subido) -- solo en ese caso tiene sentido
+   * ofrecer "Quitar" (cancela la selección, no borra lo ya guardado). */
+  hasPendingFile: boolean
+  disabled: boolean
+  onSelect: (file: File | null) => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed">
+        {previewUrl ? (
+          <img src={previewUrl} alt={label} className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-muted-foreground text-[9px]">Genérico</span>
+        )}
+      </div>
+      <label className="hover:bg-muted text-muted-foreground cursor-pointer rounded-md border px-2 py-1 text-xs">
+        {disabled ? 'Subiendo...' : previewUrl ? 'Cambiar ícono' : 'Subir ícono'}
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          disabled={disabled}
+          onChange={(e) => onSelect(e.target.files?.[0] ?? null)}
+        />
+      </label>
+      {hasPendingFile && (
+        <button
+          type="button"
+          className="text-muted-foreground text-xs underline"
+          disabled={disabled}
+          onClick={() => onSelect(null)}
+        >
+          Cancelar
+        </button>
+      )}
+    </div>
+  )
+}
+
 interface FormEmpresa {
   nombre: string
   titular: string
@@ -158,6 +224,13 @@ export default function Empresa() {
   // null, "Guardar cambios" no toca logo_url y se conserva el actual.
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [subiendoLogo, setSubiendoLogo] = useState(false)
+
+  // Fase 38e: mismo patrón que logoFile, uno por red -- se suben recién
+  // al tocar "Guardar cambios", no apenas se elige el archivo.
+  const [whatsappIconoFile, setWhatsappIconoFile] = useState<File | null>(null)
+  const [instagramIconoFile, setInstagramIconoFile] = useState<File | null>(null)
+  const [sitioWebIconoFile, setSitioWebIconoFile] = useState<File | null>(null)
+  const [subiendoIconos, setSubiendoIconos] = useState(false)
 
   const [arcaEstado, setArcaEstado] = useState<EstadoArca | null>(null)
   const [formArca, setFormArca] = useState<FormArca>(FORM_ARCA_VACIO)
@@ -355,6 +428,28 @@ export default function Empresa() {
       }
     }
 
+    // Fase 38e: mismo patrón que el logo -- solo se sube (y solo se
+    // manda en el payload) el ícono que el negocio efectivamente eligió
+    // en esta sesión. Los otros dos conservan lo que ya tenían.
+    let whatsappIconoUrl: string | null | undefined = undefined
+    let instagramIconoUrl: string | null | undefined = undefined
+    let sitioWebIconoUrl: string | null | undefined = undefined
+    if (whatsappIconoFile || instagramIconoFile || sitioWebIconoFile) {
+      setSubiendoIconos(true)
+      if (whatsappIconoFile) whatsappIconoUrl = await subirIconoContacto(whatsappIconoFile, 'whatsapp')
+      if (instagramIconoFile) instagramIconoUrl = await subirIconoContacto(instagramIconoFile, 'instagram')
+      if (sitioWebIconoFile) sitioWebIconoUrl = await subirIconoContacto(sitioWebIconoFile, 'web')
+      setSubiendoIconos(false)
+      if (
+        (whatsappIconoFile && !whatsappIconoUrl) ||
+        (instagramIconoFile && !instagramIconoUrl) ||
+        (sitioWebIconoFile && !sitioWebIconoUrl)
+      ) {
+        setMensaje('No se pudo subir alguno de los íconos. Probá de nuevo.')
+        return
+      }
+    }
+
     const ok = await guardar({
       nombre: form.nombre,
       titular: form.titular || null,
@@ -379,12 +474,20 @@ export default function Empresa() {
       sitioWeb: form.sitioWeb.trim() || null,
       instagram: form.instagram.trim() || null,
       whatsappComercial: form.whatsappComercial.trim() || null,
-      // Solo se manda si se subió un logo nuevo en esta sesión -- si
-      // no, `guardar` no incluye logoUrl en el payload y se conserva
-      // el que ya estaba.
+      // Solo se manda si se subió un logo/ícono nuevo en esta sesión --
+      // si no, `guardar` no incluye esa clave en el payload y se
+      // conserva lo que ya estaba.
       ...(logoUrl !== undefined ? { logoUrl } : {}),
+      ...(whatsappIconoUrl !== undefined ? { whatsappIconoUrl } : {}),
+      ...(instagramIconoUrl !== undefined ? { instagramIconoUrl } : {}),
+      ...(sitioWebIconoUrl !== undefined ? { sitioWebIconoUrl } : {}),
     })
-    if (ok) setLogoFile(null)
+    if (ok) {
+      setLogoFile(null)
+      setWhatsappIconoFile(null)
+      setInstagramIconoFile(null)
+      setSitioWebIconoFile(null)
+    }
     setMensaje(ok ? 'Cambios guardados.' : null)
   }
 
@@ -492,13 +595,15 @@ export default function Empresa() {
             Info comercial
           </CardTitle>
           <CardDescription>
-            Fase 38b — sitio web, Instagram y WhatsApp comercial. Se muestran en el recuadro del
-            PDF de factura (con su ícono al lado), separado de tu domicilio y teléfono fiscal.
-            Dejá en blanco lo que no uses.
+            Fase 38b/38e — sitio web, Instagram y WhatsApp comercial. Se muestran en el recuadro
+            del PDF de factura, separado de tu domicilio y teléfono fiscal. Dejá en blanco lo que
+            no uses. Para el ícono de cada uno podés subir tu propio jpg/png (por ejemplo el logo
+            oficial que bajás de la app) -- si no subís nada, se usa un ícono genérico de
+            referencia.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-3">
-          <div className="flex flex-col gap-1.5">
+        <CardContent className="grid gap-6 sm:grid-cols-3">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="sitioWeb">Sitio web</Label>
             <Input
               id="sitioWeb"
@@ -506,8 +611,15 @@ export default function Empresa() {
               onChange={(e) => setForm({ ...form, sitioWeb: e.target.value })}
               placeholder="www.tunegocio.com"
             />
+            <IconoContactoUploader
+              label="Ícono del sitio"
+              previewUrl={sitioWebIconoFile ? URL.createObjectURL(sitioWebIconoFile) : empresa.sitioWebIconoUrl}
+              hasPendingFile={!!sitioWebIconoFile}
+              disabled={subiendoIconos}
+              onSelect={setSitioWebIconoFile}
+            />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="instagram">Instagram</Label>
             <Input
               id="instagram"
@@ -515,14 +627,28 @@ export default function Empresa() {
               onChange={(e) => setForm({ ...form, instagram: e.target.value })}
               placeholder="@tunegocio"
             />
+            <IconoContactoUploader
+              label="Ícono de Instagram"
+              previewUrl={instagramIconoFile ? URL.createObjectURL(instagramIconoFile) : empresa.instagramIconoUrl}
+              hasPendingFile={!!instagramIconoFile}
+              disabled={subiendoIconos}
+              onSelect={setInstagramIconoFile}
+            />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="whatsappComercial">WhatsApp</Label>
             <Input
               id="whatsappComercial"
               value={form.whatsappComercial}
               onChange={(e) => setForm({ ...form, whatsappComercial: e.target.value })}
               placeholder="2954232323"
+            />
+            <IconoContactoUploader
+              label="Ícono de WhatsApp"
+              previewUrl={whatsappIconoFile ? URL.createObjectURL(whatsappIconoFile) : empresa.whatsappIconoUrl}
+              hasPendingFile={!!whatsappIconoFile}
+              disabled={subiendoIconos}
+              onSelect={setWhatsappIconoFile}
             />
           </div>
         </CardContent>
@@ -1015,8 +1141,8 @@ export default function Empresa() {
       </Card>
 
       <div className="flex items-center gap-3">
-        <Button onClick={handleGuardar} disabled={guardando || subiendoLogo}>
-          {guardando || subiendoLogo ? (
+        <Button onClick={handleGuardar} disabled={guardando || subiendoLogo || subiendoIconos}>
+          {guardando || subiendoLogo || subiendoIconos ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
             <Save className="mr-2 h-4 w-4" />

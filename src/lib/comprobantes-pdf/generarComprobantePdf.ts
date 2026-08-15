@@ -86,6 +86,14 @@ export interface EmpresaParaPdf {
   sitioWeb?: string | null
   instagram?: string | null
   whatsappComercial?: string | null
+  /** Fase 38e: ícono propio (jpg/png subido en Configuración > Empresa)
+   * para cada red -- si está cargado, se usa esta imagen en vez del
+   * pictograma genérico que dibuja el motor. Evita que Edgy tenga que
+   * reproducir el logo real de WhatsApp/Instagram (marca registrada);
+   * el negocio elige y sube el suyo bajo su propia responsabilidad. */
+  sitioWebIconoUrl?: string | null
+  instagramIconoUrl?: string | null
+  whatsappIconoUrl?: string | null
 }
 
 /** Leyenda de condición de IVA del emisor -- Anexo II RG 1415, espacio
@@ -285,60 +293,75 @@ function formatNumeroFiscal(puntoVenta: number, numeroComprobante: number): stri
 }
 
 /**
- * Fase 38b: pictogramas genéricos para la línea de info comercial
- * (web/Instagram/WhatsApp) -- dibujados a mano con las primitivas
- * vectoriales de jsPDF, a propósito NO son los logos de marca reales
- * (esos son assets con derechos de autor/marca registrada que no
- * corresponde reproducir acá). Solo dan una referencia visual rápida
- * de qué tipo de dato es cada uno.
+ * Fase 38b/38c: pictogramas genéricos para la línea de info comercial
+ * (WhatsApp/Instagram/web) -- dibujados a mano con las primitivas
+ * vectoriales de jsPDF, a propósito NO son los logos de marca reales.
+ * Carlos pidió expresamente que se vean "como los logos reales" y se
+ * ofreció a mandar los archivos vectoriales -- no corresponde
+ * reproducir el isotipo exacto de WhatsApp/Instagram (son marcas
+ * registradas con diseño protegido) ni siquiera partiendo de un
+ * vector que él provea, así que la solución acá es la más cercana
+ * posible sin cruzar esa línea: una placa cuadrada con esquinas
+ * redondeadas (mismo lenguaje visual "app icon" que sus referencias)
+ * rellena con el color asociado a cada red, y adentro un glifo blanco
+ * genérico (un globo de diálogo para WhatsApp, una cámara para
+ * Instagram) -- reconocible por color y forma general, sin calcar el
+ * isotipo protegido.
  */
-// Fase 38c: colores de referencia para los pictogramas de Instagram y
-// WhatsApp -- Carlos pidió reconocerlos rápido por color (naranja y
-// verde). Son aproximaciones genéricas, no los colores exactos de
-// marca registrada (que además es un degradé en el caso real de
-// Instagram) -- alcanza para la asociación visual sin reproducir el
-// logo ni la paleta oficial pixel a pixel.
-const COLOR_ICONO_INSTAGRAM: [number, number, number] = [214, 96, 34] // naranja
-const COLOR_ICONO_WHATSAPP: [number, number, number] = [42, 168, 89] // verde
-const COLOR_ICONO_WEB: [number, number, number] = [120, 120, 120] // gris neutro
+const COLOR_ICONO_WHATSAPP: [number, number, number] = [37, 178, 92] // verde
+const COLOR_ICONO_INSTAGRAM: [number, number, number] = [224, 108, 30] // naranja
+const COLOR_ICONO_WEB: [number, number, number] = [110, 110, 110] // gris neutro
 
 function dibujarIconoContacto(
   doc: jsPDF,
-  tipo: 'web' | 'instagram' | 'whatsapp',
+  tipo: 'whatsapp' | 'instagram' | 'web',
   x: number,
   y: number,
   size: number,
 ): void {
   const [dr, dg, db] =
-    tipo === 'instagram' ? COLOR_ICONO_INSTAGRAM : tipo === 'whatsapp' ? COLOR_ICONO_WHATSAPP : COLOR_ICONO_WEB
-  doc.setDrawColor(dr, dg, db)
+    tipo === 'whatsapp' ? COLOR_ICONO_WHATSAPP : tipo === 'instagram' ? COLOR_ICONO_INSTAGRAM : COLOR_ICONO_WEB
+
+  // Placa de fondo -- cuadrado con esquinas redondeadas, relleno sólido.
   doc.setFillColor(dr, dg, db)
-  doc.setLineWidth(0.2)
+  doc.roundedRect(x, y, size, size, size * 0.24, size * 0.24, 'F')
+
+  // Glifo en blanco, encima de la placa.
+  doc.setDrawColor(255, 255, 255)
+  doc.setFillColor(255, 255, 255)
+  doc.setLineWidth(size * 0.07)
   const r = size / 2
   const cx = x + r
   const cy = y + r
   switch (tipo) {
+    case 'whatsapp': {
+      // Globo de diálogo genérico con colita -- NO el auricular
+      // estilizado que usa el isotipo real de WhatsApp.
+      const bw = size * 0.58
+      const bh = size * 0.48
+      const bx = x + (size - bw) / 2
+      const by = y + size * 0.24
+      doc.roundedRect(bx, by, bw, bh, bh * 0.4, bh * 0.4, 'S')
+      doc.triangle(
+        bx + bw * 0.28, by + bh * 0.95,
+        bx + bw * 0.52, by + bh * 0.95,
+        bx + bw * 0.28, by + bh * 1.3,
+        'F',
+      )
+      break
+    }
+    case 'instagram':
+      // Pictograma tipo "cámara": cuadrado redondeado + lente + punto,
+      // NO el isotipo real de Instagram.
+      doc.roundedRect(x + size * 0.2, y + size * 0.2, size * 0.6, size * 0.6, size * 0.14, size * 0.14, 'S')
+      doc.circle(cx, cy, r * 0.42, 'S')
+      doc.circle(x + size * 0.74, y + size * 0.26, size * 0.05, 'F')
+      break
     case 'web':
       // Globo terráqueo simplificado: círculo + meridiano + ecuador.
-      doc.circle(cx, cy, r, 'S')
-      doc.line(x, cy, x + size, cy)
-      doc.ellipse(cx, cy, r * 0.45, r, 'S')
-      break
-    case 'instagram':
-      // Pictograma tipo "cámara": cuadrado redondeado + lente + punto.
-      doc.roundedRect(x, y, size, size, size * 0.28, size * 0.28, 'S')
-      doc.circle(cx, cy, r * 0.5, 'S')
-      doc.circle(x + size * 0.8, y + size * 0.2, size * 0.06, 'F')
-      break
-    case 'whatsapp':
-      // Globo de diálogo genérico con colita.
-      doc.roundedRect(x, y, size, size * 0.8, size * 0.32, size * 0.32, 'S')
-      doc.triangle(
-        x + size * 0.18, y + size * 0.78,
-        x + size * 0.4, y + size * 0.78,
-        x + size * 0.18, y + size * 1.02,
-        'S',
-      )
+      doc.circle(cx, cy, r * 0.62, 'S')
+      doc.line(x + size * 0.19, cy, x + size * 0.81, cy)
+      doc.ellipse(cx, cy, r * 0.28, r * 0.62, 'S')
       break
   }
 }
@@ -423,7 +446,10 @@ export async function generarComprobantePdf(
   // Nota de crédito/débito) -- el Presupuesto no manda `letraFiscal`.
   if (conRecuadroFiscal) {
     const yBox = y
-    const hBox = 28
+    // Fase 38c: 28 -> 34 -- la fila de contactos pasó de horizontal a
+    // vertical (WhatsApp / Instagram / Web, uno debajo del otro, en
+    // ese orden), así que la columna del emisor necesita más alto.
+    const hBox = 34
     const xColA = marginX
     const xDivisor1 = marginX + 94
     const xDivisor2 = xDivisor1 + 22
@@ -466,29 +492,56 @@ export async function generarComprobantePdf(
         yA += 4.5
       }
     }
-    const contactos: { tipo: 'web' | 'instagram' | 'whatsapp'; texto: string }[] = []
-    if (empresa.sitioWeb) contactos.push({ tipo: 'web', texto: empresa.sitioWeb })
-    if (empresa.instagram) contactos.push({ tipo: 'instagram', texto: empresa.instagram })
-    if (empresa.whatsappComercial) contactos.push({ tipo: 'whatsapp', texto: empresa.whatsappComercial })
+    // Fase 38c: la fila de contactos pasa de horizontal a vertical --
+    // WhatsApp, Instagram, Web, en ese orden fijo (Carlos lo pidió así
+    // explícitamente), un renglón por dato, cada uno con su placa de
+    // color a la izquierda.
+    // Fase 38e: si el negocio subió su propio ícono (Configuración >
+    // Empresa) se usa esa imagen tal cual en vez del pictograma
+    // genérico -- así puede mostrar el logo real de cada red sin que
+    // Edgy tenga que reproducirlo.
+    const contactos: { tipo: 'whatsapp' | 'instagram' | 'web'; texto: string; iconoUrl?: string | null }[] = []
+    if (empresa.whatsappComercial) {
+      contactos.push({ tipo: 'whatsapp', texto: empresa.whatsappComercial, iconoUrl: empresa.whatsappIconoUrl })
+    }
+    if (empresa.instagram) {
+      contactos.push({ tipo: 'instagram', texto: empresa.instagram, iconoUrl: empresa.instagramIconoUrl })
+    }
+    if (empresa.sitioWeb) {
+      contactos.push({ tipo: 'web', texto: empresa.sitioWeb, iconoUrl: empresa.sitioWebIconoUrl })
+    }
     if (contactos.length > 0) {
-      let xIcono = xColA + 3
-      const iconoSize = 2.6
-      doc.setFontSize(6.5)
-      doc.setTextColor('#555555')
+      const iconoSize = 3
+      doc.setFontSize(6.8)
       for (const c of contactos) {
-        dibujarIconoContacto(doc, c.tipo, xIcono, yA - iconoSize + 0.8, iconoSize)
-        doc.text(c.texto, xIcono + iconoSize + 1, yA)
-        xIcono += iconoSize + 1 + doc.getTextWidth(c.texto) + 3.5
+        const yIcono = yA - iconoSize + 0.9
+        let iconoPropio: { dataUrl: string; formato: 'PNG' | 'JPEG' } | null = null
+        if (c.iconoUrl) iconoPropio = await logoADataUrl(c.iconoUrl)
+        if (iconoPropio) {
+          try {
+            doc.addImage(iconoPropio.dataUrl, iconoPropio.formato, xColA + 3, yIcono, iconoSize, iconoSize)
+          } catch {
+            // Formato no soportado por jsPDF -- cae al pictograma genérico.
+            dibujarIconoContacto(doc, c.tipo, xColA + 3, yIcono, iconoSize)
+          }
+        } else {
+          dibujarIconoContacto(doc, c.tipo, xColA + 3, yIcono, iconoSize)
+        }
+        doc.setTextColor('#555555')
+        doc.text(c.texto, xColA + 3 + iconoSize + 1.3, yA)
+        yA += iconoSize + 0.8
       }
     }
 
     // Letra fiscal destacada -- Fase 38c: 22 -> 20, un poco menos
-    // "gritada" para acompañar el resto de la caja, más suave.
+    // "gritada" para acompañar el resto de la caja, más suave. Se
+    // centra en el alto real de la caja (hBox ya no es fijo).
     const xLetra = (xDivisor1 + xDivisor2) / 2
+    const yLetra = yBox + hBox * 0.5 + 3
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(20)
     doc.setTextColor('#222222')
-    doc.text(comprobante.letraFiscal!, xLetra, yBox + 18, { align: 'center' })
+    doc.text(comprobante.letraFiscal!, xLetra, yLetra, { align: 'center' })
     doc.setFontSize(6)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor('#777777')
