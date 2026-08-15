@@ -55,7 +55,13 @@ function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
 // en adelante (los comprobantes Internos que Carlos usa para iterar el
 // diseño, y cualquier factura electrónica real una vez que el diseño
 // esté afinado) usa el motor nuevo (A5 apaisada, Anexo II RG 1415).
-const CORTE_FORMATO_A5 = '2026-08-16T02:59:59.999Z'; // fin del 15/08/2026 en Arg. (UTC-3)
+// Fix: el corte original quedó mal puesto (fin del 15/08, no inicio) --
+// eso hacía que hasta los comprobantes de prueba de HOY (creados
+// después del deploy) siguieran cayendo en el motor Clásico. Lo que
+// hay que dejar afuera son los que ya tienen CAE real de ARCA, todos
+// del 14/08 o antes -- cualquier cosa del 15/08 en adelante (incluidas
+// las pruebas Internas de hoy) ya usa el motor nuevo.
+const CORTE_FORMATO_A5 = '2026-08-15T03:00:00.000Z'; // inicio del 15/08/2026 en Arg. (UTC-3)
 
 /** Descarga el PDF de un Comprobante (Factura/Recibo/Nota) -- mismo
  * mapeo que ya usaba Comprobantes.tsx, ahora reutilizable desde
