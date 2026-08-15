@@ -463,7 +463,9 @@ export async function generarComprobantePdf(
     // Fase 38f: las líneas ya no bajan hasta el final de la caja (que
     // ahora es alta por la lista vertical de contactos) -- solo
     // acompañan al bloque de la letra fiscal, arriba, más cortas.
-    const hLineas = 20
+    // Fase 38g: Carlos las quiso todavía más ceñidas al bloque
+    // letra+COD/S/N (que termina en yBox+17.5) -- casi sin aire debajo.
+    const hLineas = 18.5
     doc.setDrawColor(190, 190, 190)
     doc.setLineWidth(0.25)
     doc.line(xDivisor1, yBox, xDivisor1, yBox + hLineas)
