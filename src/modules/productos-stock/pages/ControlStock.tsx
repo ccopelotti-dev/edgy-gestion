@@ -50,6 +50,13 @@ interface ControlItem {
   rubroId: string
   ultimoControl: string | null
   estado: ControlStatus
+  /** Solo tipo==='producto': id real del producto a ajustar -- si el item
+   * representa una variante puntual, `id` de arriba es el id de la
+   * variante, no del producto padre (AJUSTAR_STOCK necesita ambos por
+   * separado). */
+  productoId?: string
+  /** Solo si este ControlItem representa una variante puntual. */
+  varianteId?: string
 }
 
 // Lotes por vencer / vencidos (Fase 1 del refactor de Productos): se arma a
@@ -125,6 +132,8 @@ export default function ControlStock() {
             rubroId: p.rubroId,
             ultimoControl: lastRegistro?.fecha ?? null,
             estado,
+            productoId: p.id,
+            varianteId: v.id,
           })
         }
         continue
@@ -154,6 +163,7 @@ export default function ControlStock() {
         rubroId: p.rubroId,
         ultimoControl: lastRegistro?.fecha ?? null,
         estado,
+        productoId: p.id,
       })
     }
 
@@ -266,6 +276,25 @@ export default function ControlStock() {
         fecha: today,
       },
     })
+
+    // Cierra el círculo del control: si el conteo físico difiere del
+    // sistema, el ajuste de stock se aplica acá mismo (antes esto quedaba
+    // como un paso manual aparte en Stock/Insumos, que muchas veces no se
+    // hacía y el registro de auditoría quedaba desconectado del stock real).
+    if (diferencia !== 0) {
+      dispatch({
+        type: 'AJUSTAR_STOCK',
+        payload: {
+          itemTipo: controlItem.tipo,
+          itemId:
+            controlItem.tipo === 'producto' ? (controlItem.productoId ?? controlItem.id) : controlItem.id,
+          varianteId: controlItem.varianteId,
+          cantidad: diferencia,
+          motivo: 'conteo_fisico',
+          nota: `Ajuste automático por control de stock (regla: ${rule.nombre})`,
+        },
+      })
+    }
     setControlItem(null)
   }
 
@@ -611,6 +640,15 @@ export default function ControlStock() {
                     {stockContado - controlItem.stock} {controlItem.unidadAbrev}
                   </span>
                 </div>
+                {stockContado - controlItem.stock !== 0 && (
+                  <p className="text-xs text-muted-foreground pt-1">
+                    Al registrar, el stock del sistema se ajusta automáticamente a{' '}
+                    <span className="font-medium text-foreground">
+                      {stockContado} {controlItem.unidadAbrev}
+                    </span>
+                    .
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -620,7 +658,7 @@ export default function ControlStock() {
               Cancelar
             </Button>
             <Button onClick={handleRegistroControl}>
-              Registrar
+              {controlItem && stockContado - controlItem.stock !== 0 ? 'Registrar y ajustar stock' : 'Registrar'}
             </Button>
           </DialogFooter>
         </DialogContent>
