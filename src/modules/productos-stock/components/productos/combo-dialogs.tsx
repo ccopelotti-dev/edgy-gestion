@@ -370,7 +370,7 @@ export function ComboDialog({
           <DialogTitle>{editData ? 'Editar combo' : 'Nuevo combo'}</DialogTitle>
           <DialogDescription>
             Agrupa productos existentes en un ítem vendible a precio propio. El combo no
-            maneja stock propio -- descuenta el de sus componentes al venderse (fase futura).
+            maneja stock propio -- al venderse, descuenta el stock de sus componentes fijos.
           </DialogDescription>
         </DialogHeader>
 

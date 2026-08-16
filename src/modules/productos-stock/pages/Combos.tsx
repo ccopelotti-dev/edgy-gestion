@@ -14,9 +14,9 @@ import type { Combo } from '../types'
 //
 // Fase 5 del refactor de Productos: catálogo de combos. Cada combo agrupa
 // productos existentes (componentes fijos + slots a elección por rubro) en
-// un ítem vendible a precio fijo. El combo no tiene stock propio -- vender
-// un combo y descontar el stock de sus componentes queda para una fase
-// futura (Fase 6), cuando se conecte con Ventas/Comandas.
+// un ítem vendible a precio fijo. El combo no tiene stock propio -- al
+// vender un combo (Fase 19.1) se descuenta el stock de sus componentes
+// fijos desde Ventas/Comandas/Menú público, no desde acá.
 
 export default function Combos() {
   const { state, dispatch } = useProductosStock()

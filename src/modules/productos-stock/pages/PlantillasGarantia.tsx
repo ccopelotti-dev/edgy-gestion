@@ -155,8 +155,8 @@ export default function PlantillasGarantia() {
 
       <p className="text-muted-foreground text-xs">
         Asigná una plantilla como default de un rubro entero desde Rubros, o pisala para un
-        producto puntual desde su ficha. La activación de la garantía en una venta se conecta
-        en una fase futura.
+        producto puntual desde su ficha. Cuando se factura un producto con garantía asignada,
+        se emite automáticamente -- podés verlas en la pestaña Garantías emitidas.
       </p>
 
       {/* Dialog */}

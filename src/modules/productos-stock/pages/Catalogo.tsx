@@ -109,8 +109,9 @@ export default function Catalogo() {
     <div className="space-y-6">
       {/* Nota de alcance */}
       <div className="rounded-lg border border-dashed bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-        Vista interna del catálogo (dentro del panel). El catálogo público para compartir en
-        redes es una entrega aparte, que requiere migrar los productos a Supabase.
+        Vista interna del catálogo (dentro del panel). El catálogo público para compartir con
+        clientes ya está activo -- el link y el QR para imprimir/compartir están en Ventas
+        Online o Menú QR (según los módulos habilitados para esta cuenta).
       </div>
 
       {/* Filtros */}
