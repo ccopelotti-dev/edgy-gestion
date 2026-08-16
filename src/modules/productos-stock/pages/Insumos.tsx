@@ -373,6 +373,11 @@ export default function Insumos() {
         rubros={state.rubros}
         subRubros={state.subRubros}
         editData={editingInsumo}
+        productos={state.productos}
+        onIrAProducto={() => {
+          setDialogOpen(false)
+          navigate(`${base}/productos`)
+        }}
       />
 
       {ajusteItem && (

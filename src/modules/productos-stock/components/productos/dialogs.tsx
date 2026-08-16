@@ -10,7 +10,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2, ImagePlus, X, Loader2, Star, Wand2 } from 'lucide-react'
+import { Plus, Trash2, ImagePlus, X, Loader2, Star, Wand2, Lock } from 'lucide-react'
 import { formatARS } from '../../lib/format'
 import { todayISO } from '../../lib/format'
 import {
@@ -1048,6 +1048,11 @@ interface InsumoDialogProps {
   rubros: Rubro[]
   subRubros: SubRubro[]
   editData?: Insumo
+  /** Fase 34+ (fix): para poder mostrar el nombre del producto vinculado y
+   * ofrecer un atajo hacia él cuando el insumo es un espejo. Opcional para
+   * no romper otros llamadores que todavía no lo pasen. */
+  productos?: Producto[]
+  onIrAProducto?: (productoId: string) => void
 }
 
 const emptyInsumo: InsumoFormData = {
@@ -1067,10 +1072,22 @@ export function InsumoDialog({
   rubros,
   subRubros,
   editData,
+  productos,
+  onIrAProducto,
 }: InsumoDialogProps) {
   const [form, setForm] = useState<InsumoFormData>(emptyInsumo)
   const [stockMinimoTexto, setStockMinimoTexto] = useState('')
   const [costoTexto, setCostoTexto] = useState('')
+
+  // Fase 34+ (fix): si el insumo es un espejo, nombre/rubro/sub-rubro/
+  // unidad/stock mínimo/costo se re-escriben solos cada vez que se guarda
+  // el producto vinculado (ver sincronizarInsumoDeProducto en store.tsx).
+  // Editarlos acá daba una falsa sensación de que el cambio queda -- se
+  // pisa en silencio en el próximo guardado del producto. Se bloquean y
+  // se explica dónde editarlos de verdad. "Comercializable" NO es un
+  // campo espejado, sigue editable normalmente.
+  const vinculado = !!editData?.productoVinculadoId
+  const productoVinculado = productos?.find((p) => p.id === editData?.productoVinculadoId)
 
   useEffect(() => {
     if (open) {
@@ -1113,6 +1130,37 @@ export function InsumoDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
+          {vinculado && (
+            <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-300">
+              <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p>
+                  Este insumo está vinculado a{' '}
+                  {productoVinculado ? (
+                    <strong>{productoVinculado.nombre}</strong>
+                  ) : (
+                    'un producto'
+                  )}
+                  . Nombre, rubro, sub-rubro, unidad, stock mínimo y costo se
+                  sincronizan solos desde ahí -- se bloquean acá para que un
+                  cambio manual no se pise en silencio la próxima vez que se
+                  guarde el producto.
+                </p>
+                {productoVinculado && onIrAProducto && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-blue-800 underline dark:text-blue-300"
+                    onClick={() => onIrAProducto(productoVinculado.id)}
+                  >
+                    Ir al producto para editarlo
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Nombre */}
           <div className="grid gap-1.5">
             <label className="text-sm font-medium">Nombre *</label>
@@ -1121,6 +1169,7 @@ export function InsumoDialog({
               value={form.nombre}
               onChange={(e) => update('nombre', e.target.value)}
               placeholder="Nombre del insumo"
+              disabled={vinculado}
             />
           </div>
 
@@ -1135,6 +1184,7 @@ export function InsumoDialog({
                   update('rubroId', e.target.value)
                   update('subRubroId', undefined)
                 }}
+                disabled={vinculado}
               >
                 <option value="">Sin rubro</option>
                 {rubrosFiltrados.map((r) => (
@@ -1150,7 +1200,7 @@ export function InsumoDialog({
                 className={inputClass}
                 value={form.subRubroId ?? ''}
                 onChange={(e) => update('subRubroId', e.target.value || undefined)}
-                disabled={!form.rubroId || subRubrosFiltrados.length === 0}
+                disabled={vinculado || !form.rubroId || subRubrosFiltrados.length === 0}
               >
                 <option value="">Sin sub-rubro</option>
                 {subRubrosFiltrados.map((sr) => (
@@ -1169,6 +1219,7 @@ export function InsumoDialog({
               className={inputClass}
               value={form.unidad}
               onChange={(e) => update('unidad', e.target.value as UnidadMedida)}
+              disabled={vinculado}
             >
               {UNIDADES.map((u) => (
                 <option key={u.value} value={u.value}>
@@ -1192,6 +1243,7 @@ export function InsumoDialog({
                   setStockMinimoTexto(texto)
                   update('stockMinimo', parsearDecimal(texto))
                 }}
+                disabled={vinculado}
               />
             </div>
             <div className="grid gap-1.5">
@@ -1206,6 +1258,7 @@ export function InsumoDialog({
                   setCostoTexto(texto)
                   update('costo', parsearDecimal(texto))
                 }}
+                disabled={vinculado}
               />
             </div>
           </div>
