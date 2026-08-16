@@ -18,6 +18,7 @@ import { useProductosStock } from '../data/store'
 import { Amount, EmptyState } from '../components/productos/display'
 import { ProductoDialog } from '../components/productos/dialogs'
 import { formatARS } from '../lib/format'
+import { sanitizarDecimal, parsearDecimal, decimalATexto } from '@/lib/decimal'
 import {
   UNIDADES,
   unidadAbrev,
@@ -54,30 +55,39 @@ interface LocalLinea {
   cantidad: number
   unidad: UnidadMedida
   costoUnitario: number
+  /** Buffers de texto (ver @/lib/decimal) -- aceptan coma decimal sin
+   * perderla mientras el usuario todavía está escribiendo. */
+  cantidadTexto: string
+  costoUnitarioTexto: string
 }
 
 interface FormulaLocal {
   cantidadProducida: number
+  cantidadProducidaTexto: string
   unidadProducida: UnidadMedida
   lineas: LocalLinea[]
   notas: string
   /** Fase 9: % de merma de proceso (informativo, ver comentario en types/index.ts). */
   mermaPorcentaje: number
+  mermaPorcentajeTexto: string
 }
 
 function emptyFormula(): FormulaLocal {
   return {
     cantidadProducida: 1,
+    cantidadProducidaTexto: '1',
     unidadProducida: 'unidad',
     lineas: [],
     notas: '',
     mermaPorcentaje: 0,
+    mermaPorcentajeTexto: '',
   }
 }
 
 function formulaToLocal(f: Formula): FormulaLocal {
   return {
     cantidadProducida: f.cantidadProducida,
+    cantidadProducidaTexto: decimalATexto(f.cantidadProducida) || String(f.cantidadProducida),
     unidadProducida: f.unidadProducida,
     lineas: f.lineas.map((l) => ({
       id: l.id,
@@ -87,9 +97,12 @@ function formulaToLocal(f: Formula): FormulaLocal {
       cantidad: l.cantidad,
       unidad: l.unidad,
       costoUnitario: l.costoUnitario,
+      cantidadTexto: decimalATexto(l.cantidad),
+      costoUnitarioTexto: decimalATexto(l.costoUnitario),
     })),
     notas: f.notas,
     mermaPorcentaje: f.mermaPorcentaje ?? 0,
+    mermaPorcentajeTexto: decimalATexto(f.mermaPorcentaje ?? 0),
   }
 }
 
@@ -164,9 +177,11 @@ function FormulaSection({
                           const insumo = insumosOptions?.find(
                             (x) => x.id === e.target.value,
                           )
+                          const nuevoCosto = insumo?.costo ?? l.costoUnitario
                           onUpdateLine(l.id, {
                             insumoId: e.target.value,
-                            costoUnitario: insumo?.costo ?? l.costoUnitario,
+                            costoUnitario: nuevoCosto,
+                            costoUnitarioTexto: decimalATexto(nuevoCosto),
                             unidad: insumo?.unidad ?? l.unidad,
                             descripcion: insumo?.nombre ?? '',
                           })
@@ -197,15 +212,13 @@ function FormulaSection({
                   <td className="px-3 py-2">
                     <input
                       className={cn(inputClass, 'text-xs text-right')}
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={l.cantidad || ''}
-                      onChange={(e) =>
-                        onUpdateLine(l.id, {
-                          cantidad: parseFloat(e.target.value) || 0,
-                        })
-                      }
+                      type="text"
+                      inputMode="decimal"
+                      value={l.cantidadTexto}
+                      onChange={(e) => {
+                        const texto = sanitizarDecimal(e.target.value)
+                        onUpdateLine(l.id, { cantidadTexto: texto, cantidad: parsearDecimal(texto) })
+                      }}
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -228,15 +241,13 @@ function FormulaSection({
                   <td className="px-3 py-2">
                     <input
                       className={cn(inputClass, 'text-xs text-right')}
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={l.costoUnitario || ''}
-                      onChange={(e) =>
-                        onUpdateLine(l.id, {
-                          costoUnitario: parseFloat(e.target.value) || 0,
-                        })
-                      }
+                      type="text"
+                      inputMode="decimal"
+                      value={l.costoUnitarioTexto}
+                      onChange={(e) => {
+                        const texto = sanitizarDecimal(e.target.value)
+                        onUpdateLine(l.id, { costoUnitarioTexto: texto, costoUnitario: parsearDecimal(texto) })
+                      }}
                     />
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium">
@@ -379,6 +390,8 @@ export default function FormularProducto() {
         cantidad: 0,
         unidad: tipo === 'mano_de_obra' ? 'hora' : 'unidad',
         costoUnitario: 0,
+        cantidadTexto: '',
+        costoUnitarioTexto: '',
       }
       return { ...prev, lineas: [...prev.lineas, newLine] }
     })
@@ -555,14 +568,14 @@ export default function FormularProducto() {
                 <label className="text-sm text-muted-foreground">Cantidad producida:</label>
                 <input
                   className={cn(inputClass, 'w-20 text-right')}
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={formula.cantidadProducida || ''}
+                  type="text"
+                  inputMode="decimal"
+                  value={formula.cantidadProducidaTexto}
                   onChange={(e) => {
-                    const nuevaCantidad = parseFloat(e.target.value) || 1
+                    const texto = sanitizarDecimal(e.target.value)
+                    const nuevaCantidad = parsearDecimal(texto) || 1
                     setFormula((prev) =>
-                      prev ? { ...prev, cantidadProducida: nuevaCantidad } : prev,
+                      prev ? { ...prev, cantidadProducidaTexto: texto, cantidadProducida: nuevaCantidad } : prev,
                     )
                     setDirty(true)
                   }}
@@ -587,15 +600,13 @@ export default function FormularProducto() {
                 <label className="text-sm text-muted-foreground">Merma de proceso (%):</label>
                 <input
                   className={cn(inputClass, 'w-20 text-right')}
-                  type="number"
-                  min={0}
-                  max={99}
-                  step={0.1}
-                  value={formula.mermaPorcentaje || ''}
+                  type="text"
+                  inputMode="decimal"
+                  value={formula.mermaPorcentajeTexto}
                   onChange={(e) => {
-                    const nuevaMerma = parseFloat(e.target.value) || 0
+                    const texto = sanitizarDecimal(e.target.value)
                     setFormula((prev) =>
-                      prev ? { ...prev, mermaPorcentaje: nuevaMerma } : prev,
+                      prev ? { ...prev, mermaPorcentajeTexto: texto, mermaPorcentaje: parsearDecimal(texto) } : prev,
                     )
                     setDirty(true)
                   }}

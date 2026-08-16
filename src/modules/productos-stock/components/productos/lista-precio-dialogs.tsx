@@ -10,6 +10,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { sanitizarDecimal, parsearDecimal, decimalATexto } from '@/lib/decimal'
 import type { ListaPrecio } from '../../types'
 
 const inputClass =
@@ -38,6 +39,7 @@ export function ListaPrecioDialog({
   editData,
 }: ListaPrecioDialogProps) {
   const [form, setForm] = useState<ListaPrecioFormData>(emptyLista)
+  const [porcentajeRecargoTexto, setPorcentajeRecargoTexto] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -46,6 +48,7 @@ export function ListaPrecioDialog({
           ? { nombre: editData.nombre, porcentajeRecargo: editData.porcentajeRecargo }
           : emptyLista,
       )
+      setPorcentajeRecargoTexto(editData ? decimalATexto(editData.porcentajeRecargo) : '')
     }
   }, [open, editData])
 
@@ -82,13 +85,14 @@ export function ListaPrecioDialog({
             <label className="text-sm font-medium">% de recargo sobre el costo</label>
             <input
               className={inputClass}
-              type="number"
-              min={0}
-              step={0.1}
-              value={form.porcentajeRecargo || ''}
-              onChange={(e) =>
-                setForm({ ...form, porcentajeRecargo: parseFloat(e.target.value) || 0 })
-              }
+              type="text"
+              inputMode="decimal"
+              value={porcentajeRecargoTexto}
+              onChange={(e) => {
+                const texto = sanitizarDecimal(e.target.value)
+                setPorcentajeRecargoTexto(texto)
+                setForm({ ...form, porcentajeRecargo: parsearDecimal(texto) })
+              }}
               placeholder="Ej: 30"
             />
             <p className="text-xs text-muted-foreground">

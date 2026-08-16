@@ -20,6 +20,7 @@ import {
 } from '../../lib/imagenes'
 import { generarCodigoInterno } from '../../lib/etiqueta'
 import { supabase } from '@/lib/supabase'
+import { sanitizarDecimal, sanitizarDecimalConSigno, parsearDecimal, decimalATexto } from '@/lib/decimal'
 import type {
   Producto,
   ProductoVariante,
@@ -123,6 +124,12 @@ export function ProductoDialog({
   editData,
 }: ProductoDialogProps) {
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
+  // Buffers de texto de los 3 campos numéricos con coma decimal (ver
+  // @/lib/decimal) -- separados de `form` para no pisar la coma que el
+  // usuario todavía está escribiendo.
+  const [precioVentaTexto, setPrecioVentaTexto] = useState('')
+  const [costoTexto, setCostoTexto] = useState('')
+  const [stockMinimoTexto, setStockMinimoTexto] = useState('')
   const [subiendo, setSubiendo] = useState(false)
   const [errorImagen, setErrorImagen] = useState('')
   const [errorCodigoBarras, setErrorCodigoBarras] = useState('')
@@ -218,8 +225,14 @@ export function ProductoDialog({
           // hasta que se guarda, sin tocar el state global.
           variantes: rest.variantes.map((v) => ({ ...v })),
         })
+        setPrecioVentaTexto(decimalATexto(rest.precioVenta))
+        setCostoTexto(decimalATexto(rest.costo))
+        setStockMinimoTexto(decimalATexto(rest.stockMinimo))
       } else {
         setForm(emptyProducto)
+        setPrecioVentaTexto('')
+        setCostoTexto('')
+        setStockMinimoTexto('')
       }
     }
   }, [open, editData])
@@ -330,6 +343,7 @@ export function ProductoDialog({
 
   function handleSave() {
     if (!form.nombre.trim()) return
+    if (!form.rubroId) return
     if (!variantesValidas) return
 
     const codigoBarrasLimpio = form.codigoBarras?.trim() || undefined
@@ -531,7 +545,7 @@ export function ProductoDialog({
           {/* Rubro y Sub-rubro */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Rubro</label>
+              <label className="text-sm font-medium">Rubro *</label>
               <select
                 className={inputClass}
                 value={form.rubroId}
@@ -540,13 +554,20 @@ export function ProductoDialog({
                   update('subRubroId', undefined)
                 }}
               >
-                <option value="">Sin rubro</option>
+                <option value="" disabled>
+                  Elegí un rubro...
+                </option>
                 {rubrosFiltrados.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.nombre}
                   </option>
                 ))}
               </select>
+              {rubrosFiltrados.length === 0 && (
+                <p className="text-xs text-amber-600">
+                  Todavía no cargaste ningún rubro -- creá uno primero en la pestaña Rubros.
+                </p>
+              )}
             </div>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Sub-rubro</label>
@@ -751,22 +772,28 @@ export function ProductoDialog({
               <label className="text-sm font-medium">Precio venta</label>
               <input
                 className={inputClass}
-                type="number"
-                min={0}
-                step={0.01}
-                value={form.precioVenta || ''}
-                onChange={(e) => update('precioVenta', parseFloat(e.target.value) || 0)}
+                type="text"
+                inputMode="decimal"
+                value={precioVentaTexto}
+                onChange={(e) => {
+                  const texto = sanitizarDecimal(e.target.value)
+                  setPrecioVentaTexto(texto)
+                  update('precioVenta', parsearDecimal(texto))
+                }}
               />
             </div>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Costo</label>
               <input
                 className={inputClass}
-                type="number"
-                min={0}
-                step={0.01}
-                value={form.costo || ''}
-                onChange={(e) => update('costo', parseFloat(e.target.value) || 0)}
+                type="text"
+                inputMode="decimal"
+                value={costoTexto}
+                onChange={(e) => {
+                  const texto = sanitizarDecimal(e.target.value)
+                  setCostoTexto(texto)
+                  update('costo', parsearDecimal(texto))
+                }}
               />
             </div>
           </div>
@@ -808,10 +835,14 @@ export function ProductoDialog({
             <label className="text-sm font-medium">Stock minimo</label>
             <input
               className={inputClass}
-              type="number"
-              min={0}
-              value={form.stockMinimo || ''}
-              onChange={(e) => update('stockMinimo', parseFloat(e.target.value) || 0)}
+              type="text"
+              inputMode="decimal"
+              value={stockMinimoTexto}
+              onChange={(e) => {
+                const texto = sanitizarDecimal(e.target.value)
+                setStockMinimoTexto(texto)
+                update('stockMinimo', parsearDecimal(texto))
+              }}
             />
           </div>
 
@@ -996,7 +1027,7 @@ export function ProductoDialog({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={!form.nombre.trim() || subiendo || !variantesValidas}
+            disabled={!form.nombre.trim() || !form.rubroId || subiendo || !variantesValidas}
           >
             {editData ? 'Guardar cambios' : 'Crear producto'}
           </Button>
@@ -1038,14 +1069,20 @@ export function InsumoDialog({
   editData,
 }: InsumoDialogProps) {
   const [form, setForm] = useState<InsumoFormData>(emptyInsumo)
+  const [stockMinimoTexto, setStockMinimoTexto] = useState('')
+  const [costoTexto, setCostoTexto] = useState('')
 
   useEffect(() => {
     if (open) {
       if (editData) {
         const { id, stock, createdAt, productoVinculadoId, ...rest } = editData
         setForm(rest)
+        setStockMinimoTexto(decimalATexto(rest.stockMinimo))
+        setCostoTexto(decimalATexto(rest.costo))
       } else {
         setForm(emptyInsumo)
+        setStockMinimoTexto('')
+        setCostoTexto('')
       }
     }
   }, [open, editData])
@@ -1147,21 +1184,28 @@ export function InsumoDialog({
               <label className="text-sm font-medium">Stock minimo</label>
               <input
                 className={inputClass}
-                type="number"
-                min={0}
-                value={form.stockMinimo || ''}
-                onChange={(e) => update('stockMinimo', parseFloat(e.target.value) || 0)}
+                type="text"
+                inputMode="decimal"
+                value={stockMinimoTexto}
+                onChange={(e) => {
+                  const texto = sanitizarDecimal(e.target.value)
+                  setStockMinimoTexto(texto)
+                  update('stockMinimo', parsearDecimal(texto))
+                }}
               />
             </div>
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Costo</label>
               <input
                 className={inputClass}
-                type="number"
-                min={0}
-                step={0.01}
-                value={form.costo || ''}
-                onChange={(e) => update('costo', parseFloat(e.target.value) || 0)}
+                type="text"
+                inputMode="decimal"
+                value={costoTexto}
+                onChange={(e) => {
+                  const texto = sanitizarDecimal(e.target.value)
+                  setCostoTexto(texto)
+                  update('costo', parsearDecimal(texto))
+                }}
               />
             </div>
           </div>
@@ -1211,6 +1255,11 @@ interface LineaForm {
   varianteId: string
   cantidad: number
   costoUnitario: number
+  /** Buffer de texto de los inputs de arriba -- acepta coma decimal (ver
+   * @/lib/decimal) sin perderla mientras el usuario todavía está
+   * escribiendo. */
+  cantidadTexto: string
+  costoUnitarioTexto: string
   /** Vencimiento del lote que ingresa (opcional -- perecederos). */
   fechaVencimiento: string
 }
@@ -1260,7 +1309,9 @@ export function RecepcionDialog({
       setLineas((prev) => {
         const idx = prev.findIndex((l) => l.itemTipo === 'producto' && l.itemId === producto.id && !l.varianteId)
         if (idx >= 0) {
-          return prev.map((l, i) => (i === idx ? { ...l, cantidad: l.cantidad + 1 } : l))
+          return prev.map((l, i) =>
+            i === idx ? { ...l, cantidad: l.cantidad + 1, cantidadTexto: decimalATexto(l.cantidad + 1) } : l,
+          )
         }
         return [
           ...prev,
@@ -1271,6 +1322,8 @@ export function RecepcionDialog({
             varianteId: '',
             cantidad: 1,
             costoUnitario: producto.costo,
+            cantidadTexto: '1',
+            costoUnitarioTexto: decimalATexto(producto.costo),
             fechaVencimiento: '',
           },
         ]
@@ -1289,7 +1342,9 @@ export function RecepcionDialog({
             (l) => l.itemTipo === 'producto' && l.itemId === p.id && l.varianteId === variante.id,
           )
           if (idx >= 0) {
-            return prev.map((l, i) => (i === idx ? { ...l, cantidad: l.cantidad + 1 } : l))
+            return prev.map((l, i) =>
+              i === idx ? { ...l, cantidad: l.cantidad + 1, cantidadTexto: decimalATexto(l.cantidad + 1) } : l,
+            )
           }
           return [
             ...prev,
@@ -1300,6 +1355,8 @@ export function RecepcionDialog({
               varianteId: variante.id,
               cantidad: 1,
               costoUnitario: p.costo,
+              cantidadTexto: '1',
+              costoUnitarioTexto: decimalATexto(p.costo),
               fechaVencimiento: '',
             },
           ]
@@ -1322,6 +1379,8 @@ export function RecepcionDialog({
         varianteId: '',
         cantidad: 0,
         costoUnitario: 0,
+        cantidadTexto: '',
+        costoUnitarioTexto: '',
         fechaVencimiento: '',
       },
     ])
@@ -1348,14 +1407,17 @@ export function RecepcionDialog({
     return true
   }
 
+  const datosCabeceraValidos = proveedor.trim().length > 0 && numeroRemito.trim().length > 0
+
   function handleSave() {
     const validLineas = lineas.filter(lineaValida)
     if (validLineas.length === 0) return
+    if (!datosCabeceraValidos) return
 
     onSave({
       fecha,
-      proveedor,
-      numeroRemito,
+      proveedor: proveedor.trim(),
+      numeroRemito: numeroRemito.trim(),
       notas,
       lineas: validLineas.map((l) => ({
         // La tabla recepcion_lineas usa `uuid` como tipo de columna id.
@@ -1397,7 +1459,7 @@ export function RecepcionDialog({
               />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">Proveedor</label>
+              <label className="text-sm font-medium">Proveedor *</label>
               <input
                 className={inputClass}
                 value={proveedor}
@@ -1406,7 +1468,7 @@ export function RecepcionDialog({
               />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium">N. remito</label>
+              <label className="text-sm font-medium">N. remito *</label>
               <input
                 className={inputClass}
                 value={numeroRemito}
@@ -1520,13 +1582,13 @@ export function RecepcionDialog({
                       <label className="text-xs text-muted-foreground">Cantidad</label>
                       <input
                         className={inputClass}
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={linea.cantidad || ''}
-                        onChange={(e) =>
-                          updateLinea(idx, { cantidad: parseFloat(e.target.value) || 0 })
-                        }
+                        type="text"
+                        inputMode="decimal"
+                        value={linea.cantidadTexto}
+                        onChange={(e) => {
+                          const texto = sanitizarDecimal(e.target.value)
+                          updateLinea(idx, { cantidadTexto: texto, cantidad: parsearDecimal(texto) })
+                        }}
                       />
                     </div>
 
@@ -1535,15 +1597,13 @@ export function RecepcionDialog({
                       <label className="text-xs text-muted-foreground">Costo unit.</label>
                       <input
                         className={inputClass}
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={linea.costoUnitario || ''}
-                        onChange={(e) =>
-                          updateLinea(idx, {
-                            costoUnitario: parseFloat(e.target.value) || 0,
-                          })
-                        }
+                        type="text"
+                        inputMode="decimal"
+                        value={linea.costoUnitarioTexto}
+                        onChange={(e) => {
+                          const texto = sanitizarDecimal(e.target.value)
+                          updateLinea(idx, { costoUnitarioTexto: texto, costoUnitario: parsearDecimal(texto) })
+                        }}
                       />
                     </div>
 
@@ -1610,7 +1670,7 @@ export function RecepcionDialog({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={lineas.filter(lineaValida).length === 0}
+            disabled={lineas.filter(lineaValida).length === 0 || !datosCabeceraValidos}
           >
             Crear recepcion
           </Button>
@@ -1932,12 +1992,14 @@ export function AjusteStockDialog({
   item,
 }: AjusteStockDialogProps) {
   const [cantidad, setCantidad] = useState(0)
+  const [cantidadTexto, setCantidadTexto] = useState('')
   const [motivo, setMotivo] = useState<MotivoAjuste>('conteo_fisico')
   const [nota, setNota] = useState('')
 
   useEffect(() => {
     if (open) {
       setCantidad(0)
+      setCantidadTexto('')
       setMotivo('conteo_fisico')
       setNota('')
     }
@@ -1949,6 +2011,12 @@ export function AjusteStockDialog({
     if (cantidad === 0) return
     onSave({ cantidad, motivo, nota })
     onOpenChange(false)
+  }
+
+  function handleCantidadTexto(raw: string) {
+    const texto = sanitizarDecimalConSigno(raw)
+    setCantidadTexto(texto)
+    setCantidad(parsearDecimal(texto))
   }
 
   return (
@@ -1977,10 +2045,10 @@ export function AjusteStockDialog({
             </label>
             <input
               className={inputClass}
-              type="number"
-              step={0.01}
-              value={cantidad || ''}
-              onChange={(e) => setCantidad(parseFloat(e.target.value) || 0)}
+              type="text"
+              inputMode="decimal"
+              value={cantidadTexto}
+              onChange={(e) => handleCantidadTexto(e.target.value)}
               placeholder="Ej: 10 o -5"
             />
           </div>

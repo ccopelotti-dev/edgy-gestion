@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { useProductosStock } from '../data/store'
 import { KpiCard, EmptyState } from '../components/productos/display'
 import { formatDate, todayISO } from '../lib/format'
+import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
 import { unidadAbrev } from '../types'
 
 const inputClass =
@@ -44,7 +45,9 @@ export default function Produccion() {
 
   const [selectedProductoId, setSelectedProductoId] = useState('')
   const [factor, setFactor] = useState(1)
+  const [factorTexto, setFactorTexto] = useState('1')
   const [cantidadReal, setCantidadReal] = useState<number | ''>('')
+  const [cantidadRealTexto, setCantidadRealTexto] = useState('')
   const [fecha, setFecha] = useState(todayISO())
   const [notas, setNotas] = useState('')
 
@@ -75,7 +78,9 @@ export default function Produccion() {
 
     setSelectedProductoId('')
     setFactor(1)
+    setFactorTexto('1')
     setCantidadReal('')
+    setCantidadRealTexto('')
     setFecha(todayISO())
     setNotas('')
   }
@@ -163,6 +168,7 @@ export default function Produccion() {
                   onChange={(e) => {
                     setSelectedProductoId(e.target.value)
                     setCantidadReal('')
+                    setCantidadRealTexto('')
                   }}
                 >
                   <option value="">Seleccionar un producto...</option>
@@ -193,11 +199,14 @@ export default function Produccion() {
                     </label>
                     <input
                       className={cn(inputClass, 'text-right')}
-                      type="number"
-                      min={0.01}
-                      step={0.5}
-                      value={factor || ''}
-                      onChange={(e) => setFactor(parseFloat(e.target.value) || 0)}
+                      type="text"
+                      inputMode="decimal"
+                      value={factorTexto}
+                      onChange={(e) => {
+                        const texto = sanitizarDecimal(e.target.value)
+                        setFactorTexto(texto)
+                        setFactor(parsearDecimal(texto))
+                      }}
                     />
                   </div>
                   <div>
@@ -206,16 +215,15 @@ export default function Produccion() {
                     </label>
                     <input
                       className={cn(inputClass, 'text-right')}
-                      type="number"
-                      min={0}
-                      step={0.01}
+                      type="text"
+                      inputMode="decimal"
                       placeholder={cantidadTeorica.toFixed(2)}
-                      value={cantidadReal}
-                      onChange={(e) =>
-                        setCantidadReal(
-                          e.target.value === '' ? '' : parseFloat(e.target.value) || 0,
-                        )
-                      }
+                      value={cantidadRealTexto}
+                      onChange={(e) => {
+                        const texto = sanitizarDecimal(e.target.value)
+                        setCantidadRealTexto(texto)
+                        setCantidadReal(texto === '' ? '' : parsearDecimal(texto))
+                      }}
                     />
                   </div>
                   <div>

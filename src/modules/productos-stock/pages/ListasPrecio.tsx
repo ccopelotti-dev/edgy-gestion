@@ -9,6 +9,7 @@ import { useClienteActual } from '@/hooks/useClienteActual'
 import { useProductosStock } from '../data/store'
 import { EmptyState, Amount } from '../components/productos/display'
 import { ListaPrecioDialog } from '../components/productos/lista-precio-dialogs'
+import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
 import type { ListaPrecio, Producto, ProductoPrecio } from '../types'
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -161,8 +162,12 @@ function FilaPrecioProducto({
   }, [override?.precio, producto.costo, lista.porcentajeRecargo])
 
   function handleBlur() {
-    const num = parseFloat(valor)
-    if (isNaN(num) || num < 0) {
+    if (!valor.trim()) {
+      setValor(String((override?.precio ?? calculado).toFixed(2)))
+      return
+    }
+    const num = parsearDecimal(valor)
+    if (num < 0) {
       setValor(String((override?.precio ?? calculado).toFixed(2)))
       return
     }
@@ -185,8 +190,9 @@ function FilaPrecioProducto({
       <td className="px-4 py-2 text-right">
         <input
           className="h-8 w-28 rounded-md border border-input bg-background px-2 py-1 text-right text-sm"
+          inputMode="decimal"
           value={valor}
-          onChange={(e) => setValor(e.target.value)}
+          onChange={(e) => setValor(sanitizarDecimal(e.target.value))}
           onBlur={handleBlur}
         />
       </td>
