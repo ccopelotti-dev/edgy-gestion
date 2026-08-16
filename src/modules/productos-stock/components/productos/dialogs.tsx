@@ -105,6 +105,8 @@ const emptyProducto: ProductoFormData = {
   diasDisponibles: undefined,
   puntoVentaId: undefined,
   esInsumo: false,
+  servicioAsociadoId: undefined,
+  servicioAsociadoObligatorio: false,
 }
 
 export function ProductoDialog({
@@ -147,6 +149,27 @@ export function ProductoDialog({
       .order('nombre')
       .then(({ data }) => {
         if (activo) setProveedores(data ?? [])
+      })
+    return () => {
+      activo = false
+    }
+  }, [open])
+
+  // Fase 40: catálogo de Servicios (módulo separado) para el selector de
+  // "Servicio asociado" -- mismo criterio directo-a-Supabase que
+  // proveedores acá arriba, sin acoplar este módulo al store de Servicios.
+  const [servicios, setServicios] = useState<{ id: string; titulo: string }[]>([])
+
+  useEffect(() => {
+    if (!open) return
+    let activo = true
+    supabase
+      .from('servicios')
+      .select('id, titulo')
+      .eq('estado', 'activo')
+      .order('titulo')
+      .then(({ data }) => {
+        if (activo) setServicios(data ?? [])
       })
     return () => {
       activo = false
@@ -332,6 +355,8 @@ export function ProductoDialog({
       plantillaGarantiaId: form.plantillaGarantiaId || undefined,
       diasDisponibles: form.diasDisponibles && form.diasDisponibles.length ? form.diasDisponibles : undefined,
       puntoVentaId: form.puntoVentaId || undefined,
+      servicioAsociadoId: form.servicioAsociadoId || undefined,
+      servicioAsociadoObligatorio: form.servicioAsociadoId ? !!form.servicioAsociadoObligatorio : false,
       variantes:
         form.tipo === 'con_variantes'
           ? form.variantes.map((v) => ({
@@ -625,6 +650,41 @@ export function ProductoDialog({
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Servicio asociado (Fase 40): enlace opcional a un servicio del
+              módulo Servicios -- ej. "Instalación" para una cortina. Mismo
+              criterio liviano que Marca/Proveedor preferido de arriba. */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Servicio asociado</label>
+            <p className="text-xs text-muted-foreground">
+              Un servicio (ej. instalación) que suele venderse junto con este producto.
+            </p>
+            <select
+              className={inputClass}
+              value={form.servicioAsociadoId ?? ''}
+              onChange={(e) => update('servicioAsociadoId', e.target.value || undefined)}
+            >
+              <option value="">Sin servicio asociado</option>
+              {servicios.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.titulo}
+                </option>
+              ))}
+            </select>
+            {form.servicioAsociadoId && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={!!form.servicioAsociadoObligatorio}
+                  onChange={(e) => update('servicioAsociadoObligatorio', e.target.checked)}
+                />
+                Agregarlo automáticamente al vender este producto
+                <span className="text-xs text-muted-foreground">
+                  (si no, Ventas solo lo va a sugerir con un botón)
+                </span>
+              </label>
+            )}
           </div>
 
           {/* Disponible en (Fase 27d): solo aparece en clientes con 2+

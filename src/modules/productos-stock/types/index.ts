@@ -339,6 +339,23 @@ export interface Producto {
    * Ver `productoVinculadoDe`/`espejarInsumoVinculado` en data/store.tsx.
    */
   esInsumo?: boolean
+  /**
+   * Fase 40: Servicio asociado a este producto (ej. "Instalación" para una
+   * cortina), del módulo Servicios. Mismo patrón liviano que marcaId/
+   * proveedorId -- un enlace opcional simple, no una tabla puente: la
+   * gran mayoría de los casos reales es "este producto tiene UN servicio
+   * típico asociado". Si el servicio es de tipo 'con_variantes', debería
+   * elegirse la variante puntual al momento de vender (no acá).
+   */
+  servicioAsociadoId?: string
+  /**
+   * Si true, Ventas agrega automáticamente una segunda línea con el
+   * servicio asociado al vender este producto. Si false (default), Ventas
+   * solo sugiere agregarlo con un botón "+ agregar servicio" -- el
+   * operador decide caso a caso (ej. instalación no siempre aplica si el
+   * cliente retira el producto y lo coloca él mismo).
+   */
+  servicioAsociadoObligatorio?: boolean
   createdAt: string
 }
 

@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2, Search, ShieldCheck, Tag, Check } from 'lucide-react';
+import { X, Plus, Trash2, Search, ShieldCheck, Tag, Check, Briefcase } from 'lucide-react';
 
 import type {
   Cliente,
@@ -405,6 +405,13 @@ interface ItemRow {
    * de los componentes fijos del combo (ver descontarStockVenta.ts),
    * no de un producto único. */
   comboId?: string;
+  /** Vínculo opcional a un Servicio del catálogo -- Fase 40. Mutuamente
+   * excluyente con productoId/comboId: no descuenta stock (Servicios no
+   * tiene). Si el servicio es de tipo 'con_variantes', varianteServicioId
+   * identifica cuál variante se vendió (cada variante tiene su propio
+   * precio -- ver flattening en cargarCatalogo). */
+  servicioId?: string;
+  varianteServicioId?: string;
 }
 
 function newItemRow(): ItemRow {
@@ -432,7 +439,7 @@ function filaItemIncompleta(item: ItemRow): boolean {
  * borrara a mano (mismo criterio que PresupuestoDialog, ver
  * filaPresupuestoVacia). */
 function filaItemVacia(item: ItemRow): boolean {
-  return !item.descripcion.trim() && !item.productoId && !item.comboId;
+  return !item.descripcion.trim() && !item.productoId && !item.comboId && !item.servicioId;
 }
 
 // Fase 18: selector de catálogo en "Nuevo comprobante" -- versión simplificada
@@ -448,6 +455,11 @@ interface ProductoCatalogoItem {
   precioVenta: number;
   stock: number;
   controlaStock: boolean;
+  /** Fase 40: Servicio asociado (ej. Instalación), si el producto tiene uno
+   * cargado -- ver Producto.servicioAsociadoId. Maneja el auto-agregado o
+   * la sugerencia al elegir este producto desde el buscador. */
+  servicioAsociadoId?: string;
+  servicioAsociadoObligatorio?: boolean;
 }
 
 // Fase 19.1: los combos también son vendibles desde acá -- no tienen stock
@@ -462,9 +474,26 @@ interface ComboCatalogoItem {
   etiqueta?: string;
 }
 
+// Fase 40: los Servicios (módulo separado, sin stock) también son vendibles
+// desde acá -- mismo criterio que Combos, pero un servicio 'con_variantes'
+// no tiene un precio único (cada variante tiene el suyo), así que se
+// "aplana" en cargarCatalogo: una entrada seleccionable por variante (ej.
+// "Instalación - Cortina simple" / "Instalación - Cortina doble"), cada una
+// con su propio varianteServicioId. Un servicio 'a_convenir' llega con
+// precioVenta 0 -- el operador lo completa a mano en la fila, igual que
+// cualquier línea manual.
+interface ServicioCatalogoItem {
+  id: string;
+  varianteServicioId?: string;
+  nombre: string;
+  precioVenta: number;
+  aConvenir: boolean;
+}
+
 type SugerenciaCatalogo =
   | { tipo: 'producto'; item: ProductoCatalogoItem }
-  | { tipo: 'combo'; item: ComboCatalogoItem };
+  | { tipo: 'combo'; item: ComboCatalogoItem }
+  | { tipo: 'servicio'; item: ServicioCatalogoItem };
 
 export function ComprobanteDialog({
   open,
@@ -513,7 +542,13 @@ export function ComprobanteDialog({
   // Fase 19.1: combos disponibles del catálogo, cargados junto con los
   // productos (misma condición `open` + cliente tenant).
   const [combosCatalogo, setCombosCatalogo] = useState<ComboCatalogoItem[]>([]);
+  // Fase 40: servicios vendibles del catálogo, ya "aplanados" por variante.
+  const [serviciosCatalogo, setServiciosCatalogo] = useState<ServicioCatalogoItem[]>([]);
   const [busquedaProducto, setBusquedaProducto] = useState('');
+  // Fase 40: cuando se agrega un producto con Servicio asociado no
+  // obligatorio, queda acá la sugerencia para que el operador la confirme
+  // con un clic (o la descarte) -- ver handleAgregarLineaCatalogo.
+  const [servicioSugerido, setServicioSugerido] = useState<ServicioCatalogoItem | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -525,6 +560,7 @@ export function ComprobanteDialog({
       setErrors({});
       setIntentoGuardar(false);
       setBusquedaProducto('');
+      setServicioSugerido(null);
       setTextoCantidad({});
       setTextoPrecio({});
       // Fase 27c: precarga el punto de venta al que está restringido el
@@ -587,10 +623,10 @@ export function ComprobanteDialog({
     const listaId = clienteTenant.lista_precio_ventas_id;
 
     async function cargarCatalogo() {
-      const [productosRes, listaRes, overridesRes, combosRes] = await Promise.all([
+      const [productosRes, listaRes, overridesRes, combosRes, serviciosRes] = await Promise.all([
         supabase
           .from('productos')
-          .select('id, nombre, precio_venta, costo, stock, controla_stock')
+          .select('id, nombre, precio_venta, costo, stock, controla_stock, servicio_asociado_id, servicio_asociado_obligatorio')
           .eq('cliente_id', clienteTenant!.id)
           .eq('disponible', true)
           .eq('estado', 'activo')
@@ -609,9 +645,59 @@ export function ComprobanteDialog({
           .eq('cliente_id', clienteTenant!.id)
           .eq('disponible', true)
           .order('nombre'),
+        // Fase 40: servicios activos del cliente -- tampoco usan lista de
+        // precio (precio fijo cargado en el módulo Servicios).
+        supabase
+          .from('servicios')
+          .select('id, titulo, tipo, modalidad_precio, precio')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('estado', 'activo')
+          .order('titulo'),
       ]);
 
       if (!activo) return;
+
+      // Fase 40: los servicios 'con_variantes' no tienen precio propio --
+      // hay que traer sus variantes en una segunda consulta (no se puede
+      // resolver en el Promise.all de arriba porque depende de los ids).
+      const serviciosData = (serviciosRes.data ?? []) as any[];
+      const idsConVariantes = serviciosData.filter((s) => s.tipo === 'con_variantes').map((s) => s.id);
+      let variantesPorServicio = new Map<string, { id: string; nombre: string; modalidad_precio: string; precio: number }[]>();
+      if (idsConVariantes.length > 0 && activo) {
+        const variantesRes = await supabase
+          .from('servicio_variantes')
+          .select('id, servicio_id, nombre, modalidad_precio, precio')
+          .in('servicio_id', idsConVariantes)
+          .order('orden');
+        if (!activo) return;
+        for (const v of (variantesRes.data ?? []) as any[]) {
+          const lista = variantesPorServicio.get(v.servicio_id) ?? [];
+          lista.push(v);
+          variantesPorServicio.set(v.servicio_id, lista);
+        }
+      }
+      const servicios: ServicioCatalogoItem[] = [];
+      for (const s of serviciosData) {
+        if (s.tipo === 'con_variantes') {
+          for (const v of variantesPorServicio.get(s.id) ?? []) {
+            servicios.push({
+              id: s.id,
+              varianteServicioId: v.id,
+              nombre: `${s.titulo} - ${v.nombre}`,
+              precioVenta: v.modalidad_precio === 'a_convenir' ? 0 : Number(v.precio ?? 0),
+              aConvenir: v.modalidad_precio === 'a_convenir',
+            });
+          }
+        } else {
+          servicios.push({
+            id: s.id,
+            nombre: s.titulo,
+            precioVenta: s.modalidad_precio === 'a_convenir' ? 0 : Number(s.precio ?? 0),
+            aConvenir: s.modalidad_precio === 'a_convenir',
+          });
+        }
+      }
+      setServiciosCatalogo(servicios);
 
       const porcentaje = listaRes.data ? Number(listaRes.data.porcentaje_recargo) : 0;
       const overridesPorProducto = new Map<string, number>();
@@ -630,6 +716,8 @@ export function ComprobanteDialog({
             precioVenta,
             stock: Number(p.stock),
             controlaStock: !!p.controla_stock,
+            servicioAsociadoId: p.servicio_asociado_id ?? undefined,
+            servicioAsociadoObligatorio: !!p.servicio_asociado_obligatorio,
           } as ProductoCatalogoItem;
         }),
       );
@@ -659,11 +747,14 @@ export function ComprobanteDialog({
     const combos: SugerenciaCatalogo[] = combosCatalogo
       .filter((c) => c.nombre.toLowerCase().includes(q))
       .map((item) => ({ tipo: 'combo' as const, item }));
+    const servicios: SugerenciaCatalogo[] = serviciosCatalogo
+      .filter((s) => s.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'servicio' as const, item }));
     const productos: SugerenciaCatalogo[] = productosCatalogo
       .filter((p) => p.nombre.toLowerCase().includes(q))
       .map((item) => ({ tipo: 'producto' as const, item }));
-    return [...combos, ...productos].slice(0, 8);
-  }, [busquedaProducto, productosCatalogo, combosCatalogo]);
+    return [...combos, ...servicios, ...productos].slice(0, 8);
+  }, [busquedaProducto, productosCatalogo, combosCatalogo, serviciosCatalogo]);
 
   const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogoItem) => {
     const nuevaLinea: ItemRow = {
@@ -681,7 +772,38 @@ export function ComprobanteDialog({
       return [...prev, nuevaLinea];
     });
     setBusquedaProducto('');
-  }, []);
+
+    // Fase 40: Servicio asociado -- si el producto elegido tiene uno
+    // cargado (ver Producto.servicioAsociadoId), se agrega solo cuando es
+    // "obligatorio"; si no, queda como sugerencia con un botón (ver render
+    // más abajo). Un servicio 'con_variantes' no tiene una única entrada
+    // para auto-agregar (cada variante tiene su propio precio) -- en ese
+    // caso se precarga el buscador con su título para que el operador
+    // elija la variante puntual.
+    setServicioSugerido(null);
+    if (producto.servicioAsociadoId) {
+      const candidatos = serviciosCatalogo.filter((s) => s.id === producto.servicioAsociadoId);
+      if (candidatos.length === 1) {
+        if (producto.servicioAsociadoObligatorio) {
+          const servicioLinea: ItemRow = {
+            key: generarId(),
+            descripcion: candidatos[0].nombre,
+            cantidad: 1,
+            precioUnitario: candidatos[0].precioVenta,
+            descuento: 0,
+            alicuotaIva: 21,
+            servicioId: candidatos[0].id,
+            varianteServicioId: candidatos[0].varianteServicioId,
+          };
+          setItems((prev) => [...prev, servicioLinea]);
+        } else {
+          setServicioSugerido(candidatos[0]);
+        }
+      } else if (candidatos.length > 1 && !producto.servicioAsociadoObligatorio) {
+        setBusquedaProducto(candidatos[0].nombre.split(' - ')[0]);
+      }
+    }
+  }, [serviciosCatalogo]);
 
   const handleAgregarLineaCombo = useCallback((combo: ComboCatalogoItem) => {
     const nuevaLinea: ItemRow = {
@@ -699,6 +821,27 @@ export function ComprobanteDialog({
       return [...prev, nuevaLinea];
     });
     setBusquedaProducto('');
+    setServicioSugerido(null);
+  }, []);
+
+  const handleAgregarLineaServicio = useCallback((servicio: ServicioCatalogoItem) => {
+    const nuevaLinea: ItemRow = {
+      key: generarId(),
+      descripcion: servicio.nombre,
+      cantidad: 1,
+      precioUnitario: servicio.precioVenta,
+      descuento: 0,
+      alicuotaIva: 21,
+      servicioId: servicio.id,
+      varianteServicioId: servicio.varianteServicioId,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaItemVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
+    setBusquedaProducto('');
+    setServicioSugerido(null);
   }, []);
 
   const updateItem = (index: number, field: keyof ItemRow, value: string | number) => {
@@ -796,6 +939,8 @@ export function ComprobanteDialog({
           montoIva,
           productoId: item.productoId,
           comboId: item.comboId,
+          servicioId: item.servicioId,
+          varianteServicioId: item.varianteServicioId,
         };
       }),
     });
@@ -1001,26 +1146,52 @@ export function ComprobanteDialog({
                 />
                 {sugerenciasCatalogo.length > 0 && (
                   <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-                    {sugerenciasCatalogo.map((s) =>
-                      s.tipo === 'combo' ? (
-                        <button
-                          key={`combo-${s.item.id}`}
-                          type="button"
-                          onClick={() => handleAgregarLineaCombo(s.item)}
-                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
-                        >
-                          <span className="flex items-center gap-1.5 text-gray-900">
-                            <Tag className="h-3.5 w-3.5 text-pink-600" />
-                            {s.item.nombre}
-                            {s.item.etiqueta && (
-                              <span className="inline-flex items-center rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] font-medium text-pink-700">
-                                {s.item.etiqueta}
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-gray-500">{formatARS(s.item.precioVenta)}</span>
-                        </button>
-                      ) : (
+                    {sugerenciasCatalogo.map((s) => {
+                      if (s.tipo === 'combo') {
+                        return (
+                          <button
+                            key={`combo-${s.item.id}`}
+                            type="button"
+                            onClick={() => handleAgregarLineaCombo(s.item)}
+                            className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                          >
+                            <span className="flex items-center gap-1.5 text-gray-900">
+                              <Tag className="h-3.5 w-3.5 text-pink-600" />
+                              {s.item.nombre}
+                              {s.item.etiqueta && (
+                                <span className="inline-flex items-center rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] font-medium text-pink-700">
+                                  {s.item.etiqueta}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-gray-500">{formatARS(s.item.precioVenta)}</span>
+                          </button>
+                        );
+                      }
+                      if (s.tipo === 'servicio') {
+                        return (
+                          <button
+                            key={`servicio-${s.item.id}-${s.item.varianteServicioId ?? ''}`}
+                            type="button"
+                            onClick={() => handleAgregarLineaServicio(s.item)}
+                            className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                          >
+                            <span className="flex items-center gap-1.5 text-gray-900">
+                              <Briefcase className="h-3.5 w-3.5 text-indigo-600" />
+                              {s.item.nombre}
+                              {s.item.aConvenir && (
+                                <span className="inline-flex items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                                  A convenir
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-gray-500">
+                              {s.item.aConvenir ? '$ 0 (editable)' : formatARS(s.item.precioVenta)}
+                            </span>
+                          </button>
+                        );
+                      }
+                      return (
                         <button
                           key={`producto-${s.item.id}`}
                           type="button"
@@ -1033,11 +1204,39 @@ export function ComprobanteDialog({
                             {s.item.controlaStock ? ` · Stock ${s.item.stock}` : ''}
                           </span>
                         </button>
-                      ),
-                    )}
+                      );
+                    })}
                   </div>
                 )}
               </div>
+
+              {/* Fase 40: sugerencia de Servicio asociado (ej. instalación)
+                  al producto que se acaba de agregar -- solo cuando no es
+                  "obligatorio" (si lo es, ya se agregó solo arriba). */}
+              {servicioSugerido && (
+                <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+                  <span className="flex items-center gap-1.5 text-sm text-indigo-900">
+                    <Briefcase className="h-3.5 w-3.5 text-indigo-600" />
+                    ¿Agregar "{servicioSugerido.nombre}"?
+                  </span>
+                  <div className="flex shrink-0 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleAgregarLineaServicio(servicioSugerido)}
+                      className="text-xs font-medium text-indigo-700 hover:underline"
+                    >
+                      Agregar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setServicioSugerido(null)}
+                      className="text-xs text-gray-500 hover:underline"
+                    >
+                      Descartar
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
@@ -1468,6 +1667,11 @@ interface PresupuestoItemRow {
    * criterio que el buscador de ComprobanteDialog (Fase 18). Si se deja
    * sin vincular, la línea sigue siendo texto libre (fallback manual). */
   productoId?: string;
+  /** Vínculo opcional a un Servicio del catálogo -- Fase 40. Igual que en
+   * ComprobanteDialog: no descuenta stock, mutuamente excluyente con
+   * productoId. */
+  servicioId?: string;
+  varianteServicioId?: string;
 }
 
 function newPresupuestoItemRow(): PresupuestoItemRow {
@@ -1487,7 +1691,24 @@ interface ProductoCatalogoPresupuesto {
   id: string;
   nombre: string;
   precioVenta: number;
+  /** Fase 40: ver comentario en ProductoCatalogoItem de ComprobanteDialog. */
+  servicioAsociadoId?: string;
+  servicioAsociadoObligatorio?: boolean;
 }
+
+/** Fase 40: servicios vendibles del catálogo, mismo criterio de "aplanado"
+ * por variante que en ComprobanteDialog (ver ServicioCatalogoItem). */
+interface ServicioCatalogoPresupuesto {
+  id: string;
+  varianteServicioId?: string;
+  nombre: string;
+  precioVenta: number;
+  aConvenir: boolean;
+}
+
+type SugerenciaPresupuesto =
+  | { tipo: 'producto'; item: ProductoCatalogoPresupuesto }
+  | { tipo: 'servicio'; item: ServicioCatalogoPresupuesto };
 
 /** Una fila de ítem se considera incompleta si falta la descripción o el precio. */
 function filaPresupuestoIncompleta(item: PresupuestoItemRow): boolean {
@@ -1501,7 +1722,7 @@ function filaPresupuestoIncompleta(item: PresupuestoItemRow): boolean {
  * en blanco -- si no, esa fila vacía bloqueaba el guardado (mismo criterio
  * que CotizacionDialog en Compras, ver filaCotizacionVacia). */
 function filaPresupuestoVacia(item: PresupuestoItemRow): boolean {
-  return !item.descripcion.trim() && !item.productoId;
+  return !item.descripcion.trim() && !item.productoId && !item.servicioId;
 }
 
 export function PresupuestoDialog({
@@ -1531,7 +1752,11 @@ export function PresupuestoDialog({
   // con el módulo Productos en vez de forzar carga manual de texto libre.
   const { cliente: clienteTenant } = useClienteActual();
   const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoPresupuesto[]>([]);
+  // Fase 40: servicios vendibles del catálogo, ya aplanados por variante.
+  const [serviciosCatalogo, setServiciosCatalogo] = useState<ServicioCatalogoPresupuesto[]>([]);
   const [busquedaProducto, setBusquedaProducto] = useState('');
+  // Fase 40: ver comentario en ComprobanteDialog (servicioSugerido).
+  const [servicioSugerido, setServicioSugerido] = useState<ServicioCatalogoPresupuesto | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -1550,6 +1775,8 @@ export function PresupuestoDialog({
             precioUnitario: it.precioUnitario,
             descuento: it.descuento,
             productoId: it.productoId || undefined,
+            servicioId: it.servicioId || undefined,
+            varianteServicioId: it.varianteServicioId || undefined,
           })),
         );
       } else {
@@ -1564,6 +1791,7 @@ export function PresupuestoDialog({
       setErrors({});
       setIntentoGuardar(false);
       setBusquedaProducto('');
+      setServicioSugerido(null);
     }
   }, [open, presupuesto, validezDefault]);
 
@@ -1572,13 +1800,23 @@ export function PresupuestoDialog({
     let activo = true;
 
     async function cargarCatalogo() {
-      const { data } = await supabase
-        .from('productos')
-        .select('id, nombre, precio_venta')
-        .eq('cliente_id', clienteTenant!.id)
-        .eq('disponible', true)
-        .eq('estado', 'activo')
-        .order('nombre');
+      const [{ data }, serviciosRes] = await Promise.all([
+        supabase
+          .from('productos')
+          .select('id, nombre, precio_venta, servicio_asociado_id, servicio_asociado_obligatorio')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('disponible', true)
+          .eq('estado', 'activo')
+          .order('nombre'),
+        // Fase 40: servicios activos del cliente -- ver mismo criterio en
+        // ComprobanteDialog (cargarCatalogo).
+        supabase
+          .from('servicios')
+          .select('id, titulo, tipo, modalidad_precio, precio')
+          .eq('cliente_id', clienteTenant!.id)
+          .eq('estado', 'activo')
+          .order('titulo'),
+      ]);
 
       if (!activo) return;
       setProductosCatalogo(
@@ -1586,8 +1824,49 @@ export function PresupuestoDialog({
           id: p.id,
           nombre: p.nombre,
           precioVenta: Number(p.precio_venta),
+          servicioAsociadoId: p.servicio_asociado_id ?? undefined,
+          servicioAsociadoObligatorio: !!p.servicio_asociado_obligatorio,
         })),
       );
+
+      const serviciosData = (serviciosRes.data ?? []) as any[];
+      const idsConVariantes = serviciosData.filter((s) => s.tipo === 'con_variantes').map((s) => s.id);
+      let variantesPorServicio = new Map<string, { id: string; nombre: string; modalidad_precio: string; precio: number }[]>();
+      if (idsConVariantes.length > 0) {
+        const variantesRes = await supabase
+          .from('servicio_variantes')
+          .select('id, servicio_id, nombre, modalidad_precio, precio')
+          .in('servicio_id', idsConVariantes)
+          .order('orden');
+        if (!activo) return;
+        for (const v of (variantesRes.data ?? []) as any[]) {
+          const lista = variantesPorServicio.get(v.servicio_id) ?? [];
+          lista.push(v);
+          variantesPorServicio.set(v.servicio_id, lista);
+        }
+      }
+      const servicios: ServicioCatalogoPresupuesto[] = [];
+      for (const s of serviciosData) {
+        if (s.tipo === 'con_variantes') {
+          for (const v of variantesPorServicio.get(s.id) ?? []) {
+            servicios.push({
+              id: s.id,
+              varianteServicioId: v.id,
+              nombre: `${s.titulo} - ${v.nombre}`,
+              precioVenta: v.modalidad_precio === 'a_convenir' ? 0 : Number(v.precio ?? 0),
+              aConvenir: v.modalidad_precio === 'a_convenir',
+            });
+          }
+        } else {
+          servicios.push({
+            id: s.id,
+            nombre: s.titulo,
+            precioVenta: s.modalidad_precio === 'a_convenir' ? 0 : Number(s.precio ?? 0),
+            aConvenir: s.modalidad_precio === 'a_convenir',
+          });
+        }
+      }
+      setServiciosCatalogo(servicios);
     }
 
     cargarCatalogo();
@@ -1596,11 +1875,17 @@ export function PresupuestoDialog({
     };
   }, [open, clienteTenant?.id]);
 
-  const sugerenciasProducto = useMemo(() => {
+  const sugerenciasProducto = useMemo<SugerenciaPresupuesto[]>(() => {
     const q = busquedaProducto.trim().toLowerCase();
     if (!q) return [];
-    return productosCatalogo.filter((p) => p.nombre.toLowerCase().includes(q)).slice(0, 8);
-  }, [busquedaProducto, productosCatalogo]);
+    const servicios: SugerenciaPresupuesto[] = serviciosCatalogo
+      .filter((s) => s.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'servicio' as const, item }));
+    const productos: SugerenciaPresupuesto[] = productosCatalogo
+      .filter((p) => p.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'producto' as const, item }));
+    return [...servicios, ...productos].slice(0, 8);
+  }, [busquedaProducto, productosCatalogo, serviciosCatalogo]);
 
   const handleAgregarLineaCatalogo = useCallback((producto: ProductoCatalogoPresupuesto) => {
     const nuevaLinea: PresupuestoItemRow = {
@@ -1617,6 +1902,49 @@ export function PresupuestoDialog({
       return [...prev, nuevaLinea];
     });
     setBusquedaProducto('');
+
+    // Fase 40: ver comentario en ComprobanteDialog (mismo criterio).
+    setServicioSugerido(null);
+    if (producto.servicioAsociadoId) {
+      const candidatos = serviciosCatalogo.filter((s) => s.id === producto.servicioAsociadoId);
+      if (candidatos.length === 1) {
+        if (producto.servicioAsociadoObligatorio) {
+          const servicioLinea: PresupuestoItemRow = {
+            key: generarId(),
+            descripcion: candidatos[0].nombre,
+            cantidad: 1,
+            precioUnitario: candidatos[0].precioVenta,
+            descuento: 0,
+            servicioId: candidatos[0].id,
+            varianteServicioId: candidatos[0].varianteServicioId,
+          };
+          setItems((prev) => [...prev, servicioLinea]);
+        } else {
+          setServicioSugerido(candidatos[0]);
+        }
+      } else if (candidatos.length > 1 && !producto.servicioAsociadoObligatorio) {
+        setBusquedaProducto(candidatos[0].nombre.split(' - ')[0]);
+      }
+    }
+  }, [serviciosCatalogo]);
+
+  const handleAgregarLineaServicio = useCallback((servicio: ServicioCatalogoPresupuesto) => {
+    const nuevaLinea: PresupuestoItemRow = {
+      key: generarId(),
+      descripcion: servicio.nombre,
+      cantidad: 1,
+      precioUnitario: servicio.precioVenta,
+      descuento: 0,
+      servicioId: servicio.id,
+      varianteServicioId: servicio.varianteServicioId,
+    };
+    setItems((prev) => {
+      const idxVacia = prev.findIndex(filaPresupuestoVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
+    setBusquedaProducto('');
+    setServicioSugerido(null);
   }, []);
 
   const updateItem = (index: number, field: keyof PresupuestoItemRow, value: string | number) => {
@@ -1668,6 +1996,8 @@ export function PresupuestoDialog({
       descuentoGeneral,
       items: items.map((item) => ({
         productoId: item.productoId ?? '',
+        servicioId: item.servicioId,
+        varianteServicioId: item.varianteServicioId,
         descripcion: item.descripcion.trim(),
         cantidad: item.cantidad,
         precioUnitario: item.precioUnitario,
@@ -1784,20 +2114,69 @@ export function PresupuestoDialog({
                 />
                 {sugerenciasProducto.length > 0 && (
                   <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-                    {sugerenciasProducto.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => handleAgregarLineaCatalogo(p)}
-                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
-                      >
-                        <span className="text-gray-900">{p.nombre}</span>
-                        <span className="text-gray-500">{formatARS(p.precioVenta)}</span>
-                      </button>
-                    ))}
+                    {sugerenciasProducto.map((s) =>
+                      s.tipo === 'servicio' ? (
+                        <button
+                          key={`servicio-${s.item.id}-${s.item.varianteServicioId ?? ''}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaServicio(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1.5 text-gray-900">
+                            <Briefcase className="h-3.5 w-3.5 text-indigo-600" />
+                            {s.item.nombre}
+                            {s.item.aConvenir && (
+                              <span className="inline-flex items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                                A convenir
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-gray-500">
+                            {s.item.aConvenir ? '$ 0 (editable)' : formatARS(s.item.precioVenta)}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          key={`producto-${s.item.id}`}
+                          type="button"
+                          onClick={() => handleAgregarLineaCatalogo(s.item)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        >
+                          <span className="text-gray-900">{s.item.nombre}</span>
+                          <span className="text-gray-500">{formatARS(s.item.precioVenta)}</span>
+                        </button>
+                      ),
+                    )}
                   </div>
                 )}
               </div>
+
+              {/* Fase 40: sugerencia de Servicio asociado -- ver comentario
+                  en ComprobanteDialog. */}
+              {servicioSugerido && (
+                <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+                  <span className="flex items-center gap-1.5 text-sm text-indigo-900">
+                    <Briefcase className="h-3.5 w-3.5 text-indigo-600" />
+                    ¿Agregar "{servicioSugerido.nombre}"?
+                  </span>
+                  <div className="flex shrink-0 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleAgregarLineaServicio(servicioSugerido)}
+                      className="text-xs font-medium text-indigo-700 hover:underline"
+                    >
+                      Agregar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setServicioSugerido(null)}
+                      className="text-xs text-gray-500 hover:underline"
+                    >
+                      Descartar
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">

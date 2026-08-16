@@ -801,6 +801,9 @@ function productoToRow(p: Producto, clienteId: string) {
     punto_venta_id: p.puntoVentaId || null,
     // Fase 34+: ver comentario en types/index.ts (Producto.esInsumo).
     es_insumo: p.esInsumo ?? false,
+    // Fase 40: ver comentario en types/index.ts (Producto.servicioAsociadoId).
+    servicio_asociado_id: p.servicioAsociadoId || null,
+    servicio_asociado_obligatorio: p.servicioAsociadoObligatorio ?? false,
   }
 }
 
@@ -1788,6 +1791,8 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     diasDisponibles: r.dias_disponibles ?? undefined,
     puntoVentaId: r.punto_venta_id ?? undefined,
     esInsumo: r.es_insumo ?? false,
+    servicioAsociadoId: r.servicio_asociado_id ?? undefined,
+    servicioAsociadoObligatorio: r.servicio_asociado_obligatorio ?? false,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 

@@ -74,6 +74,11 @@ export type EstadoPresupuesto =
 export interface PresupuestoItem {
   id: string;
   productoId: string;
+  /** Vínculo opcional a un Servicio del catálogo (Fase 40) -- mutuamente
+   * excluyente con productoId. Si el servicio es de tipo 'con_variantes',
+   * varianteServicioId identifica cuál. */
+  servicioId?: string;
+  varianteServicioId?: string;
   descripcion: string;
   cantidad: number;
   precioUnitario: number;
@@ -304,6 +309,12 @@ export interface ComprobanteItem {
    * excluyente con productoId: una línea vinculada a un combo descuenta
    * stock de los componentes fijos de ESE combo, no de un producto único. */
   comboId?: string;
+  /** Vínculo opcional a un Servicio del catálogo (Fase 40) -- mutuamente
+   * excluyente con productoId/comboId. No descuenta stock (Servicios no
+   * tiene). Si el servicio es de tipo 'con_variantes', varianteServicioId
+   * identifica cuál (cada variante tiene su propio precio). */
+  servicioId?: string;
+  varianteServicioId?: string;
   descripcion: string;
   cantidad: number;
   precioUnitario: number;
