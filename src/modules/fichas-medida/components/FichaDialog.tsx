@@ -135,6 +135,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
   const [estado, setEstado] = useState<EstadoFicha>('borrador');
   const [fechaPedido, setFechaPedido] = useState('');
   const [fechaReplanteo, setFechaReplanteo] = useState('');
+  const [horaReplanteo, setHoraReplanteo] = useState('');
   const [fechaEntrega, setFechaEntrega] = useState('');
   const [modalidadEntrega, setModalidadEntrega] = useState<ModalidadEntrega>('retiro_local');
   const [domicilioDistinto, setDomicilioDistinto] = useState(false);
@@ -156,6 +157,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       setEstado(ficha.estado);
       setFechaPedido(ficha.fechaPedido);
       setFechaReplanteo(ficha.fechaReplanteo ?? '');
+      setHoraReplanteo(ficha.horaReplanteo ?? '');
       setFechaEntrega(ficha.fechaEntrega ?? '');
       setModalidadEntrega(ficha.modalidadEntrega ?? 'retiro_local');
       setDomicilioDistinto(Boolean(ficha.domicilioTrabajo));
@@ -172,6 +174,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       setEstado('borrador');
       setFechaPedido(new Date().toISOString().split('T')[0]);
       setFechaReplanteo('');
+      setHoraReplanteo('');
       setFechaEntrega('');
       setModalidadEntrega('retiro_local');
       setDomicilioDistinto(false);
@@ -304,6 +307,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       estado,
       fechaPedido,
       fechaReplanteo: fechaReplanteo || undefined,
+      horaReplanteo: fechaReplanteo ? horaReplanteo || undefined : undefined,
       fechaEntrega: fechaEntrega || undefined,
       domicilioTrabajo: domicilioDistinto ? domicilioTrabajo.trim() || undefined : undefined,
       modalidadEntrega,
@@ -438,12 +442,21 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
               </div>
               <div>
                 <label className={labelClass}>Fecha de replanteo</label>
-                <input
-                  type="date"
-                  value={fechaReplanteo}
-                  onChange={(e) => setFechaReplanteo(e.target.value)}
-                  className={inputClass}
-                />
+                <div className="flex gap-1.5">
+                  <input
+                    type="date"
+                    value={fechaReplanteo}
+                    onChange={(e) => setFechaReplanteo(e.target.value)}
+                    className={inputClass}
+                  />
+                  <input
+                    type="time"
+                    value={horaReplanteo}
+                    onChange={(e) => setHoraReplanteo(e.target.value)}
+                    disabled={!fechaReplanteo}
+                    className={`${inputClass} w-28 disabled:opacity-50`}
+                  />
+                </div>
                 <p className="mt-1 text-[11px] text-gray-400">Crea una tarea en Agenda automáticamente.</p>
               </div>
               <div>

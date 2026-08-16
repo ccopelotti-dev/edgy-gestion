@@ -49,6 +49,7 @@ function filaAFicha(row: any): FichaMedida {
     estado: row.estado as EstadoFicha,
     fechaPedido: row.fecha_pedido,
     fechaReplanteo: row.fecha_replanteo ?? undefined,
+    horaReplanteo: row.hora_replanteo ? String(row.hora_replanteo).slice(0, 5) : undefined,
     fechaEntrega: row.fecha_entrega ?? undefined,
     domicilioTrabajo: row.domicilio_trabajo ?? undefined,
     modalidadEntrega: (row.modalidad_entrega as ModalidadEntrega) ?? 'retiro_local',
@@ -68,6 +69,7 @@ export interface NuevaFichaMedida {
   estado: EstadoFicha
   fechaPedido: string
   fechaReplanteo?: string
+  horaReplanteo?: string
   fechaEntrega?: string
   domicilioTrabajo?: string
   modalidadEntrega: ModalidadEntrega
@@ -182,12 +184,13 @@ export function useFichasMedida(): UseFichasMedidaResult {
   async function sincronizarUnaTarea(params: {
     tareaIdActual: string | null
     fecha: string | null | undefined
+    horaInicio?: string | null
     categoria: 'replanteo' | 'entrega'
     titulo: string
     descripcion: string
     clienteIdTenant: string
   }): Promise<string | null> {
-    const { tareaIdActual, fecha, categoria, titulo, descripcion, clienteIdTenant } = params
+    const { tareaIdActual, fecha, horaInicio, categoria, titulo, descripcion, clienteIdTenant } = params
 
     if (!fecha) {
       if (tareaIdActual) {
@@ -199,7 +202,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
     if (tareaIdActual) {
       const { error: errUpdate } = await supabase
         .from('agenda_tareas')
-        .update({ fecha, titulo, descripcion })
+        .update({ fecha, titulo, descripcion, hora_inicio: horaInicio || null })
         .eq('id', tareaIdActual)
       if (!errUpdate) return tareaIdActual
       // Si el update falla (p.ej. la tarea fue borrada a mano desde Agenda),
@@ -213,7 +216,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
       titulo,
       descripcion,
       fecha,
-      hora_inicio: null,
+      hora_inicio: horaInicio || null,
       hora_fin: null,
       categoria,
       prioridad: 'media',
@@ -229,6 +232,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
     tareaReplanteoIdActual: string | null
     tareaEntregaIdActual: string | null
     fechaReplanteo: string | null | undefined
+    horaReplanteo: string | null | undefined
     fechaEntrega: string | null | undefined
     domicilioTrabajo: string | null | undefined
     modalidadEntrega: ModalidadEntrega
@@ -240,6 +244,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
       tareaReplanteoIdActual,
       tareaEntregaIdActual,
       fechaReplanteo,
+      horaReplanteo,
       fechaEntrega,
       domicilioTrabajo,
       modalidadEntrega,
@@ -264,6 +269,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
     const tareaReplanteoId = await sincronizarUnaTarea({
       tareaIdActual: tareaReplanteoIdActual,
       fecha: fechaReplanteo,
+      horaInicio: horaReplanteo,
       categoria: 'replanteo',
       titulo: `Replanteo — ${nombre}`,
       descripcion: descripcionReplanteo,
@@ -299,6 +305,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
         estado: data.estado,
         fecha_pedido: data.fechaPedido,
         fecha_replanteo: data.fechaReplanteo || null,
+        hora_replanteo: data.horaReplanteo || null,
         fecha_entrega: data.fechaEntrega || null,
         domicilio_trabajo: data.domicilioTrabajo || null,
         modalidad_entrega: data.modalidadEntrega,
@@ -320,6 +327,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
         tareaReplanteoIdActual: null,
         tareaEntregaIdActual: null,
         fechaReplanteo: data.fechaReplanteo,
+        horaReplanteo: data.horaReplanteo,
         fechaEntrega: data.fechaEntrega,
         domicilioTrabajo: data.domicilioTrabajo,
         modalidadEntrega: data.modalidadEntrega,
@@ -352,6 +360,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
           estado: data.estado,
           fecha_pedido: data.fechaPedido,
           fecha_replanteo: data.fechaReplanteo || null,
+          hora_replanteo: data.horaReplanteo || null,
           fecha_entrega: data.fechaEntrega || null,
           domicilio_trabajo: data.domicilioTrabajo || null,
           modalidad_entrega: data.modalidadEntrega,
@@ -383,6 +392,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
         tareaReplanteoIdActual: fichaActual?.tarea_replanteo_id ?? null,
         tareaEntregaIdActual: fichaActual?.tarea_entrega_id ?? null,
         fechaReplanteo: data.fechaReplanteo,
+        horaReplanteo: data.horaReplanteo,
         fechaEntrega: data.fechaEntrega,
         domicilioTrabajo: data.domicilioTrabajo,
         modalidadEntrega: data.modalidadEntrega,

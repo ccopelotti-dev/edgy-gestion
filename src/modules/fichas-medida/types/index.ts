@@ -87,6 +87,9 @@ export interface FichaMedida {
   /** Segunda visita a domicilio para confirmar medidas exactas antes de
    * fabricar -- genera automáticamente una tarea en Agenda (Fase 0083). */
   fechaReplanteo?: string
+  /** Horario acordado de la visita -- a diferencia de Entrega (compromiso
+   * de día), el Replanteo es una cita puntual (Fase 0085). Formato HH:MM. */
+  horaReplanteo?: string
   fechaEntrega?: string
   /** Domicilio donde se hace el Replanteo y, si modalidadEntrega es
    * 'obra_instalacion', también donde se instala -- si no se carga, la UI
