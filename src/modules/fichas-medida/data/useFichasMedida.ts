@@ -9,7 +9,7 @@ import { useClienteId } from './useClienteId'
 // ni separar el detalle en una consulta aparte.
 const SELECT_FICHA = `
   *,
-  clientes_venta(nombre, telefono, direccion),
+  clientes_venta(nombre, telefono, email, direccion),
   ficha_medida_items(*, ficha_medida_panos(*))
 `
 
@@ -44,6 +44,7 @@ function filaAFicha(row: any): FichaMedida {
     clienteVentaId: row.cliente_venta_id,
     clienteNombre: cv.nombre ?? 'Cliente',
     clienteTelefono: cv.telefono ?? undefined,
+    clienteEmail: cv.email ?? undefined,
     clienteDireccion: cv.direccion ?? undefined,
     tipo: row.tipo as TipoFicha,
     estado: row.estado as EstadoFicha,

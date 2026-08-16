@@ -80,6 +80,7 @@ export interface FichaMedida {
    * siempre de clientes_venta (fuente de verdad real). */
   clienteNombre: string
   clienteTelefono?: string
+  clienteEmail?: string
   clienteDireccion?: string
   tipo: TipoFicha
   estado: EstadoFicha

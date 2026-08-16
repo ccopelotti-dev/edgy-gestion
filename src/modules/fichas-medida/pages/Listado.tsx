@@ -5,12 +5,16 @@
 // desde el celular -- mismo criterio mobile-first que Modo Mostrador.
 
 import { useMemo, useState } from 'react';
-import { Search, Plus, Ruler, Calendar, FileCheck2, Trash2 } from 'lucide-react';
+import { Search, Plus, Ruler, Calendar, FileCheck2, Trash2, Download, Mail, MessageCircle, Loader2 } from 'lucide-react';
 import { useFichasMedida } from '../data/useFichasMedida';
 import { FichaDialog } from '../components/FichaDialog';
 import { generarPresupuestoDesdeFicha } from '../lib/generarPresupuesto';
+import { generarFichaMedidaPdf } from '../lib/generarFichaMedidaPdf';
 import { ESTADO_FICHA_LABEL, MODALIDAD_ENTREGA_LABEL, TIPO_FICHA_LABEL, type EstadoFicha, type FichaMedida } from '../types';
 import { formatARS } from '@/modules/ventas/lib/format';
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import type { EmpresaParaPdf } from '@/lib/comprobantes-pdf/pdfHelpers';
 
 const ESTADO_BADGE: Record<EstadoFicha, string> = {
   borrador: 'bg-gray-100 text-gray-600',
@@ -20,11 +24,13 @@ const ESTADO_BADGE: Record<EstadoFicha, string> = {
 
 export default function Listado() {
   const { clienteId, fichas, cargando, error, crear, actualizar, marcarConvertida, eliminar } = useFichasMedida();
+  const { cliente: empresaActual } = useClienteActual();
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<EstadoFicha | ''>('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [fichaEditando, setFichaEditando] = useState<FichaMedida | undefined>(undefined);
   const [generandoId, setGenerandoId] = useState<string | null>(null);
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
 
   const fichasFiltradas = useMemo(() => {
@@ -75,6 +81,54 @@ export default function Listado() {
     } else {
       setMensaje({ tipo: 'error', texto: resultado.error });
     }
+  }
+
+  // Envío por email / WhatsApp al cliente -- mismo criterio que
+  // Cotizaciones (Compras): todavía no hay un motor de envío real, así
+  // que se arma un link mailto:/wa.me con el texto ya redactado y se
+  // abre el cliente de correo o WhatsApp del propio usuario. El PDF no
+  // se puede adjuntar automáticamente (limitación de mailto:/wa.me) --
+  // hay que descargarlo aparte y adjuntarlo a mano si hace falta.
+  function armarTextoFicha(f: FichaMedida) {
+    const numero = f.id.slice(0, 8).toUpperCase();
+    return {
+      asunto: `Ficha de medida · ${f.clienteNombre}`,
+      cuerpo:
+        `Hola${f.clienteNombre ? ` ${f.clienteNombre}` : ''},\n\n` +
+        `Te enviamos el comprobante con el detalle de la medición (Ficha ${numero}).\n\n` +
+        `Cualquier consulta quedamos a disposición.\nSaludos.`,
+    };
+  }
+
+  async function handleDescargarPdf(f: FichaMedida) {
+    if (!empresaActual) return;
+    setGenerandoPdfId(f.id);
+    try {
+      const empresa: EmpresaParaPdf = {
+        nombre: empresaActual.nombre,
+        cuit: empresaActual.cuit,
+        direccion: empresaActual.direccion,
+        telefono: empresaActual.telefono,
+        logoUrl: empresaActual.logo_url,
+        colorMarca: empresaActual.color_marca,
+      };
+      await generarFichaMedidaPdf(empresa, f, `Ficha de medida - ${f.clienteNombre}`);
+    } finally {
+      setGenerandoPdfId(null);
+    }
+  }
+
+  function handleEnviarEmail(f: FichaMedida) {
+    if (!f.clienteEmail) return;
+    const { asunto, cuerpo } = armarTextoFicha(f);
+    const url = `mailto:${f.clienteEmail}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+    window.open(url, '_blank');
+  }
+
+  function handleEnviarWhatsapp(f: FichaMedida) {
+    if (!f.clienteTelefono) return;
+    const { cuerpo } = armarTextoFicha(f);
+    window.open(armarLinkWhatsapp(f.clienteTelefono, cuerpo), '_blank');
   }
 
   return (
@@ -169,7 +223,35 @@ export default function Listado() {
                   {f.total > 0 && <span>{formatARS(f.total)}</span>}
                 </div>
               </button>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => handleDescargarPdf(f)}
+                  disabled={generandoPdfId === f.id}
+                  title="Descargar PDF"
+                  className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+                >
+                  {generandoPdfId === f.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                <button
+                  onClick={() => handleEnviarEmail(f)}
+                  disabled={!f.clienteEmail}
+                  title={f.clienteEmail ? `Enviar por email a ${f.clienteEmail}` : 'El cliente no tiene email cargado'}
+                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => handleEnviarWhatsapp(f)}
+                  disabled={!f.clienteTelefono}
+                  title={f.clienteTelefono ? `Enviar por WhatsApp a ${f.clienteTelefono}` : 'El cliente no tiene teléfono cargado'}
+                  className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                </button>
                 {f.estado === 'lista' && (
                   <button
                     onClick={() => handleGenerarPresupuesto(f)}
