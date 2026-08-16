@@ -14,10 +14,11 @@ import {
   PackagePlus,
   SlidersHorizontal,
   History,
+  Merge,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import { useProductosStock, fetchProductosStockState } from '../data/store'
 import {
   KpiCard,
   StockBadge,
@@ -26,6 +27,7 @@ import {
   EmptyState,
 } from '../components/productos/display'
 import { InsumoDialog, AjusteStockDialog } from '../components/productos/dialogs'
+import { DuplicadosDialog, detectarDuplicados } from '../components/productos/duplicados-dialog'
 import { formatARS } from '../lib/format'
 import { unidadAbrev } from '../types'
 import type { Insumo } from '../types'
@@ -48,6 +50,21 @@ export default function Insumos() {
   const [rubroFilter, setRubroFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingInsumo, setEditingInsumo] = useState<Insumo | undefined>()
+  const [duplicadosOpen, setDuplicadosOpen] = useState(false)
+
+  // Fase 34+ (fix): insumos sueltos que comparten nombre con un producto
+  // vinculado -- ver duplicados-dialog.tsx. Se calcula acá arriba (no solo
+  // dentro del dialog) para poder mostrar el conteo en el botón sin abrirlo.
+  const duplicados = useMemo(
+    () => detectarDuplicados(state.productos, state.insumos),
+    [state.productos, state.insumos],
+  )
+  const totalDuplicados = duplicados.reduce((sum, g) => sum + g.huerfanos.length, 0)
+
+  async function handleFusionado() {
+    const fresh = await fetchProductosStockState()
+    dispatch({ type: 'SET_STATE', payload: fresh })
+  }
 
   // Ajuste/Recibir dialog state
   const [ajusteDialogOpen, setAjusteDialogOpen] = useState(false)
@@ -241,6 +258,16 @@ export default function Insumos() {
             </option>
           ))}
         </select>
+        {totalDuplicados > 0 && (
+          <Button
+            variant="outline"
+            className="shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-400"
+            onClick={() => setDuplicadosOpen(true)}
+          >
+            <Merge className="h-4 w-4 mr-1" />
+            {totalDuplicados} duplicado{totalDuplicados === 1 ? '' : 's'}
+          </Button>
+        )}
         <Button onClick={handleOpenNew} className="shrink-0">
           <Plus className="h-4 w-4 mr-1" />
           Nuevo insumo
@@ -388,6 +415,14 @@ export default function Insumos() {
           item={ajusteItem}
         />
       )}
+
+      <DuplicadosDialog
+        open={duplicadosOpen}
+        onOpenChange={setDuplicadosOpen}
+        productos={state.productos}
+        insumos={state.insumos}
+        onFusionado={handleFusionado}
+      />
     </div>
   )
 }

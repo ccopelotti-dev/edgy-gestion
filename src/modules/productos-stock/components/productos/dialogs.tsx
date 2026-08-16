@@ -69,6 +69,9 @@ interface ProductoDialogProps {
   subRubros: SubRubro[]
   /** Productos existentes, para validar que el código de barras no se repita. */
   productos: Producto[]
+  /** Insumos existentes -- para avisar si ya hay uno suelto con el mismo
+   * nombre al tildar "también es insumo" (ver Fase 34+ fix). */
+  insumos: Insumo[]
   /** Catálogo de marcas del cliente (ver Fase 1 del refactor de Productos). */
   marcas: Marca[]
   /** Crea una marca nueva en el catálogo compartido (dispatch ADD_MARCA). */
@@ -117,6 +120,7 @@ export function ProductoDialog({
   rubros,
   subRubros,
   productos,
+  insumos,
   marcas,
   onCrearMarca,
   plantillasGarantia,
@@ -981,7 +985,30 @@ export function ProductoDialog({
               <input
                 type="checkbox"
                 checked={form.esInsumo ?? false}
-                onChange={(e) => update('esInsumo', e.target.checked)}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    // Fase 34+ (fix): antes de tildar, avisar si ya existe un
+                    // insumo suelto (sin vínculo) con el mismo nombre -- se
+                    // va a vincular ESE en vez de crear uno nuevo (ver
+                    // sincronizarInsumoDeProducto en data/store.tsx).
+                    const nombreP = form.nombre.trim().toLowerCase()
+                    const huerfano = nombreP
+                      ? insumos.find(
+                          (i) =>
+                            !i.productoVinculadoId &&
+                            i.nombre.trim().toLowerCase() === nombreP,
+                        )
+                      : undefined
+                    if (huerfano) {
+                      const ok = window.confirm(
+                        `Ya existe un insumo suelto llamado "${huerfano.nombre}" (stock ${huerfano.stock}) sin vincular a ningún producto.\n\n` +
+                          `Al guardar, se va a vincular ese insumo con este producto en vez de crear uno nuevo -- así no queda la existencia contada dos veces.`,
+                      )
+                      if (!ok) return
+                    }
+                  }
+                  update('esInsumo', e.target.checked)
+                }}
                 className="rounded border-input"
               />
               También es insumo (usar en Formular Producto)

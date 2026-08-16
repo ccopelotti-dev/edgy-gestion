@@ -1011,6 +1011,33 @@ function sincronizarInsumoDeProducto(producto: Producto, insumos: Insumo[]): Ins
   const existente = insumos.find((i) => i.productoVinculadoId === producto.id)
 
   if (producto.esInsumo && !existente) {
+    // Fase 34+ (fix): antes de crear un espejo nuevo, se busca un insumo
+    // suelto (sin vínculo) con el mismo nombre -- evita el duplicado
+    // clásico de "ya existía este insumo de una carga anterior a este
+    // vínculo, ahora hay dos filas para la misma existencia". Si lo
+    // encuentra, lo adopta como espejo en vez de crear una fila nueva
+    // (conserva su id -- ver ProductoDialog, que avisa antes de tildar
+    // "también es insumo" si detecta este caso).
+    const nombreProducto = producto.nombre.trim().toLowerCase()
+    const huerfano = insumos.find(
+      (i) => !i.productoVinculadoId && i.nombre.trim().toLowerCase() === nombreProducto,
+    )
+    if (huerfano) {
+      return insumos.map((i) =>
+        i.id === huerfano.id
+          ? {
+              ...i,
+              productoVinculadoId: producto.id,
+              rubroId: producto.rubroId,
+              subRubroId: producto.subRubroId,
+              unidad: producto.unidadVenta,
+              stockMinimo: producto.stockMinimo,
+              costo: producto.costo,
+              stock: producto.stock,
+            }
+          : i,
+      )
+    }
     const nuevo: Insumo = {
       id: uid(),
       nombre: producto.nombre,

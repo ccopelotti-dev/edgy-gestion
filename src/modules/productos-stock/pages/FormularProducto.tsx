@@ -774,6 +774,7 @@ export default function FormularProducto() {
         rubros={state.rubros}
         subRubros={state.subRubros}
         productos={state.productos}
+        insumos={state.insumos}
         marcas={state.marcas}
         onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
         plantillasGarantia={state.plantillasGarantia}
