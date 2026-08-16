@@ -442,7 +442,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
               </div>
               <div>
                 <label className={labelClass}>Fecha de replanteo</label>
-                <div className="flex gap-1.5">
+                <div className="flex flex-col gap-1.5">
                   <input
                     type="date"
                     value={fechaReplanteo}
@@ -454,7 +454,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                     value={horaReplanteo}
                     onChange={(e) => setHoraReplanteo(e.target.value)}
                     disabled={!fechaReplanteo}
-                    className={`${inputClass} w-28 disabled:opacity-50`}
+                    className={`${inputClass} disabled:opacity-50`}
                   />
                 </div>
                 <p className="mt-1 text-[11px] text-gray-400">Crea una tarea en Agenda automáticamente.</p>
