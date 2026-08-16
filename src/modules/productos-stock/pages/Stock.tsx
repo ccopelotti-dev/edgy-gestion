@@ -115,16 +115,25 @@ export default function Stock() {
         ]
       })
 
-    const fromInsumos: StockItem[] = state.insumos.map((i) => ({
-      id: i.id,
-      nombre: i.nombre,
-      tipo: 'insumo' as const,
-      stock: i.stock,
-      minimo: i.stockMinimo,
-      costo: i.costo,
-      unidadAbrev: unidadAbrev(i.unidad),
-      rubroId: i.rubroId,
-    }))
+    // Fase 34+ (fix): los insumos vinculados a un producto (productoVinculadoId)
+    // son un espejo -- misma existencia física que su producto, no un ítem
+    // aparte. Se excluyen acá para no listarlos ni contarlos dos veces
+    // (antes aparecían como fila "Producto" Y fila "Insumo" con el mismo
+    // stock, duplicando también el KPI de Valor del inventario). Siguen
+    // apareciendo en la pestaña Insumos (con el badge "vinculado a
+    // producto") para poder elegirse en Formular Producto.
+    const fromInsumos: StockItem[] = state.insumos
+      .filter((i) => !i.productoVinculadoId)
+      .map((i) => ({
+        id: i.id,
+        nombre: i.nombre,
+        tipo: 'insumo' as const,
+        stock: i.stock,
+        minimo: i.stockMinimo,
+        costo: i.costo,
+        unidadAbrev: unidadAbrev(i.unidad),
+        rubroId: i.rubroId,
+      }))
 
     return [...fromProductos, ...fromInsumos]
   }, [state.productos, state.insumos])

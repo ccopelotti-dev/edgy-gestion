@@ -462,21 +462,28 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       for (const linea of formula.lineas) {
         if (linea.tipo !== 'insumo' || !linea.insumoId) continue
         const cantidadConsumida = linea.cantidad * factor
+
+        // Fase 34+ (fix): si el insumo consumido está vinculado a un
+        // producto, el descuento se aplica sobre el producto y se espeja
+        // de vuelta -- el movimiento se registra ya con el ítem efectivo,
+        // para que el Kardex de una existencia vinculada (ej. un género
+        // que se vende suelto y también se consume por confección) no
+        // quede partido entre "Insumo" y "Producto".
+        const vinculado = productoVinculadoDe(linea.insumoId, insumos, productos)
+        const itemTipoConsumo = vinculado ? 'producto' : 'insumo'
+        const itemIdConsumo = vinculado ? vinculado.id : linea.insumoId
+
         nuevosMovimientos.push({
           id: uid(),
           tipo: 'egreso',
-          itemTipo: 'insumo',
-          itemId: linea.insumoId,
+          itemTipo: itemTipoConsumo,
+          itemId: itemIdConsumo,
           cantidad: cantidadConsumida,
           nota: notas,
           fecha,
           origen: 'formula',
           origenId: loteId,
         })
-        // Fase 34+: ver comentario en AJUSTAR_STOCK -- si el insumo
-        // consumido está vinculado a un producto, el descuento se aplica
-        // sobre el producto y se espeja de vuelta.
-        const vinculado = productoVinculadoDe(linea.insumoId, insumos, productos)
         if (vinculado) {
           productos = productos.map((p) =>
             p.id === vinculado.id ? { ...p, stock: p.stock - cantidadConsumida } : p,
@@ -503,6 +510,11 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       productos = productos.map((p) =>
         p.id === formula.productoId ? { ...p, stock: p.stock + cantidadRealProducida } : p,
       )
+      // Fase 34+ (fix): espeja sobre el insumo vinculado del producto
+      // terminado, si lo tiene -- misma garantía que el resto de las
+      // acciones de stock, aunque no es un caso típico (un producto que
+      // se fabrica por fórmula y además se usa como insumo de otra).
+      insumos = espejarInsumoVinculado(formula.productoId, productos, insumos)
 
       return {
         ...state,
@@ -540,11 +552,26 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       const nuevosMovimientos: MovimientoStock[] = []
 
       for (const linea of recepcion.lineas) {
+        // Fase 34+ (fix): antes solo se redirigía al producto (y se
+        // espejaba de vuelta) cuando la línea llegaba como 'insumo'. Si la
+        // línea ya era 'producto' y ESE producto tenía un insumo espejo,
+        // el espejo nunca se actualizaba -- quedaba desincronizado en
+        // silencio (stock real en Producto, insumo espejo con el valor
+        // viejo). Ahora se calcula el ítem efectivo primero y el espejo se
+        // sincroniza siempre que se toque el lado producto, sin importar
+        // desde qué lado entró la línea. El movimiento también se
+        // registra con el ítem efectivo, para que el Kardex de una
+        // existencia vinculada quede en un solo lugar.
+        const vinculado =
+          linea.itemTipo === 'insumo' ? productoVinculadoDe(linea.itemId, insumos, productos) : undefined
+        const itemTipoEfectivo = vinculado ? 'producto' : linea.itemTipo
+        const itemIdEfectivo = vinculado ? vinculado.id : linea.itemId
+
         nuevosMovimientos.push({
           id: uid(),
           tipo: 'ingreso',
-          itemTipo: linea.itemTipo,
-          itemId: linea.itemId,
+          itemTipo: itemTipoEfectivo,
+          itemId: itemIdEfectivo,
           varianteId: linea.varianteId,
           cantidad: linea.cantidad,
           costoUnitario: linea.costoUnitario,
@@ -557,9 +584,9 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           fechaVencimiento: linea.fechaVencimiento,
         })
 
-        if (linea.itemTipo === 'producto') {
+        if (itemTipoEfectivo === 'producto') {
           productos = productos.map((p) => {
-            if (p.id !== linea.itemId) return p
+            if (p.id !== itemIdEfectivo) return p
             const nuevoCosto = linea.costoUnitario > 0 ? linea.costoUnitario : p.costo
             if (linea.varianteId) {
               const variantes = p.variantes.map((v) =>
@@ -572,32 +599,20 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
             }
             return { ...p, stock: p.stock + linea.cantidad, costo: nuevoCosto }
           })
+          // Espejo sobre el insumo vinculado, si lo hay -- sin importar si
+          // esta línea llegó como producto directamente o redirigida
+          // desde un insumo vinculado.
+          insumos = espejarInsumoVinculado(itemIdEfectivo, productos, insumos)
         } else {
-          // Fase 34+: ver comentario en AJUSTAR_STOCK -- redirección a
-          // producto + espejo de vuelta si el insumo está vinculado.
-          const vinculado = productoVinculadoDe(linea.itemId, insumos, productos)
-          if (vinculado) {
-            productos = productos.map((p) =>
-              p.id === vinculado.id
-                ? {
-                    ...p,
-                    stock: p.stock + linea.cantidad,
-                    costo: linea.costoUnitario > 0 ? linea.costoUnitario : p.costo,
-                  }
-                : p,
-            )
-            insumos = espejarInsumoVinculado(vinculado.id, productos, insumos)
-          } else {
-            insumos = insumos.map((i) =>
-              i.id === linea.itemId
-                ? {
-                    ...i,
-                    stock: i.stock + linea.cantidad,
-                    costo: linea.costoUnitario > 0 ? linea.costoUnitario : i.costo,
-                  }
-                : i,
-            )
-          }
+          insumos = insumos.map((i) =>
+            i.id === linea.itemId
+              ? {
+                  ...i,
+                  stock: i.stock + linea.cantidad,
+                  costo: linea.costoUnitario > 0 ? linea.costoUnitario : i.costo,
+                }
+              : i,
+          )
         }
       }
 
@@ -641,11 +656,29 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
     case 'AJUSTAR_STOCK': {
       const { itemTipo, itemId, varianteId, cantidad, motivo, nota } = action.payload
 
+      let productos = state.productos
+      let insumos = state.insumos
+
+      // Fase 34+ (fix): un insumo vinculado a un producto no tiene stock
+      // propio -- el ajuste se redirige al producto (fuente única de
+      // verdad) y después se espeja de vuelta sobre el insumo. Antes esto
+      // solo pasaba cuando el ajuste llegaba con itemTipo:'insumo'; si
+      // llegaba directamente como 'producto' (ej. ajustando desde la fila
+      // Producto en Stock.tsx o desde Productos.tsx) y ese producto tenía
+      // un insumo espejo, el espejo quedaba desactualizado en silencio.
+      // Ahora el espejo se sincroniza siempre, sin importar el lado de
+      // origen -- y el movimiento se guarda con el ítem efectivo, para
+      // que el Kardex de una existencia vinculada no quede partido.
+      const vinculado =
+        itemTipo === 'insumo' ? productoVinculadoDe(itemId, insumos, productos) : undefined
+      const itemTipoEfectivo = vinculado ? 'producto' : itemTipo
+      const itemIdEfectivo = vinculado ? vinculado.id : itemId
+
       const movimiento: MovimientoStock = {
         id: uid(),
         tipo: 'ajuste',
-        itemTipo,
-        itemId,
+        itemTipo: itemTipoEfectivo,
+        itemId: itemIdEfectivo,
         varianteId,
         cantidad,
         motivo,
@@ -653,17 +686,6 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         fecha: todayISO(),
         origen: 'ajuste_manual',
       }
-
-      let productos = state.productos
-      let insumos = state.insumos
-
-      // Fase 34+: un insumo vinculado a un producto no tiene stock propio
-      // -- el ajuste se redirige al producto (fuente única de verdad) y
-      // después se espeja de vuelta sobre el insumo.
-      const vinculado =
-        itemTipo === 'insumo' ? productoVinculadoDe(itemId, insumos, productos) : undefined
-      const itemTipoEfectivo = vinculado ? 'producto' : itemTipo
-      const itemIdEfectivo = vinculado ? vinculado.id : itemId
 
       if (itemTipoEfectivo === 'producto') {
         productos = productos.map((p) => {
@@ -677,7 +699,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           }
           return { ...p, stock: p.stock + cantidad }
         })
-        if (vinculado) insumos = espejarInsumoVinculado(vinculado.id, productos, insumos)
+        insumos = espejarInsumoVinculado(itemIdEfectivo, productos, insumos)
       } else {
         insumos = insumos.map((i) =>
           i.id === itemId ? { ...i, stock: i.stock + cantidad } : i,
@@ -696,11 +718,22 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
     case 'RECIBIR_STOCK': {
       const { itemTipo, itemId, varianteId, cantidad, costoUnitario, nota } = action.payload
 
+      let productos = state.productos
+      let insumos = state.insumos
+
+      // Fase 34+ (fix): ver comentario en AJUSTAR_STOCK -- mismo criterio
+      // de redirección a producto + espejo de vuelta sobre el insumo,
+      // ahora también cuando el ítem llega directamente como 'producto'.
+      const vinculado =
+        itemTipo === 'insumo' ? productoVinculadoDe(itemId, insumos, productos) : undefined
+      const itemTipoEfectivo = vinculado ? 'producto' : itemTipo
+      const itemIdEfectivo = vinculado ? vinculado.id : itemId
+
       const movimiento: MovimientoStock = {
         id: uid(),
         tipo: 'ingreso',
-        itemTipo,
-        itemId,
+        itemTipo: itemTipoEfectivo,
+        itemId: itemIdEfectivo,
         varianteId,
         cantidad,
         costoUnitario,
@@ -708,16 +741,6 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         fecha: todayISO(),
         origen: 'recepcion',
       }
-
-      let productos = state.productos
-      let insumos = state.insumos
-
-      // Fase 34+: ver comentario en AJUSTAR_STOCK -- mismo criterio de
-      // redirección a producto + espejo de vuelta sobre el insumo.
-      const vinculado =
-        itemTipo === 'insumo' ? productoVinculadoDe(itemId, insumos, productos) : undefined
-      const itemTipoEfectivo = vinculado ? 'producto' : itemTipo
-      const itemIdEfectivo = vinculado ? vinculado.id : itemId
 
       if (itemTipoEfectivo === 'producto') {
         productos = productos.map((p) => {
@@ -733,7 +756,7 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           }
           return { ...p, stock: p.stock + cantidad, ...costoUpdate }
         })
-        if (vinculado) insumos = espejarInsumoVinculado(vinculado.id, productos, insumos)
+        insumos = espejarInsumoVinculado(itemIdEfectivo, productos, insumos)
       } else {
         insumos = insumos.map((i) =>
           i.id === itemId

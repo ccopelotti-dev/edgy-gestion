@@ -140,6 +140,13 @@ export default function Insumos() {
   }
 
   function handleVerMovimientos(insumo: Insumo) {
+    // Fase 34+ (fix): si el insumo es un espejo, el Kardex real quedó
+    // registrado bajo el producto vinculado (ver store.tsx) -- redirigir
+    // ahí para no mostrar un historial vacío.
+    if (insumo.productoVinculadoId) {
+      navigate(`${base}/movimientos?itemId=${insumo.productoVinculadoId}&itemTipo=producto`)
+      return
+    }
     navigate(`${base}/movimientos?itemId=${insumo.id}&itemTipo=insumo`)
   }
 
