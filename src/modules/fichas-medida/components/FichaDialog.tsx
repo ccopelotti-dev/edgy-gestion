@@ -18,12 +18,14 @@ import { supabase } from '@/lib/supabase';
 import { ClienteDialog } from '@/modules/ventas/components/ventas/dialogs';
 import type { Cliente } from '@/modules/ventas/types';
 import {
+  MODALIDAD_ENTREGA_LABEL,
   TIPOS_BARRAL,
   TIPOS_CORTINA,
   TIPO_FICHA_LABEL,
   type EstadoFicha,
   type FichaMedida,
   type ItemFichaMedida,
+  type ModalidadEntrega,
   type PanoMedida,
   type TipoFicha,
 } from '../types';
@@ -124,6 +126,7 @@ interface Props {
 export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contarFichasDeCliente, onSave }: Props) {
   const [clienteVentaId, setClienteVentaId] = useState('');
   const [clienteNombre, setClienteNombre] = useState('');
+  const [clienteDireccion, setClienteDireccion] = useState('');
   const [busquedaCliente, setBusquedaCliente] = useState('');
   const [candidatosCliente, setCandidatosCliente] = useState<CandidatoCliente[]>([]);
   const [clienteDialogOpen, setClienteDialogOpen] = useState(false);
@@ -133,6 +136,9 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
   const [fechaPedido, setFechaPedido] = useState('');
   const [fechaReplanteo, setFechaReplanteo] = useState('');
   const [fechaEntrega, setFechaEntrega] = useState('');
+  const [modalidadEntrega, setModalidadEntrega] = useState<ModalidadEntrega>('retiro_local');
+  const [domicilioDistinto, setDomicilioDistinto] = useState(false);
+  const [domicilioTrabajo, setDomicilioTrabajo] = useState('');
   const [textoSena, setTextoSena] = useState('0');
   const [textoTotal, setTextoTotal] = useState('0');
   const [notas, setNotas] = useState('');
@@ -145,11 +151,15 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     if (ficha) {
       setClienteVentaId(ficha.clienteVentaId);
       setClienteNombre(ficha.clienteNombre);
+      setClienteDireccion(ficha.clienteDireccion ?? '');
       setTipo(ficha.tipo);
       setEstado(ficha.estado);
       setFechaPedido(ficha.fechaPedido);
       setFechaReplanteo(ficha.fechaReplanteo ?? '');
       setFechaEntrega(ficha.fechaEntrega ?? '');
+      setModalidadEntrega(ficha.modalidadEntrega ?? 'retiro_local');
+      setDomicilioDistinto(Boolean(ficha.domicilioTrabajo));
+      setDomicilioTrabajo(ficha.domicilioTrabajo ?? '');
       setTextoSena(String(ficha.sena ?? 0));
       setTextoTotal(String(ficha.total ?? 0));
       setNotas(ficha.notas ?? '');
@@ -157,11 +167,15 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     } else {
       setClienteVentaId('');
       setClienteNombre('');
+      setClienteDireccion('');
       setTipo('generica');
       setEstado('borrador');
       setFechaPedido(new Date().toISOString().split('T')[0]);
       setFechaReplanteo('');
       setFechaEntrega('');
+      setModalidadEntrega('retiro_local');
+      setDomicilioDistinto(false);
+      setDomicilioTrabajo('');
       setTextoSena('0');
       setTextoTotal('0');
       setNotas('');
@@ -201,6 +215,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
   function elegirCliente(c: CandidatoCliente) {
     setClienteVentaId(c.id);
     setClienteNombre(c.nombre);
+    setClienteDireccion(c.direccion ?? '');
     setBusquedaCliente('');
     setCandidatosCliente([]);
   }
@@ -233,6 +248,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     }
     setClienteVentaId(nuevoId);
     setClienteNombre(data.nombre);
+    setClienteDireccion(data.direccion ?? '');
     setClienteDialogOpen(false);
   }
 
@@ -289,6 +305,8 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       fechaPedido,
       fechaReplanteo: fechaReplanteo || undefined,
       fechaEntrega: fechaEntrega || undefined,
+      domicilioTrabajo: domicilioDistinto ? domicilioTrabajo.trim() || undefined : undefined,
+      modalidadEntrega,
       sena: parseDecimal(textoSena),
       total: parseDecimal(textoTotal),
       notas: notas.trim() || undefined,
@@ -434,6 +452,20 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                 <p className="mt-1 text-[11px] text-gray-400">También impacta en Agenda.</p>
               </div>
               <div>
+                <label className={labelClass}>Modalidad de entrega</label>
+                <select
+                  value={modalidadEntrega}
+                  onChange={(e) => setModalidadEntrega(e.target.value as ModalidadEntrega)}
+                  className={inputClass}
+                >
+                  <option value="retiro_local">{MODALIDAD_ENTREGA_LABEL.retiro_local}</option>
+                  <option value="obra_instalacion">{MODALIDAD_ENTREGA_LABEL.obra_instalacion}</option>
+                </select>
+                {modalidadEntrega === 'obra_instalacion' && (
+                  <p className="mt-1 text-[11px] text-gray-400">Agrega una línea de instalación al presupuesto.</p>
+                )}
+              </div>
+              <div>
                 <label className={labelClass}>Seña</label>
                 <input
                   type="text"
@@ -454,6 +486,33 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                 />
               </div>
             </div>
+
+            {/* ── Domicilio de trabajo (Replanteo / Instalación) ── */}
+            {(fechaReplanteo || modalidadEntrega === 'obra_instalacion') && (
+              <div>
+                <label className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={domicilioDistinto}
+                    onChange={(e) => setDomicilioDistinto(e.target.checked)}
+                  />
+                  Usar un domicilio distinto al del cliente
+                </label>
+                {domicilioDistinto ? (
+                  <input
+                    type="text"
+                    value={domicilioTrabajo}
+                    onChange={(e) => setDomicilioTrabajo(e.target.value)}
+                    placeholder="Domicilio donde se hace el replanteo / la instalación"
+                    className={inputClass}
+                  />
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    Se usa el domicilio del cliente{clienteDireccion ? `: ${clienteDireccion}` : ' (sin cargar)'}.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* ── Ítems ── */}
             <div>

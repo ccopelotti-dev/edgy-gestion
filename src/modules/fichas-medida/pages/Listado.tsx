@@ -9,7 +9,7 @@ import { Search, Plus, Ruler, Calendar, FileCheck2, Trash2 } from 'lucide-react'
 import { useFichasMedida } from '../data/useFichasMedida';
 import { FichaDialog } from '../components/FichaDialog';
 import { generarPresupuestoDesdeFicha } from '../lib/generarPresupuesto';
-import { ESTADO_FICHA_LABEL, TIPO_FICHA_LABEL, type EstadoFicha, type FichaMedida } from '../types';
+import { ESTADO_FICHA_LABEL, MODALIDAD_ENTREGA_LABEL, TIPO_FICHA_LABEL, type EstadoFicha, type FichaMedida } from '../types';
 import { formatARS } from '@/modules/ventas/lib/format';
 
 const ESTADO_BADGE: Record<EstadoFicha, string> = {
@@ -153,6 +153,11 @@ export default function Listado() {
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${ESTADO_BADGE[f.estado]}`}>
                     {ESTADO_FICHA_LABEL[f.estado]}
                   </span>
+                  {f.modalidadEntrega === 'obra_instalacion' && (
+                    <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700">
+                      {MODALIDAD_ENTREGA_LABEL.obra_instalacion}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500">
                   <span className="flex items-center gap-1">

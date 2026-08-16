@@ -104,6 +104,25 @@ export async function generarPresupuestoDesdeFicha(
     subtotal: 0,
   }));
 
+  // Obra con instalación: se agrega una línea más para el costo de
+  // instalación -- todavía texto libre en $0 (editable a mano en Ventas),
+  // hasta que exista una integración real con el módulo Servicios (Fase 40,
+  // no construida todavía) que permita vincularla a un producto/servicio
+  // real del catálogo.
+  if (ficha.modalidadEntrega === 'obra_instalacion') {
+    const direccion = ficha.domicilioTrabajo || ficha.clienteDireccion;
+    filasItems.push({
+      id: crypto.randomUUID(),
+      presupuesto_id: presupuestoId,
+      producto_id: null,
+      descripcion: `Instalación en obra${direccion ? ` — ${direccion}` : ''}`,
+      cantidad: 1,
+      precio_unitario: 0,
+      descuento: 0,
+      subtotal: 0,
+    });
+  }
+
   const { error: errItems } = await supabase.from('presupuesto_items').insert(filasItems);
   if (errItems) {
     return { ok: false, error: 'El presupuesto se creó, pero no pudimos cargar los ítems.' };

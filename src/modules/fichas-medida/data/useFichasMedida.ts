@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { EstadoFicha, FichaMedida, ItemFichaMedida, TipoFicha } from '../types'
+import type { EstadoFicha, FichaMedida, ItemFichaMedida, ModalidadEntrega, TipoFicha } from '../types'
 import { useClienteId } from './useClienteId'
 
 // Nested select vía PostgREST: trae ficha + cliente (clientes_venta) +
@@ -50,6 +50,8 @@ function filaAFicha(row: any): FichaMedida {
     fechaPedido: row.fecha_pedido,
     fechaReplanteo: row.fecha_replanteo ?? undefined,
     fechaEntrega: row.fecha_entrega ?? undefined,
+    domicilioTrabajo: row.domicilio_trabajo ?? undefined,
+    modalidadEntrega: (row.modalidad_entrega as ModalidadEntrega) ?? 'retiro_local',
     sena: Number(row.sena),
     total: Number(row.total),
     notas: row.notas ?? undefined,
@@ -67,6 +69,8 @@ export interface NuevaFichaMedida {
   fechaPedido: string
   fechaReplanteo?: string
   fechaEntrega?: string
+  domicilioTrabajo?: string
+  modalidadEntrega: ModalidadEntrega
   sena: number
   total: number
   notas?: string
@@ -226,9 +230,20 @@ export function useFichasMedida(): UseFichasMedidaResult {
     tareaEntregaIdActual: string | null
     fechaReplanteo: string | null | undefined
     fechaEntrega: string | null | undefined
+    domicilioTrabajo: string | null | undefined
+    modalidadEntrega: ModalidadEntrega
   }) {
-    const { fichaId, clienteIdTenant, clienteVentaId, tareaReplanteoIdActual, tareaEntregaIdActual, fechaReplanteo, fechaEntrega } =
-      params
+    const {
+      fichaId,
+      clienteIdTenant,
+      clienteVentaId,
+      tareaReplanteoIdActual,
+      tareaEntregaIdActual,
+      fechaReplanteo,
+      fechaEntrega,
+      domicilioTrabajo,
+      modalidadEntrega,
+    } = params
 
     const { data: clienteRow } = await supabase
       .from('clientes_venta')
@@ -236,15 +251,22 @@ export function useFichasMedida(): UseFichasMedidaResult {
       .eq('id', clienteVentaId)
       .maybeSingle()
     const nombre = clienteRow?.nombre ?? 'Cliente'
-    const direccion = clienteRow?.direccion ? ` (${clienteRow.direccion})` : ''
-    const descripcion = `Ficha de medida de ${nombre}${direccion} -- ver módulo Fichas de medida.`
+    // El domicilio de trabajo pisa al del cliente si se cargó uno distinto
+    // (ver FichaDialog.tsx) -- el agente que va a la visita necesita la
+    // dirección correcta en la tarea, no la que quedó registrada en la
+    // ficha del cliente si esta vez es otro lugar.
+    const direccionTexto = domicilioTrabajo || clienteRow?.direccion
+    const direccion = direccionTexto ? ` (${direccionTexto})` : ''
+    const descripcionReplanteo = `Ficha de medida de ${nombre}${direccion} -- ver módulo Fichas de medida.`
+    const modalidadTexto = modalidadEntrega === 'obra_instalacion' ? 'En obra con instalación' : 'Retiro en local'
+    const descripcionEntrega = `Ficha de medida de ${nombre}${direccion} -- ${modalidadTexto}. Ver módulo Fichas de medida.`
 
     const tareaReplanteoId = await sincronizarUnaTarea({
       tareaIdActual: tareaReplanteoIdActual,
       fecha: fechaReplanteo,
       categoria: 'replanteo',
       titulo: `Replanteo — ${nombre}`,
-      descripcion,
+      descripcion: descripcionReplanteo,
       clienteIdTenant,
     })
 
@@ -253,7 +275,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
       fecha: fechaEntrega,
       categoria: 'entrega',
       titulo: `Entrega — ${nombre}`,
-      descripcion,
+      descripcion: descripcionEntrega,
       clienteIdTenant,
     })
 
@@ -278,6 +300,8 @@ export function useFichasMedida(): UseFichasMedidaResult {
         fecha_pedido: data.fechaPedido,
         fecha_replanteo: data.fechaReplanteo || null,
         fecha_entrega: data.fechaEntrega || null,
+        domicilio_trabajo: data.domicilioTrabajo || null,
+        modalidad_entrega: data.modalidadEntrega,
         sena: data.sena,
         total: data.total,
         notas: data.notas || null,
@@ -297,6 +321,8 @@ export function useFichasMedida(): UseFichasMedidaResult {
         tareaEntregaIdActual: null,
         fechaReplanteo: data.fechaReplanteo,
         fechaEntrega: data.fechaEntrega,
+        domicilioTrabajo: data.domicilioTrabajo,
+        modalidadEntrega: data.modalidadEntrega,
       })
       await cargar()
       return fichaId
@@ -327,6 +353,8 @@ export function useFichasMedida(): UseFichasMedidaResult {
           fecha_pedido: data.fechaPedido,
           fecha_replanteo: data.fechaReplanteo || null,
           fecha_entrega: data.fechaEntrega || null,
+          domicilio_trabajo: data.domicilioTrabajo || null,
+          modalidad_entrega: data.modalidadEntrega,
           sena: data.sena,
           total: data.total,
           notas: data.notas || null,
@@ -356,6 +384,8 @@ export function useFichasMedida(): UseFichasMedidaResult {
         tareaEntregaIdActual: fichaActual?.tarea_entrega_id ?? null,
         fechaReplanteo: data.fechaReplanteo,
         fechaEntrega: data.fechaEntrega,
+        domicilioTrabajo: data.domicilioTrabajo,
+        modalidadEntrega: data.modalidadEntrega,
       })
       await cargar()
       return true

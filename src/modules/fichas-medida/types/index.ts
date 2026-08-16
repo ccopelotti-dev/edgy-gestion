@@ -21,6 +21,18 @@ export const ESTADO_FICHA_LABEL: Record<EstadoFicha, string> = {
   convertida: 'Convertida a presupuesto',
 }
 
+// Retiro en local: el cliente se lleva el producto e instala por su cuenta.
+// Obra con instalación: el comercio instala en el domicilio de trabajo --
+// hoy agrega una línea de instalación en $0 (editable) al generar el
+// presupuesto; a futuro se va a vincular a un Servicio real del catálogo
+// (Fase 40, todavía no construida).
+export type ModalidadEntrega = 'retiro_local' | 'obra_instalacion'
+
+export const MODALIDAD_ENTREGA_LABEL: Record<ModalidadEntrega, string> = {
+  retiro_local: 'Retiro en local',
+  obra_instalacion: 'Obra con instalación',
+}
+
 // Opciones fijas de Tipo de barral / Tipo de cortina -- tomadas tal
 // cual del papel de Punto Tex. Texto libre en la base de datos (no
 // ameritan catálogo aparte), pero se centralizan acá para no repetir
@@ -76,6 +88,11 @@ export interface FichaMedida {
    * fabricar -- genera automáticamente una tarea en Agenda (Fase 0083). */
   fechaReplanteo?: string
   fechaEntrega?: string
+  /** Domicilio donde se hace el Replanteo y, si modalidadEntrega es
+   * 'obra_instalacion', también donde se instala -- si no se carga, la UI
+   * usa clienteDireccion como default (Fase 0084). */
+  domicilioTrabajo?: string
+  modalidadEntrega: ModalidadEntrega
   sena: number
   total: number
   notas?: string
