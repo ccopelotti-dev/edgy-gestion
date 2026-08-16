@@ -22,17 +22,27 @@ interface RubroFormData {
   tipo: Rubro['tipo']
   /** Garantía default para todos los productos de este rubro (Fase 4). */
   plantillaGarantiaId?: string
+  /** Solo de UI -- gatilla si se muestra el selector de plantilla. La
+   * mayoría de los rubros no tiene garantía, así que por defecto el
+   * selector queda oculto en vez de mostrar un desplegable con "Sin
+   * garantía" como una opción más (Fase 41: opt-in explícito). */
+  tieneGarantia: boolean
 }
 
 interface RubroDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: RubroFormData) => void
+  onSave: (data: Omit<RubroFormData, 'tieneGarantia'>) => void
   editData?: Rubro
   plantillasGarantia: PlantillaGarantia[]
 }
 
-const emptyRubro: RubroFormData = { nombre: '', tipo: 'ambos', plantillaGarantiaId: undefined }
+const emptyRubro: RubroFormData = {
+  nombre: '',
+  tipo: 'ambos',
+  plantillaGarantiaId: undefined,
+  tieneGarantia: false,
+}
 
 export function RubroDialog({
   open,
@@ -51,18 +61,21 @@ export function RubroDialog({
               nombre: editData.nombre,
               tipo: editData.tipo,
               plantillaGarantiaId: editData.plantillaGarantiaId,
+              tieneGarantia: !!editData.plantillaGarantiaId,
             }
           : emptyRubro,
       )
     }
   }, [open, editData])
 
+  const garantiaIncompleta = form.tieneGarantia && !form.plantillaGarantiaId
+
   function handleSave() {
-    if (!form.nombre.trim()) return
+    if (!form.nombre.trim() || garantiaIncompleta) return
     onSave({
       nombre: form.nombre.trim(),
       tipo: form.tipo,
-      plantillaGarantiaId: form.plantillaGarantiaId || undefined,
+      plantillaGarantiaId: form.tieneGarantia ? form.plantillaGarantiaId : undefined,
     })
     onOpenChange(false)
   }
@@ -102,25 +115,54 @@ export function RubroDialog({
           </div>
 
           <div className="grid gap-1.5">
-            <label className="text-sm font-medium">Garantía por defecto</label>
-            <select
-              className={inputClass}
-              value={form.plantillaGarantiaId ?? ''}
-              onChange={(e) =>
-                setForm({ ...form, plantillaGarantiaId: e.target.value || undefined })
-              }
-            >
-              <option value="">Sin garantía</option>
-              {plantillasGarantia.map((pg) => (
-                <option key={pg.id} value={pg.id}>
-                  {pg.nombre} ({pg.duracionMeses} {pg.duracionMeses === 1 ? 'mes' : 'meses'})
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Se aplica a todos los productos de este rubro, salvo que un producto puntual
-              tenga su propia garantía asignada.
-            </p>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={form.tieneGarantia}
+                onChange={(e) => {
+                  const tieneGarantia = e.target.checked
+                  setForm({
+                    ...form,
+                    tieneGarantia,
+                    plantillaGarantiaId: tieneGarantia ? form.plantillaGarantiaId : undefined,
+                  })
+                }}
+              />
+              Los productos de este rubro tienen garantía
+            </label>
+
+            {form.tieneGarantia && (
+              <>
+                {plantillasGarantia.length === 0 ? (
+                  <p className="text-xs text-amber-600">
+                    Todavía no cargaste ninguna plantilla de garantía -- creá una primero en la
+                    pestaña Garantías.
+                  </p>
+                ) : (
+                  <>
+                    <select
+                      className={inputClass}
+                      value={form.plantillaGarantiaId ?? ''}
+                      onChange={(e) =>
+                        setForm({ ...form, plantillaGarantiaId: e.target.value || undefined })
+                      }
+                    >
+                      <option value="">Elegí una plantilla...</option>
+                      {plantillasGarantia.map((pg) => (
+                        <option key={pg.id} value={pg.id}>
+                          {pg.nombre} ({pg.duracionMeses} {pg.duracionMeses === 1 ? 'mes' : 'meses'})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      Se aplica a todos los productos de este rubro, salvo que un producto puntual
+                      tenga su propia garantía asignada.
+                    </p>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -128,7 +170,7 @@ export function RubroDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!form.nombre.trim()}>
+          <Button onClick={handleSave} disabled={!form.nombre.trim() || garantiaIncompleta}>
             {editData ? 'Guardar cambios' : 'Crear rubro'}
           </Button>
         </DialogFooter>
