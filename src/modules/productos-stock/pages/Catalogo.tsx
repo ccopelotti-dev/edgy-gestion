@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { Search, ImageOff, ChevronLeft, ChevronRight, Images } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { Search, ImageOff, ChevronLeft, ChevronRight, Images, List, Rows3, Grid2x2, LayoutGrid } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   Dialog,
@@ -19,6 +19,23 @@ import type { Producto } from '../types'
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
 
+// ─── Vista Tipo (tamaño de tarjetas) ───────────────────────────────────────────
+// Listado/Detalle: filas compactas (para escanear rápido en el celular).
+// Medio: grilla actual (default histórico). Grande: grilla con menos columnas
+// y más info por tarjeta. Se recuerda la elección entre visitas (localStorage,
+// por dispositivo -- no es una preferencia de cuenta que viaje entre equipos).
+
+type VistaCatalogo = 'listado' | 'detalle' | 'medio' | 'grande'
+
+const VISTA_STORAGE_KEY = 'catalogo-vista-tamano'
+
+const VISTA_OPCIONES: { valor: VistaCatalogo; label: string; icon: typeof List }[] = [
+  { valor: 'listado', label: 'Listado', icon: List },
+  { valor: 'detalle', label: 'Detalle', icon: Rows3 },
+  { valor: 'medio', label: 'Medio', icon: Grid2x2 },
+  { valor: 'grande', label: 'Grande', icon: LayoutGrid },
+]
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 //
 // Vista de catálogo visual, pensada como referencia de lo que eventualmente se
@@ -35,6 +52,15 @@ export default function Catalogo() {
   const [incluirNoDisponibles, setIncluirNoDisponibles] = useState(false)
   const [productoAbierto, setProductoAbierto] = useState<Producto | null>(null)
   const [indiceImagen, setIndiceImagen] = useState(0)
+  const [vista, setVista] = useState<VistaCatalogo>(() => {
+    if (typeof window === 'undefined') return 'medio'
+    const guardada = window.localStorage.getItem(VISTA_STORAGE_KEY) as VistaCatalogo | null
+    return guardada && VISTA_OPCIONES.some((o) => o.valor === guardada) ? guardada : 'medio'
+  })
+
+  useEffect(() => {
+    window.localStorage.setItem(VISTA_STORAGE_KEY, vista)
+  }, [vista])
 
   const rubrosMap = useMemo(() => new Map(state.rubros.map((r) => [r.id, r])), [state.rubros])
 
@@ -119,6 +145,25 @@ export default function Catalogo() {
           />
           Incluir no disponibles
         </label>
+        <div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-1 sm:ml-auto">
+          {VISTA_OPCIONES.map(({ valor, label, icon: Icon }) => (
+            <button
+              key={valor}
+              type="button"
+              onClick={() => setVista(valor)}
+              title={`Vista ${label}`}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+                vista === valor
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Grilla */}
@@ -132,8 +177,62 @@ export default function Catalogo() {
               : 'No se encontraron productos con los filtros aplicados.'
           }
         />
+      ) : vista === 'listado' || vista === 'detalle' ? (
+        <div className="divide-y overflow-hidden rounded-lg border bg-card">
+          {productos.map((p) => {
+            const noDisponible = !(p.disponible && p.estado === 'activo')
+            const esDetalle = vista === 'detalle'
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => abrirProducto(p)}
+                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+              >
+                <div
+                  className={cn(
+                    'relative shrink-0 overflow-hidden rounded-md bg-muted',
+                    esDetalle ? 'h-16 w-16' : 'h-10 w-10',
+                  )}
+                >
+                  {p.imagenes && p.imagenes.length > 0 ? (
+                    <img src={p.imagenes[0]} alt={p.nombre} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                      <ImageOff className={esDetalle ? 'h-5 w-5' : 'h-4 w-4'} />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium leading-tight">{p.nombre}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {rubrosMap.get(p.rubroId)?.nombre ?? 'Sin rubro'}
+                  </p>
+                  {esDetalle && p.descripcion && (
+                    <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{p.descripcion}</p>
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  {noDisponible && (
+                    <span className="rounded-full bg-gray-900/70 px-1.5 py-0.5 text-[10px] text-white">
+                      No disponible
+                    </span>
+                  )}
+                  <Amount value={p.precioVenta} className="text-sm font-semibold" />
+                </div>
+              </button>
+            )
+          })}
+        </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div
+          className={cn(
+            'grid gap-4',
+            vista === 'grande'
+              ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+              : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5',
+          )}
+        >
           {productos.map((p) => {
             const noDisponible = !(p.disponible && p.estado === 'activo')
             return (
@@ -172,6 +271,9 @@ export default function Catalogo() {
                   <p className="text-xs text-muted-foreground">
                     {rubrosMap.get(p.rubroId)?.nombre ?? 'Sin rubro'}
                   </p>
+                  {vista === 'grande' && p.descripcion && (
+                    <p className="line-clamp-2 text-xs text-muted-foreground">{p.descripcion}</p>
+                  )}
                   <div className="mt-auto pt-1">
                     <Amount value={p.precioVenta} className="text-sm font-semibold" />
                   </div>
