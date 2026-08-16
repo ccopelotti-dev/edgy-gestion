@@ -157,6 +157,7 @@ export default function Listado() {
                 <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500">
                   <span className="flex items-center gap-1">
                     <Calendar className="h-3 w-3" /> Pedido {f.fechaPedido}
+                    {f.fechaReplanteo ? ` · Replanteo ${f.fechaReplanteo}` : ''}
                     {f.fechaEntrega ? ` · Entrega ${f.fechaEntrega}` : ''}
                   </span>
                   <span>{f.items.length} ítem{f.items.length !== 1 ? 's' : ''}</span>

@@ -48,6 +48,7 @@ function filaAFicha(row: any): FichaMedida {
     tipo: row.tipo as TipoFicha,
     estado: row.estado as EstadoFicha,
     fechaPedido: row.fecha_pedido,
+    fechaReplanteo: row.fecha_replanteo ?? undefined,
     fechaEntrega: row.fecha_entrega ?? undefined,
     sena: Number(row.sena),
     total: Number(row.total),
@@ -64,6 +65,7 @@ export interface NuevaFichaMedida {
   tipo: TipoFicha
   estado: EstadoFicha
   fechaPedido: string
+  fechaReplanteo?: string
   fechaEntrega?: string
   sena: number
   total: number
@@ -168,6 +170,99 @@ export function useFichasMedida(): UseFichasMedidaResult {
     }
   }
 
+  // Replanteo y Entrega generan/actualizan/borran automáticamente una
+  // tarea en agenda_tareas -- así Marina no tiene que acordarse de
+  // cargarla a mano en Agenda (a diferencia del botón manual "Crear
+  // recordatorio" de Impuestos > Posición mensual). tareaIdActual permite
+  // reutilizar la misma tarea si se edita la fecha, en vez de duplicarla.
+  async function sincronizarUnaTarea(params: {
+    tareaIdActual: string | null
+    fecha: string | null | undefined
+    categoria: 'replanteo' | 'entrega'
+    titulo: string
+    descripcion: string
+    clienteIdTenant: string
+  }): Promise<string | null> {
+    const { tareaIdActual, fecha, categoria, titulo, descripcion, clienteIdTenant } = params
+
+    if (!fecha) {
+      if (tareaIdActual) {
+        await supabase.from('agenda_tareas').delete().eq('id', tareaIdActual)
+      }
+      return null
+    }
+
+    if (tareaIdActual) {
+      const { error: errUpdate } = await supabase
+        .from('agenda_tareas')
+        .update({ fecha, titulo, descripcion })
+        .eq('id', tareaIdActual)
+      if (!errUpdate) return tareaIdActual
+      // Si el update falla (p.ej. la tarea fue borrada a mano desde Agenda),
+      // seguimos de largo y creamos una nueva en vez de perder la fecha.
+    }
+
+    const nuevaId = crypto.randomUUID()
+    const { error: errInsert } = await supabase.from('agenda_tareas').insert({
+      id: nuevaId,
+      cliente_id: clienteIdTenant,
+      titulo,
+      descripcion,
+      fecha,
+      hora_inicio: null,
+      hora_fin: null,
+      categoria,
+      prioridad: 'media',
+      estado: 'pendiente',
+    })
+    return errInsert ? null : nuevaId
+  }
+
+  async function sincronizarTareasAgenda(params: {
+    fichaId: string
+    clienteIdTenant: string
+    clienteVentaId: string
+    tareaReplanteoIdActual: string | null
+    tareaEntregaIdActual: string | null
+    fechaReplanteo: string | null | undefined
+    fechaEntrega: string | null | undefined
+  }) {
+    const { fichaId, clienteIdTenant, clienteVentaId, tareaReplanteoIdActual, tareaEntregaIdActual, fechaReplanteo, fechaEntrega } =
+      params
+
+    const { data: clienteRow } = await supabase
+      .from('clientes_venta')
+      .select('nombre, direccion')
+      .eq('id', clienteVentaId)
+      .maybeSingle()
+    const nombre = clienteRow?.nombre ?? 'Cliente'
+    const direccion = clienteRow?.direccion ? ` (${clienteRow.direccion})` : ''
+    const descripcion = `Ficha de medida de ${nombre}${direccion} -- ver módulo Fichas de medida.`
+
+    const tareaReplanteoId = await sincronizarUnaTarea({
+      tareaIdActual: tareaReplanteoIdActual,
+      fecha: fechaReplanteo,
+      categoria: 'replanteo',
+      titulo: `Replanteo — ${nombre}`,
+      descripcion,
+      clienteIdTenant,
+    })
+
+    const tareaEntregaId = await sincronizarUnaTarea({
+      tareaIdActual: tareaEntregaIdActual,
+      fecha: fechaEntrega,
+      categoria: 'entrega',
+      titulo: `Entrega — ${nombre}`,
+      descripcion,
+      clienteIdTenant,
+    })
+
+    await supabase
+      .from('fichas_medida')
+      .update({ tarea_replanteo_id: tareaReplanteoId, tarea_entrega_id: tareaEntregaId })
+      .eq('id', fichaId)
+  }
+
   const crear = useCallback(
     async (data: NuevaFichaMedida) => {
       if (!clienteId) return null
@@ -181,6 +276,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
         tipo: data.tipo,
         estado: data.estado,
         fecha_pedido: data.fechaPedido,
+        fecha_replanteo: data.fechaReplanteo || null,
         fecha_entrega: data.fechaEntrega || null,
         sena: data.sena,
         total: data.total,
@@ -193,6 +289,15 @@ export function useFichasMedida(): UseFichasMedidaResult {
       }
 
       await insertarItems(fichaId, data.items)
+      await sincronizarTareasAgenda({
+        fichaId,
+        clienteIdTenant: clienteId,
+        clienteVentaId: data.clienteVentaId,
+        tareaReplanteoIdActual: null,
+        tareaEntregaIdActual: null,
+        fechaReplanteo: data.fechaReplanteo,
+        fechaEntrega: data.fechaEntrega,
+      })
       await cargar()
       return fichaId
     },
@@ -201,7 +306,18 @@ export function useFichasMedida(): UseFichasMedidaResult {
 
   const actualizar = useCallback(
     async (fichaId: string, data: NuevaFichaMedida) => {
+      if (!clienteId) return false
       setError(null)
+
+      // Traemos los ids de tarea actuales ANTES de pisar la fila, para
+      // poder reutilizarlos en sincronizarTareasAgenda (actualiza en vez
+      // de duplicar).
+      const { data: fichaActual } = await supabase
+        .from('fichas_medida')
+        .select('tarea_replanteo_id, tarea_entrega_id')
+        .eq('id', fichaId)
+        .maybeSingle()
+
       const { error: errFicha } = await supabase
         .from('fichas_medida')
         .update({
@@ -209,6 +325,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
           tipo: data.tipo,
           estado: data.estado,
           fecha_pedido: data.fechaPedido,
+          fecha_replanteo: data.fechaReplanteo || null,
           fecha_entrega: data.fechaEntrega || null,
           sena: data.sena,
           total: data.total,
@@ -231,10 +348,19 @@ export function useFichasMedida(): UseFichasMedidaResult {
       }
 
       await insertarItems(fichaId, data.items)
+      await sincronizarTareasAgenda({
+        fichaId,
+        clienteIdTenant: clienteId,
+        clienteVentaId: data.clienteVentaId,
+        tareaReplanteoIdActual: fichaActual?.tarea_replanteo_id ?? null,
+        tareaEntregaIdActual: fichaActual?.tarea_entrega_id ?? null,
+        fechaReplanteo: data.fechaReplanteo,
+        fechaEntrega: data.fechaEntrega,
+      })
       await cargar()
       return true
     },
-    [cargar],
+    [clienteId, cargar],
   )
 
   const cambiarEstado = useCallback(
@@ -276,6 +402,23 @@ export function useFichasMedida(): UseFichasMedidaResult {
   const eliminar = useCallback(
     async (fichaId: string) => {
       setError(null)
+
+      // Las tareas de Agenda no se borran en cascada (la FK está al revés:
+      // fichas_medida -> agenda_tareas, on delete set null), así que hay
+      // que borrarlas a mano antes de perder la referencia.
+      const { data: fichaActual } = await supabase
+        .from('fichas_medida')
+        .select('tarea_replanteo_id, tarea_entrega_id')
+        .eq('id', fichaId)
+        .maybeSingle()
+
+      const idsTareas = [fichaActual?.tarea_replanteo_id, fichaActual?.tarea_entrega_id].filter(
+        (id): id is string => Boolean(id),
+      )
+      if (idsTareas.length > 0) {
+        await supabase.from('agenda_tareas').delete().in('id', idsTareas)
+      }
+
       const { error: errDelete } = await supabase.from('fichas_medida').delete().eq('id', fichaId)
 
       if (errDelete) {

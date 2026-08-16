@@ -72,6 +72,9 @@ export interface FichaMedida {
   tipo: TipoFicha
   estado: EstadoFicha
   fechaPedido: string
+  /** Segunda visita a domicilio para confirmar medidas exactas antes de
+   * fabricar -- genera automáticamente una tarea en Agenda (Fase 0083). */
+  fechaReplanteo?: string
   fechaEntrega?: string
   sena: number
   total: number

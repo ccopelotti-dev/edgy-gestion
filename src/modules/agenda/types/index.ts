@@ -2,7 +2,11 @@
 // notas. Mismo criterio que el resto de los módulos: tipos propios acá,
 // no en src/types/index.ts (ver useArchivos.ts de Utilidades).
 
-export type CategoriaTarea = 'trabajo' | 'personal' | 'pago' | 'entrega' | 'otro'
+// 'replanteo' (Fase 0083): segunda visita a domicilio para confirmar
+// medidas exactas antes de fabricar -- generada automáticamente por el
+// módulo Fichas de medida (ver fichas-medida/data/useFichasMedida.ts),
+// no se crea a mano desde acá.
+export type CategoriaTarea = 'trabajo' | 'personal' | 'pago' | 'entrega' | 'otro' | 'replanteo'
 export type PrioridadTarea = 'baja' | 'media' | 'alta'
 export type EstadoTarea = 'pendiente' | 'hecho'
 
@@ -12,6 +16,7 @@ export const CATEGORIA_TAREA_LABEL: Record<CategoriaTarea, string> = {
   pago: 'Pago',
   entrega: 'Entrega',
   otro: 'Otro',
+  replanteo: 'Replanteo',
 }
 
 export const PRIORIDAD_TAREA_LABEL: Record<PrioridadTarea, string> = {

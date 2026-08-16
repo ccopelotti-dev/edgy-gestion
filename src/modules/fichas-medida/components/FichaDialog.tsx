@@ -131,6 +131,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
   const [tipo, setTipo] = useState<TipoFicha>('generica');
   const [estado, setEstado] = useState<EstadoFicha>('borrador');
   const [fechaPedido, setFechaPedido] = useState('');
+  const [fechaReplanteo, setFechaReplanteo] = useState('');
   const [fechaEntrega, setFechaEntrega] = useState('');
   const [textoSena, setTextoSena] = useState('0');
   const [textoTotal, setTextoTotal] = useState('0');
@@ -147,6 +148,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       setTipo(ficha.tipo);
       setEstado(ficha.estado);
       setFechaPedido(ficha.fechaPedido);
+      setFechaReplanteo(ficha.fechaReplanteo ?? '');
       setFechaEntrega(ficha.fechaEntrega ?? '');
       setTextoSena(String(ficha.sena ?? 0));
       setTextoTotal(String(ficha.total ?? 0));
@@ -158,6 +160,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       setTipo('generica');
       setEstado('borrador');
       setFechaPedido(new Date().toISOString().split('T')[0]);
+      setFechaReplanteo('');
       setFechaEntrega('');
       setTextoSena('0');
       setTextoTotal('0');
@@ -284,6 +287,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       tipo,
       estado,
       fechaPedido,
+      fechaReplanteo: fechaReplanteo || undefined,
       fechaEntrega: fechaEntrega || undefined,
       sena: parseDecimal(textoSena),
       total: parseDecimal(textoTotal),
@@ -415,8 +419,19 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                 <input type="date" value={fechaPedido} onChange={(e) => setFechaPedido(e.target.value)} className={inputClass} />
               </div>
               <div>
+                <label className={labelClass}>Fecha de replanteo</label>
+                <input
+                  type="date"
+                  value={fechaReplanteo}
+                  onChange={(e) => setFechaReplanteo(e.target.value)}
+                  className={inputClass}
+                />
+                <p className="mt-1 text-[11px] text-gray-400">Crea una tarea en Agenda automáticamente.</p>
+              </div>
+              <div>
                 <label className={labelClass}>Fecha de entrega</label>
                 <input type="date" value={fechaEntrega} onChange={(e) => setFechaEntrega(e.target.value)} className={inputClass} />
+                <p className="mt-1 text-[11px] text-gray-400">También impacta en Agenda.</p>
               </div>
               <div>
                 <label className={labelClass}>Seña</label>
