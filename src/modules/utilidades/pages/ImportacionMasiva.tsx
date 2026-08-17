@@ -40,6 +40,8 @@ export default function ImportacionMasiva() {
     marcasProducto,
     rubrosServicio,
     subRubrosServicio,
+    productosExistentes,
+    serviciosExistentes,
     cargando,
     error,
     ejecutarImportacion,
@@ -73,16 +75,22 @@ export default function ImportacionMasiva() {
     let validadas: FilaConPayload[]
     switch (entidad) {
       case 'productos':
-        validadas = validarProductos(csv, rubrosProducto, subRubrosProducto, marcasProducto)
+        validadas = validarProductos(
+          csv,
+          rubrosProducto,
+          subRubrosProducto,
+          marcasProducto,
+          productosExistentes,
+        )
         break
       case 'rubros_producto':
-        validadas = validarRubrosProducto(csv)
+        validadas = validarRubrosProducto(csv, rubrosProducto)
         break
       case 'servicios':
-        validadas = validarServicios(csv, rubrosServicio, subRubrosServicio)
+        validadas = validarServicios(csv, rubrosServicio, subRubrosServicio, serviciosExistentes)
         break
       case 'rubros_servicio':
-        validadas = validarRubrosServicio(csv)
+        validadas = validarRubrosServicio(csv, rubrosServicio)
         break
     }
     setFilas(validadas)

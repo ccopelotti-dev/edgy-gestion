@@ -150,6 +150,15 @@ export interface FilaConPayload extends FilaImportacion {
   payload?: Record<string, unknown>
 }
 
+/** Catálogo existente contra el cual se chequean duplicados (Punto Tex:
+ * evitar la clase de duplicación que generó los 74 insumos huérfanos —
+ * ver auditoría Fase 34+ punto 5). Se compara por nombre normalizado
+ * (trim + minúsculas) y, si viene cargado, por código exacto. */
+export interface ItemExistenteDedup {
+  nombre: string
+  codigo?: string | null
+}
+
 export function validarProductos(
   csv: CsvParseado,
   rubros: RubroExistente[],
@@ -157,7 +166,20 @@ export function validarProductos(
   // Marcas del cliente (Fase 1 del refactor de Productos). Opcional en la
   // firma (default []) para no romper otros llamadores existentes.
   marcas: RubroExistente[] = [],
+  // Productos ya existentes del cliente (Punto 5 del audit Fase 34+):
+  // detecta nombre/código duplicado ANTES de insertar, tanto contra lo que
+  // ya está en Supabase como contra otra fila del mismo archivo.
+  productosExistentes: ItemExistenteDedup[] = [],
 ): FilaConPayload[] {
+  const nombresVistos = new Set<string>()
+  const codigosVistos = new Set<string>()
+  const nombresExistentes = new Set(productosExistentes.map((p) => p.nombre.trim().toLowerCase()))
+  const codigosExistentes = new Set(
+    productosExistentes
+      .map((p) => p.codigo?.trim().toLowerCase())
+      .filter((c): c is string => !!c),
+  )
+
   return csv.filas.map((fila, idx) => {
     const obj = filaAObjeto(csv.headers, fila)
     const numeroFila = idx + 2 // +1 por header, +1 por index base 1
@@ -165,12 +187,31 @@ export function validarProductos(
     const nombre = obj['nombre']
     const rubroNombre = obj['rubro']
     const precioVenta = obj['precioventa']
+    const codigo = obj['codigo']
 
     if (!nombre) return err(numeroFila, obj, 'Falta Nombre')
     if (!rubroNombre) return err(numeroFila, obj, 'Falta Rubro')
     if (!precioVenta || isNaN(Number(precioVenta.replace(',', '.')))) {
       return err(numeroFila, obj, 'PrecioVenta inválido o vacío')
     }
+
+    const nombreNorm = nombre.trim().toLowerCase()
+    const codigoNorm = codigo ? codigo.trim().toLowerCase() : ''
+
+    if (nombresExistentes.has(nombreNorm)) {
+      return err(numeroFila, obj, `Ya existe un producto llamado "${nombre}" -- revisá el catálogo antes de importar`)
+    }
+    if (codigoNorm && codigosExistentes.has(codigoNorm)) {
+      return err(numeroFila, obj, `Ya existe un producto con código "${codigo}" -- revisá el catálogo antes de importar`)
+    }
+    if (nombresVistos.has(nombreNorm)) {
+      return err(numeroFila, obj, `Nombre "${nombre}" repetido dentro del mismo archivo (fila duplicada)`)
+    }
+    if (codigoNorm && codigosVistos.has(codigoNorm)) {
+      return err(numeroFila, obj, `Código "${codigo}" repetido dentro del mismo archivo (fila duplicada)`)
+    }
+    nombresVistos.add(nombreNorm)
+    if (codigoNorm) codigosVistos.add(codigoNorm)
 
     const rubro = buscarRubro(rubroNombre, rubros)
     if (!rubro) {
@@ -235,12 +276,27 @@ export function validarProductos(
   })
 }
 
-export function validarRubrosProducto(csv: CsvParseado): FilaConPayload[] {
+export function validarRubrosProducto(
+  csv: CsvParseado,
+  rubrosExistentes: RubroExistente[] = [],
+): FilaConPayload[] {
+  const vistos = new Set<string>()
+  const existentes = new Set(rubrosExistentes.map((r) => r.nombre.trim().toLowerCase()))
+
   return csv.filas.map((fila, idx) => {
     const obj = filaAObjeto(csv.headers, fila)
     const numeroFila = idx + 2
     const nombre = obj['nombre']
     if (!nombre) return err(numeroFila, obj, 'Falta Nombre')
+
+    const nombreNorm = nombre.trim().toLowerCase()
+    if (existentes.has(nombreNorm)) {
+      return err(numeroFila, obj, `Ya existe un rubro llamado "${nombre}"`)
+    }
+    if (vistos.has(nombreNorm)) {
+      return err(numeroFila, obj, `Nombre "${nombre}" repetido dentro del mismo archivo (fila duplicada)`)
+    }
+    vistos.add(nombreNorm)
 
     const tipo = (obj['tipo'] || 'ambos').toLowerCase()
     if (!TIPOS_RUBRO.includes(tipo)) {
@@ -255,7 +311,13 @@ export function validarServicios(
   csv: CsvParseado,
   rubros: RubroExistente[],
   subRubros: { id: string; rubroId: string; nombre: string }[],
+  // Servicios ya existentes del cliente (Punto 5 del audit Fase 34+):
+  // mismo criterio de dedup que Productos, por título.
+  serviciosExistentes: ItemExistenteDedup[] = [],
 ): FilaConPayload[] {
+  const titulosVistos = new Set<string>()
+  const titulosExistentes = new Set(serviciosExistentes.map((s) => s.nombre.trim().toLowerCase()))
+
   return csv.filas.map((fila, idx) => {
     const obj = filaAObjeto(csv.headers, fila)
     const numeroFila = idx + 2
@@ -264,6 +326,15 @@ export function validarServicios(
     const rubroNombre = obj['rubro']
     if (!titulo) return err(numeroFila, obj, 'Falta Titulo')
     if (!rubroNombre) return err(numeroFila, obj, 'Falta Rubro')
+
+    const tituloNorm = titulo.trim().toLowerCase()
+    if (titulosExistentes.has(tituloNorm)) {
+      return err(numeroFila, obj, `Ya existe un servicio llamado "${titulo}" -- revisá el catálogo antes de importar`)
+    }
+    if (titulosVistos.has(tituloNorm)) {
+      return err(numeroFila, obj, `Titulo "${titulo}" repetido dentro del mismo archivo (fila duplicada)`)
+    }
+    titulosVistos.add(tituloNorm)
 
     const rubro = buscarRubro(rubroNombre, rubros)
     if (!rubro) {
@@ -322,12 +393,28 @@ export function validarServicios(
   })
 }
 
-export function validarRubrosServicio(csv: CsvParseado): FilaConPayload[] {
+export function validarRubrosServicio(
+  csv: CsvParseado,
+  rubrosExistentes: RubroExistente[] = [],
+): FilaConPayload[] {
+  const vistos = new Set<string>()
+  const existentes = new Set(rubrosExistentes.map((r) => r.nombre.trim().toLowerCase()))
+
   return csv.filas.map((fila, idx) => {
     const obj = filaAObjeto(csv.headers, fila)
     const numeroFila = idx + 2
     const nombre = obj['nombre']
     if (!nombre) return err(numeroFila, obj, 'Falta Nombre')
+
+    const nombreNorm = nombre.trim().toLowerCase()
+    if (existentes.has(nombreNorm)) {
+      return err(numeroFila, obj, `Ya existe un rubro llamado "${nombre}"`)
+    }
+    if (vistos.has(nombreNorm)) {
+      return err(numeroFila, obj, `Nombre "${nombre}" repetido dentro del mismo archivo (fila duplicada)`)
+    }
+    vistos.add(nombreNorm)
+
     return { numeroFila, datos: obj, valida: true, payload: { nombre } }
   })
 }

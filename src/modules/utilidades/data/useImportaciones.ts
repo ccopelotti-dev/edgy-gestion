@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { EntidadImportable, ImportacionMasiva } from '../types'
-import type { RubroExistente } from '../lib/importCsv'
+import type { ItemExistenteDedup, RubroExistente } from '../lib/importCsv'
 import { useClienteId } from './useClienteId'
 
 function filaAImportacion(row: any): ImportacionMasiva {
@@ -32,6 +32,10 @@ interface UseImportacionesResult {
   marcasProducto: RubroExistente[]
   rubrosServicio: RubroExistente[]
   subRubrosServicio: { id: string; rubroId: string; nombre: string }[]
+  // Punto 5 (audit Fase 34+): catálogo existente para chequeo de
+  // nombre/código duplicado antes de insertar en la carga masiva.
+  productosExistentes: ItemExistenteDedup[]
+  serviciosExistentes: ItemExistenteDedup[]
   cargando: boolean
   error: string | null
   ejecutarImportacion: (
@@ -56,6 +60,9 @@ export function useImportaciones(): UseImportacionesResult {
   const [subRubrosServicio, setSubRubrosServicio] = useState<
     { id: string; rubroId: string; nombre: string }[]
   >([])
+  // Punto 5 (audit Fase 34+): catálogo existente para dedup pre-insert.
+  const [productosExistentes, setProductosExistentes] = useState<ItemExistenteDedup[]>([])
+  const [serviciosExistentes, setServiciosExistentes] = useState<ItemExistenteDedup[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -67,7 +74,7 @@ export function useImportaciones(): UseImportacionesResult {
     setCargando(true)
     setError(null)
 
-    const [hist, rp, srp, mp, rs, srs] = await Promise.all([
+    const [hist, rp, srp, mp, rs, srs, prod, serv] = await Promise.all([
       supabase
         .from('importaciones_masivas')
         .select('*')
@@ -92,6 +99,12 @@ export function useImportaciones(): UseImportacionesResult {
           (r) => r.id,
         ) ?? [],
       ),
+      // Punto 5: nombre + código de TODOS los productos/servicios del
+      // cliente, para chequear duplicados antes de insertar por carga
+      // masiva (evita repetir la clase de bug que generó los 74 insumos
+      // huérfanos de Punto Tex -- ver auditoría Fase 34+).
+      supabase.from('productos').select('nombre, codigo').eq('cliente_id', clienteId),
+      supabase.from('servicios').select('titulo').eq('cliente_id', clienteId),
     ])
 
     setHistorial((hist.data ?? []).map(filaAImportacion))
@@ -100,6 +113,10 @@ export function useImportaciones(): UseImportacionesResult {
     setMarcasProducto(mp.data ?? [])
     setRubrosServicio(rs.data ?? [])
     setSubRubrosServicio((srs.data ?? []).map((s: any) => ({ id: s.id, rubroId: s.rubro_id, nombre: s.nombre })))
+    setProductosExistentes(
+      (prod.data ?? []).map((p: any) => ({ nombre: p.nombre, codigo: p.codigo })),
+    )
+    setServiciosExistentes((serv.data ?? []).map((s: any) => ({ nombre: s.titulo })))
     setCargando(false)
   }, [clienteId])
 
@@ -160,6 +177,8 @@ export function useImportaciones(): UseImportacionesResult {
     marcasProducto,
     rubrosServicio,
     subRubrosServicio,
+    productosExistentes,
+    serviciosExistentes,
     cargando: cargando || cargandoClienteId,
     error,
     ejecutarImportacion,
