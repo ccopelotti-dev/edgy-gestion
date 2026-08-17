@@ -65,7 +65,10 @@ type ProductoFormData = Omit<Producto, 'id' | 'stock' | 'createdAt' | 'tieneForm
 interface ProductoDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: ProductoFormData) => void
+  /** Guardado confirmado (17/08): espera la escritura real en Supabase antes
+   * de cerrar el diálogo. Devuelve un mensaje de error si falló, o
+   * `undefined`/nada si se guardó bien (mismo contrato que TransferenciaDialog). */
+  onSave: (data: ProductoFormData) => Promise<string | void>
   rubros: Rubro[]
   subRubros: SubRubro[]
   /** Productos existentes, para validar que el código de barras no se repita. */
@@ -156,6 +159,13 @@ export function ProductoDialog({
   const [subiendo, setSubiendo] = useState(false)
   const [errorImagen, setErrorImagen] = useState('')
   const [errorCodigoBarras, setErrorCodigoBarras] = useState('')
+  // Guardado confirmado (17/08): antes onSave era sincrónico y el diálogo se
+  // cerraba de inmediato sin esperar la respuesta real de Supabase -- así
+  // desaparecieron "Cortina Black Interior" y otro producto de prueba sin
+  // ningún aviso. Ahora se espera la confirmación antes de cerrar, y si
+  // falla se muestra acá en vez de fallar en silencio.
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Carpeta estable para esta sesión de edición (id real si ya existe, o un
@@ -239,6 +249,8 @@ export function ProductoDialog({
       setErrorImagen('')
       setMostrarNuevaMarca(false)
       setNuevaMarcaNombre('')
+      setGuardando(false)
+      setErrorGuardado('')
       if (editData) {
         const { id, stock, createdAt, tieneFormula, ...rest } = editData
         setForm({
@@ -351,6 +363,7 @@ export function ProductoDialog({
   }
 
   function handleCancelar() {
+    if (guardando) return
     // Limpiar fotos subidas en esta sesión que no se van a guardar.
     for (const url of subidasEnEstaSesionRef.current) {
       void eliminarImagenProducto(url)
@@ -364,10 +377,11 @@ export function ProductoDialog({
     (form.variantes.length > 0 &&
       form.variantes.every((v) => (v.color?.trim() || '') || (v.talle?.trim() || '')))
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.nombre.trim()) return
     if (!form.rubroId) return
     if (!variantesValidas) return
+    if (guardando) return
 
     const codigoBarrasLimpio = form.codigoBarras?.trim() || undefined
     if (codigoBarrasLimpio) {
@@ -381,8 +395,9 @@ export function ProductoDialog({
     }
 
     setErrorCodigoBarras('')
-    subidasEnEstaSesionRef.current = new Set()
-    onSave({
+    setErrorGuardado('')
+    setGuardando(true)
+    const errorGuardar = await onSave({
       ...form,
       codigo: form.codigo.trim() || `PROD-${Date.now().toString(36).toUpperCase()}`,
       codigoBarras: codigoBarrasLimpio,
@@ -404,6 +419,12 @@ export function ProductoDialog({
             }))
           : [],
     })
+    setGuardando(false)
+    if (errorGuardar) {
+      setErrorGuardado(errorGuardar)
+      return
+    }
+    subidasEnEstaSesionRef.current = new Set()
     onOpenChange(false)
   }
 
@@ -1097,14 +1118,17 @@ export function ProductoDialog({
           </div>
         </div>
 
+        {errorGuardado && <p className="text-sm text-red-500 px-6">{errorGuardado}</p>}
+
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancelar}>
+          <Button variant="outline" onClick={handleCancelar} disabled={guardando}>
             Cancelar
           </Button>
           <Button
             onClick={handleSave}
-            disabled={!form.nombre.trim() || !form.rubroId || subiendo || !variantesValidas}
+            disabled={!form.nombre.trim() || !form.rubroId || subiendo || !variantesValidas || guardando}
           >
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {editData ? 'Guardar cambios' : 'Crear producto'}
           </Button>
         </DialogFooter>

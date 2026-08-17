@@ -64,6 +64,7 @@ import {
   useReducer,
   useEffect,
   useMemo,
+  useRef,
   type ReactNode,
 } from 'react'
 import type {
@@ -90,6 +91,7 @@ import type {
   EstadoTransferencia,
   ReglaControl,
   RegistroControl,
+  UnidadMedida,
 } from '../types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
@@ -203,6 +205,16 @@ type Action =
     }
   | { type: 'RESET' }
   | { type: 'SET_STATE'; payload: ProductosStockState }
+  // Fase de estabilidad (17/08): a diferencia del resto de las acciones
+  // (optimistas -- tocan el estado local YA y escriben a Supabase en
+  // segundo plano sin esperar confirmación), estas dos se usan SOLO desde
+  // las funciones exportadas crearProductoConfirmado/guardarFormulaConfirmada
+  // más abajo, después de que Supabase ya confirmó que la escritura salió
+  // bien. Por eso su caso en syncToSupabase es un no-op (return sin hacer
+  // nada) -- no hay que volver a escribir algo que ya se escribió. Ver el
+  // comentario grande antes de esas funciones para el motivo completo.
+  | { type: 'CONFIRM_PRODUCTO'; payload: Producto }
+  | { type: 'CONFIRM_FORMULA'; payload: Formula }
 
 // ─── Reducer (copia EXACTA del original, más SET_STATE) ────
 
@@ -433,6 +445,34 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         ...state,
         formulas: state.formulas.filter((f) => f.id !== action.payload),
       }
+
+    // ── Escrituras confirmadas (17/08) ──────────────────────────────────────────
+    // Ver comentario junto al tipo Action y junto a
+    // crearProductoConfirmado/guardarFormulaConfirmada más abajo. Estos dos
+    // casos solo reflejan en el estado local algo que Supabase YA confirmó
+    // -- por eso "upsert" (si el id no está, lo agrega; si está, lo
+    // reemplaza) en vez de asumir que siempre es una fila nueva.
+    case 'CONFIRM_PRODUCTO': {
+      const p = action.payload
+      const existe = state.productos.some((x) => x.id === p.id)
+      return {
+        ...state,
+        productos: existe
+          ? state.productos.map((x) => (x.id === p.id ? p : x))
+          : [...state.productos, p],
+        insumos: sincronizarInsumoDeProducto(p, state.insumos),
+      }
+    }
+    case 'CONFIRM_FORMULA': {
+      const f = action.payload
+      const existe = state.formulas.some((x) => x.id === f.id)
+      return {
+        ...state,
+        formulas: existe
+          ? state.formulas.map((x) => (x.id === f.id ? f : x))
+          : [...state.formulas, f],
+      }
+    }
 
     case 'REGISTRAR_PRODUCCION': {
       const { formulaId, factor, cantidadRealProducida, fecha, notas } = action.payload
@@ -1461,6 +1501,17 @@ async function syncToSupabase(
       supabase.from('formulas').delete().eq('id', action.payload).then(logErr('borrado de fórmula'))
       return
 
+    // No-op a propósito: CONFIRM_PRODUCTO/CONFIRM_FORMULA se disparan
+    // DESPUÉS de que crearProductoConfirmado/guardarFormulaConfirmada ya
+    // escribieron y confirmaron en Supabase -- volver a escribir acá
+    // sería redundante (en el mejor caso) o pisaría datos con una versión
+    // vieja del payload (en el peor). Solo actualizan el estado local.
+    case 'CONFIRM_PRODUCTO':
+      persistirInsumosVinculados(prevState, nextState, clienteId)
+      return
+    case 'CONFIRM_FORMULA':
+      return
+
     case 'REGISTRAR_PRODUCCION': {
       // Fase 9 (cierre): la fila de `producciones` es el registro real del
       // lote -- se inserta primero (igual que ADD_FORMULA/ADD_RECEPCION con
@@ -2091,6 +2142,119 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
   }
 }
 
+// ─── Escrituras confirmadas ─────────────────────────────────────────────────
+// Todo el resto de este store usa el patrón optimista: dispatch() actualiza
+// el estado local YA y dispara el INSERT/UPDATE a Supabase en segundo plano
+// sin esperar la respuesta (ver syncToSupabase) -- si esa escritura falla,
+// el error queda solo en la consola del navegador y el estado local nunca
+// se corrige, así que la pantalla sigue mostrando algo que en realidad
+// nunca se guardó. Confirmado con logs reales de Supabase (17/08): así
+// desaparecieron dos productos de prueba de Carlos, y así una Fórmula
+// completa (con costo y precio ya calculados) se perdió en silencio.
+//
+// Estas dos funciones se usan en los dos puntos exactos donde eso pasó:
+// crear un Producto y guardar una Fórmula (+ sincronizar costo/precio a la
+// ficha del Producto) desde Formular Producto. Escriben a Supabase primero,
+// ESPERAN la respuesta, y devuelven { ok:false, error } si algo falla --
+// recién si { ok:true }, el componente que llama refleja el cambio en el
+// estado local (con las acciones CONFIRM_PRODUCTO/CONFIRM_FORMULA, que no
+// vuelven a escribir nada, ver el reducer y syncToSupabase más arriba).
+//
+// Esto NO es una reescritura del store entero -- el resto de las +50
+// acciones sigue siendo optimista, sería un cambio mucho más grande y
+// arriesgado tocar todo de una. Se aplica acá primero porque es donde
+// Carlos lo sufrió hoy; si el patrón conviene, se puede ir extendiendo a
+// otras pantallas más adelante.
+
+export type ResultadoGuardado<T> = { ok: true; data: T } | { ok: false; error: string }
+
+export async function crearProductoConfirmado(
+  data: Omit<Producto, 'id' | 'createdAt'>,
+  clienteId: string,
+): Promise<ResultadoGuardado<Producto>> {
+  const nuevo: Producto = { ...data, id: uid(), createdAt: todayISO() }
+  const { error } = await supabase.from('productos').insert(productoToRow(nuevo, clienteId))
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: nuevo }
+}
+
+export async function actualizarProductoConfirmado(
+  p: Producto,
+  clienteId: string,
+): Promise<ResultadoGuardado<Producto>> {
+  const { data, error } = await supabase
+    .from('productos')
+    .update(productoToRow(p, clienteId))
+    .eq('id', p.id)
+    .select('id')
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error:
+        'No se encontró este producto en la base -- puede que nunca se haya guardado. Probá crearlo de nuevo.',
+    }
+  }
+  return { ok: true, data: p }
+}
+
+export async function guardarFormulaConfirmada(
+  args: {
+    /** Si viene, se hace UPDATE de esa fórmula existente; si no, se crea una nueva. */
+    id?: string
+    productoId: string
+    cantidadProducida: number
+    unidadProducida: UnidadMedida
+    lineas: LineaFormula[]
+    notas: string
+    mermaPorcentaje: number
+    /** Solo relevante al actualizar -- se preserva la fecha de creación original. */
+    createdAt?: string
+  },
+  clienteId: string,
+): Promise<ResultadoGuardado<Formula>> {
+  const esNueva = !args.id
+  const formula: Formula = {
+    id: args.id ?? uid(),
+    productoId: args.productoId,
+    cantidadProducida: args.cantidadProducida,
+    unidadProducida: args.unidadProducida,
+    lineas: args.lineas,
+    notas: args.notas,
+    mermaPorcentaje: args.mermaPorcentaje,
+    createdAt: args.createdAt ?? todayISO(),
+  }
+
+  if (esNueva) {
+    const { error } = await supabase.from('formulas').insert(formulaToRow(formula, clienteId))
+    if (error) return { ok: false, error: error.message }
+  } else {
+    const { data, error } = await supabase
+      .from('formulas')
+      .update(formulaToRow(formula, clienteId))
+      .eq('id', formula.id)
+      .select('id')
+    if (error) return { ok: false, error: error.message }
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error: 'No se encontró esta fórmula en la base -- puede que nunca se haya guardado.',
+      }
+    }
+    const { error: delErr } = await supabase.from('formula_lineas').delete().eq('formula_id', formula.id)
+    if (delErr) return { ok: false, error: delErr.message }
+  }
+
+  if (formula.lineas.length) {
+    const { error: lineasErr } = await supabase
+      .from('formula_lineas')
+      .insert(formula.lineas.map((l) => formulaLineaToRow(l, formula.id)))
+    if (lineasErr) return { ok: false, error: lineasErr.message }
+  }
+
+  return { ok: true, data: formula }
+}
+
 // ─── Context ───────────────────────────────────────────────────────────────────
 
 interface ContextValue {
@@ -2106,6 +2270,20 @@ export function ProductosStockProvider({ children }: { children: ReactNode }) {
   const { cliente } = useClienteActual()
   const [state, rawDispatch] = useReducer(reducer, seedState)
 
+  // Fix (17/08): `dispatch` estaba memoizado con `state` como dependencia,
+  // así que dos llamadas a dispatch() seguidas dentro del mismo handler
+  // sincrónico (ej. handleSave en Formular Producto, que hace ADD_FORMULA
+  // y después UPDATE_PRODUCTO) usaban el MISMO `state` capturado -- React
+  // recién actualiza `state` en el próximo render, no entre esas dos
+  // llamadas. La segunda quedaba calculando prevState/nextState contra una
+  // versión vieja del estado, sin la fórmula que la primera acababa de
+  // agregar. `stateRef` se actualiza al toque en cada dispatch, así que la
+  // segunda llamada siempre ve lo que hizo la primera.
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
   useEffect(() => {
     let activo = true
     if (!cliente?.id) return
@@ -2119,15 +2297,16 @@ export function ProductosStockProvider({ children }: { children: ReactNode }) {
 
   const dispatch = useMemo<React.Dispatch<Action>>(() => {
     return (action: Action) => {
-      const prevState = state
+      const prevState = stateRef.current
       const nextState = reducer(prevState, action)
+      stateRef.current = nextState
       rawDispatch(action)
       if (cliente?.id && action.type !== 'RESET') {
         syncToSupabase(action, prevState, nextState, cliente.id)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, cliente?.id])
+  }, [cliente?.id])
 
   const value = useMemo(() => ({ state, dispatch }), [state, dispatch])
 

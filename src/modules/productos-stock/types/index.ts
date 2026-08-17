@@ -370,6 +370,7 @@ export interface Producto {
   createdAt: string
 }
 
+
 /** Cantidad máxima de fotos permitidas por producto en la galería. */
 export const MAX_IMAGENES_PRODUCTO = 6
 

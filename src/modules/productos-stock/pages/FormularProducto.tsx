@@ -12,11 +12,19 @@ import {
   Cog,
   Factory,
   Search,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import {
+  useProductosStock,
+  crearProductoConfirmado,
+  guardarFormulaConfirmada,
+  actualizarProductoConfirmado,
+} from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import { Amount, EmptyState } from '../components/productos/display'
 import { ProductoDialog } from '../components/productos/dialogs'
 import { formatARS } from '../lib/format'
@@ -419,12 +427,25 @@ function FormulaSection({
 
 export default function FormularProducto() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
   const { pathname, search } = useLocation()
   const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
 
   const [selectedProductoId, setSelectedProductoId] = useState('')
   const [formula, setFormula] = useState<FormulaLocal | null>(null)
   const [dirty, setDirty] = useState(false)
+
+  // Guardado confirmado (17/08): a diferencia del resto del store
+  // (optimista -- ver comentario grande en data/store.tsx junto a
+  // crearProductoConfirmado/guardarFormulaConfirmada), acá se espera la
+  // confirmación real de Supabase antes de tocar el estado local, porque
+  // este es exactamente el punto donde Carlos vio productos y una fórmula
+  // completa desaparecer sin aviso. El alta de producto nuevo delega su
+  // guardando/error al propio ProductoDialog (mismo contrato que
+  // TransferenciaDialog: onSave devuelve un string de error o nada); acá
+  // solo hace falta el estado para el guardado de la Fórmula en sí.
+  const [guardandoFormula, setGuardandoFormula] = useState(false)
+  const [errorFormula, setErrorFormula] = useState<string | null>(null)
 
   // Precio de venta automático por margen (17/08, a pedido de Carlos): en vez
   // de tener que ir a Productos a cargar el Precio venta a mano después de
@@ -516,16 +537,25 @@ export default function FormularProducto() {
     setNuevoProductoOpen(true)
   }
 
-  function handleGuardarNuevoProducto(
+  // Fix (17/08): antes esto era un simple dispatch({type:'ADD_PRODUCTO'}) --
+  // optimista, sin esperar confirmación de Supabase. Así fue como "Cortina
+  // generica" y otro producto de prueba de Carlos quedaron mostrados en
+  // pantalla pero nunca llegaron a la base; al refrescar, desaparecieron
+  // sin aviso. Ahora espera la respuesta real antes de tocar el estado
+  // local -- devuelve el mensaje de error (mismo contrato que ya usa
+  // TransferenciaDialog) para que ProductoDialog lo muestre y NO se
+  // cierre solo si algo falla.
+  async function handleGuardarNuevoProducto(
     data: Omit<Producto, 'id' | 'stock' | 'createdAt' | 'tieneFormula'>,
-  ) {
-    dispatch({
-      type: 'ADD_PRODUCTO',
-      payload: { ...data, stock: 0, tieneFormula: false },
-    })
+  ): Promise<string | void> {
+    if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
+    const res = await crearProductoConfirmado({ ...data, stock: 0, tieneFormula: false }, cliente.id)
+    if (!res.ok) return res.error
+    dispatch({ type: 'CONFIRM_PRODUCTO', payload: res.data })
   }
 
-  // ADD_PRODUCTO agrega el producto nuevo al final de state.productos (ver
+  // CONFIRM_PRODUCTO agrega el producto nuevo al final de state.productos
+  // (mismo comportamiento de "upsert al final" que tenía ADD_PRODUCTO -- ver
   // reducer en data/store.tsx). En cuanto el array crece respecto de la
   // longitud registrada al abrir el diálogo, el último elemento es el
   // producto recién creado -- se selecciona automáticamente.
@@ -632,9 +662,23 @@ export default function FormularProducto() {
     return ((pv - costos.unitario) / pv) * 100
   }, [selectedProducto, costos.unitario])
 
-  // Save
-  function handleSave() {
+  // Save (guardado confirmado, 17/08 -- ver comentario grande junto a los
+  // estados guardandoFormula/errorFormula más arriba). Antes esto era un
+  // par de dispatch() optimistas (ADD_FORMULA/UPDATE_FORMULA +
+  // UPDATE_PRODUCTO) que actualizaban la pantalla sin esperar la escritura
+  // real en Supabase. Así fue como la fórmula de "Cortina Edgy" se vio
+  // guardada en pantalla pero nunca llegó a la base (rechazada con FK
+  // violation contra un producto que tampoco se había persistido), y el
+  // costo/precio quedaron en 0 sin ningún aviso. Ahora se espera la
+  // confirmación real de cada escritura, en orden, y se corta con un error
+  // visible si algo falla -- sin marcar el formulario como guardado.
+  async function handleSave() {
     if (!formula || !selectedProductoId) return
+    if (guardandoFormula) return
+    if (!cliente?.id) {
+      setErrorFormula('No se pudo identificar la cuenta -- probá recargar la página.')
+      return
+    }
 
     const lineas: LineaFormula[] = formula.lineas.map((l) => ({
       id: l.id,
@@ -646,31 +690,29 @@ export default function FormularProducto() {
       costoUnitario: l.costoUnitario,
     }))
 
-    if (existingFormula) {
-      dispatch({
-        type: 'UPDATE_FORMULA',
-        payload: {
-          ...existingFormula,
-          cantidadProducida: formula.cantidadProducida,
-          unidadProducida: formula.unidadProducida,
-          lineas,
-          notas: formula.notas,
-          mermaPorcentaje: formula.mermaPorcentaje,
-        },
-      })
-    } else {
-      dispatch({
-        type: 'ADD_FORMULA',
-        payload: {
-          productoId: selectedProductoId,
-          cantidadProducida: formula.cantidadProducida,
-          unidadProducida: formula.unidadProducida,
-          lineas,
-          notas: formula.notas,
-          mermaPorcentaje: formula.mermaPorcentaje,
-        },
-      })
+    setGuardandoFormula(true)
+    setErrorFormula(null)
+
+    const resFormula = await guardarFormulaConfirmada(
+      {
+        id: existingFormula?.id,
+        productoId: selectedProductoId,
+        cantidadProducida: formula.cantidadProducida,
+        unidadProducida: formula.unidadProducida,
+        lineas,
+        notas: formula.notas,
+        mermaPorcentaje: formula.mermaPorcentaje,
+        createdAt: existingFormula?.createdAt,
+      },
+      cliente.id,
+    )
+
+    if (!resFormula.ok) {
+      setGuardandoFormula(false)
+      setErrorFormula(`No se pudo guardar la fórmula: ${resFormula.error}`)
+      return
     }
+    dispatch({ type: 'CONFIRM_FORMULA', payload: resFormula.data })
 
     // Sincroniza el costo calculado (insumos + mano de obra + costos
     // operativos, prorrateado por cantidadProducida) hacia la ficha del
@@ -702,13 +744,22 @@ export default function FormularProducto() {
       }
 
       if (Object.keys(cambios).length > 0) {
-        dispatch({
-          type: 'UPDATE_PRODUCTO',
-          payload: { ...selectedProducto, ...cambios },
-        })
+        const resProducto = await actualizarProductoConfirmado(
+          { ...selectedProducto, ...cambios },
+          cliente.id,
+        )
+        if (!resProducto.ok) {
+          setGuardandoFormula(false)
+          setErrorFormula(
+            `La fórmula se guardó, pero no se pudo actualizar el costo/precio del producto: ${resProducto.error}`,
+          )
+          return
+        }
+        dispatch({ type: 'CONFIRM_PRODUCTO', payload: resProducto.data })
       }
     }
 
+    setGuardandoFormula(false)
     setDirty(false)
   }
 
@@ -1039,9 +1090,19 @@ export default function FormularProducto() {
           </div>
 
           {/* Save button */}
-          <div className="flex justify-end">
-            <Button onClick={handleSave} disabled={!dirty} size="lg">
-              <Save className="h-4 w-4 mr-2" />
+          <div className="flex flex-col items-end gap-2">
+            {errorFormula && (
+              <p className="flex items-center gap-1.5 text-sm text-red-500">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                {errorFormula}
+              </p>
+            )}
+            <Button onClick={handleSave} disabled={!dirty || guardandoFormula} size="lg">
+              {guardandoFormula ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
               {existingFormula ? 'Guardar cambios' : 'Guardar formula'}
             </Button>
           </div>

@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Plus, Pencil, Trash2, ImageOff, QrCode, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import { useProductosStock, crearProductoConfirmado, actualizarProductoConfirmado } from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import {
   KpiCard,
@@ -30,7 +30,7 @@ export default function Productos() {
   const { state, dispatch } = useProductosStock()
   // Fase 27d: selector "Disponible en" del ProductoDialog, solo se
   // muestra si el cliente tiene 2+ locales cargados.
-  const { puntosVenta } = useClienteActual()
+  const { cliente, puntosVenta } = useClienteActual()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Fase 16.2: acceso rápido a Movimientos filtrado por este producto.
@@ -108,24 +108,25 @@ export default function Productos() {
     }
   }
 
-  function handleSave(data: Omit<Producto, 'id' | 'stock' | 'createdAt' | 'tieneFormula'>) {
+  // Guardado confirmado (17/08): antes esto era un dispatch optimista directo
+  // (ADD_PRODUCTO/UPDATE_PRODUCTO) sin esperar la confirmación real de
+  // Supabase -- así fue como "Cortina Black Interior" quedó mostrada acá
+  // pero nunca llegó a la base, y desapareció sin aviso al refrescar. Ahora
+  // espera la respuesta real y devuelve el error a ProductoDialog en vez de
+  // fallar en silencio (mismo contrato que TransferenciaDialog).
+  async function handleSave(
+    data: Omit<Producto, 'id' | 'stock' | 'createdAt' | 'tieneFormula'>,
+  ): Promise<string | void> {
+    if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
     if (editingProducto) {
-      dispatch({
-        type: 'UPDATE_PRODUCTO',
-        payload: {
-          ...editingProducto,
-          ...data,
-        },
-      })
+      const actualizado: Producto = { ...editingProducto, ...data }
+      const res = await actualizarProductoConfirmado(actualizado, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_PRODUCTO', payload: res.data })
     } else {
-      dispatch({
-        type: 'ADD_PRODUCTO',
-        payload: {
-          ...data,
-          stock: 0,
-          tieneFormula: false,
-        },
-      })
+      const res = await crearProductoConfirmado({ ...data, stock: 0, tieneFormula: false }, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_PRODUCTO', payload: res.data })
     }
   }
 
