@@ -9,10 +9,17 @@ import {
   Plus,
   Check,
   X,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import {
+  useProductosStock,
+  crearRecepcionConfirmada,
+  confirmarRecepcionConfirmada,
+  cancelarRecepcionConfirmada,
+} from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import {
   KpiCard,
   EstadoRecepcionBadge,
@@ -44,9 +51,14 @@ function recepcionValor(r: Recepcion): number {
 
 export default function RecepcionPage() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
 
   const [activeTab, setActiveTab] = useState<TabFilter>('todos')
   const [dialogOpen, setDialogOpen] = useState(false)
+  // Fila en la que hay una acción confirmar/cancelar en curso -- deshabilita
+  // ambos botones de esa fila mientras se espera la respuesta real.
+  const [procesandoId, setProcesandoId] = useState<string | null>(null)
+  const [errorAccion, setErrorAccion] = useState<{ id: string; mensaje: string } | null>(null)
 
   // KPIs
   const kpis = useMemo(() => {
@@ -80,6 +92,35 @@ export default function RecepcionPage() {
     () => new Map(state.insumos.map((i) => [i.id, i.nombre])),
     [state.insumos],
   )
+
+  async function handleConfirmar(r: Recepcion) {
+    if (!cliente?.id || procesandoId) return
+    setErrorAccion(null)
+    setProcesandoId(r.id)
+    const res = await confirmarRecepcionConfirmada(r, cliente.id)
+    setProcesandoId(null)
+    if (!res.ok) {
+      setErrorAccion({ id: r.id, mensaje: res.error })
+      return
+    }
+    dispatch({
+      type: 'CONFIRM_STOCK_SYNC',
+      payload: { recepcion: res.data.recepcion, productos: res.data.productos, insumos: res.data.insumos, movimientos: res.data.movimientos },
+    })
+  }
+
+  async function handleCancelar(r: Recepcion) {
+    if (procesandoId) return
+    setErrorAccion(null)
+    setProcesandoId(r.id)
+    const res = await cancelarRecepcionConfirmada(r)
+    setProcesandoId(null)
+    if (!res.ok) {
+      setErrorAccion({ id: r.id, mensaje: res.error })
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: { recepcion: res.data } })
+  }
 
   return (
     <div className="space-y-6">
@@ -185,25 +226,32 @@ export default function RecepcionPage() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs text-green-600 hover:text-green-700"
-                          onClick={() =>
-                            dispatch({ type: 'CONFIRMAR_RECEPCION', payload: r.id })
-                          }
+                          onClick={() => handleConfirmar(r)}
+                          disabled={procesandoId === r.id}
                         >
-                          <Check className="h-3.5 w-3.5 mr-1" />
+                          {procesandoId === r.id ? (
+                            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <Check className="h-3.5 w-3.5 mr-1" />
+                          )}
                           Confirmar
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs text-red-600 hover:text-red-700"
-                          onClick={() =>
-                            dispatch({ type: 'CANCELAR_RECEPCION', payload: r.id })
-                          }
+                          onClick={() => handleCancelar(r)}
+                          disabled={procesandoId === r.id}
                         >
                           <X className="h-3.5 w-3.5 mr-1" />
                           Cancelar
                         </Button>
                       </div>
+                    )}
+                    {errorAccion?.id === r.id && (
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1 max-w-xs ml-auto text-right">
+                        {errorAccion.mensaje}
+                      </p>
                     )}
                   </td>
                 </tr>
@@ -219,11 +267,11 @@ export default function RecepcionPage() {
         onOpenChange={setDialogOpen}
         productos={state.productos}
         insumos={state.insumos}
-        onSave={(data) => {
-          dispatch({
-            type: 'ADD_RECEPCION',
-            payload: { ...data, estado: 'borrador' },
-          })
+        onSave={async (data) => {
+          if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
+          const res = await crearRecepcionConfirmada(data, cliente.id)
+          if (!res.ok) return res.error
+          dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: { recepcion: res.data } })
         }}
       />
     </div>

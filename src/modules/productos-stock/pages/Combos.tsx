@@ -3,7 +3,12 @@
 import { useMemo, useState } from 'react'
 import { Plus, Pencil, Trash2, PackagePlus, ImageIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useProductosStock } from '../data/store'
+import {
+  useProductosStock,
+  crearComboConfirmado,
+  actualizarComboConfirmado,
+  eliminarComboConfirmado,
+} from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { EmptyState, Amount } from '../components/productos/display'
 import { ComboDialog } from '../components/productos/combo-dialogs'
@@ -22,12 +27,13 @@ export default function Combos() {
   const { state, dispatch } = useProductosStock()
   // Fase 27d: selector "Disponible en" del ComboDialog, solo se muestra
   // si el cliente tiene 2+ locales cargados.
-  const { puntosVenta } = useClienteActual()
+  const { cliente, puntosVenta } = useClienteActual()
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Combo | undefined>()
   const [imagenDialogOpen, setImagenDialogOpen] = useState(false)
   const [comboImagen, setComboImagen] = useState<Combo | undefined>()
+  const [eliminandoId, setEliminandoId] = useState<string | null>(null)
 
   const productosMap = useMemo(
     () => new Map(state.productos.map((p) => [p.id, p])),
@@ -45,11 +51,16 @@ export default function Combos() {
     setDialogOpen(true)
   }
 
-  function handleGuardar(data: Omit<Combo, 'id' | 'createdAt'>) {
+  async function handleGuardar(data: Omit<Combo, 'id' | 'createdAt'>): Promise<string | void> {
+    if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
     if (editing) {
-      dispatch({ type: 'UPDATE_COMBO', payload: { ...editing, ...data } })
+      const res = await actualizarComboConfirmado({ ...editing, ...data }, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_COMBO', payload: res.data })
     } else {
-      dispatch({ type: 'ADD_COMBO', payload: data })
+      const res = await crearComboConfirmado(data, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_COMBO', payload: res.data })
     }
   }
 
@@ -58,10 +69,16 @@ export default function Combos() {
     setImagenDialogOpen(true)
   }
 
-  function handleEliminar(c: Combo) {
-    if (window.confirm(`¿Eliminar el combo "${c.nombre}"?`)) {
-      dispatch({ type: 'DELETE_COMBO', payload: c.id })
+  async function handleEliminar(c: Combo) {
+    if (!window.confirm(`¿Eliminar el combo "${c.nombre}"?`)) return
+    setEliminandoId(c.id)
+    const res = await eliminarComboConfirmado(c.id)
+    setEliminandoId(null)
+    if (!res.ok) {
+      window.alert(res.error)
+      return
     }
+    dispatch({ type: 'CONFIRM_DELETE_COMBO', payload: c.id })
   }
 
   function resumenComponentes(c: Combo): string {
@@ -184,6 +201,7 @@ export default function Combos() {
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-red-500"
                         onClick={() => handleEliminar(c)}
+                        disabled={eliminandoId === c.id}
                         title="Eliminar"
                       >
                         <Trash2 className="h-4 w-4" />

@@ -6,7 +6,13 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
-import { useProductosStock } from '../data/store'
+import {
+  useProductosStock,
+  crearListaPrecioConfirmada,
+  actualizarListaPrecioConfirmada,
+  eliminarListaPrecioConfirmada,
+  fijarPrecioProductoConfirmado,
+} from '../data/store'
 import { EmptyState, Amount } from '../components/productos/display'
 import { ListaPrecioDialog } from '../components/productos/lista-precio-dialogs'
 import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
@@ -142,8 +148,8 @@ interface FilaPrecioProductoProps {
   producto: Producto
   lista: ListaPrecio
   override?: ProductoPrecio
-  onGuardar: (precio: number) => void
-  onQuitarOverride: () => void
+  onGuardar: (precio: number) => Promise<string | void>
+  onQuitarOverride: () => Promise<string | void>
 }
 
 function FilaPrecioProducto({
@@ -155,13 +161,14 @@ function FilaPrecioProducto({
 }: FilaPrecioProductoProps) {
   const calculado = producto.costo * (1 + lista.porcentajeRecargo / 100)
   const [valor, setValor] = useState(String((override?.precio ?? calculado).toFixed(2)))
+  const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
     setValor(String((override?.precio ?? calculado).toFixed(2)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [override?.precio, producto.costo, lista.porcentajeRecargo])
 
-  function handleBlur() {
+  async function handleBlur() {
     if (!valor.trim()) {
       setValor(String((override?.precio ?? calculado).toFixed(2)))
       return
@@ -175,7 +182,20 @@ function FilaPrecioProducto({
     // hace falta crear una fila de más en producto_precios.
     if (!override && Math.abs(num - calculado) < 0.005) return
     if (override && Math.abs(num - override.precio) < 0.005) return
-    onGuardar(num)
+    setGuardando(true)
+    const error = await onGuardar(num)
+    setGuardando(false)
+    if (error) {
+      window.alert(error)
+      setValor(String((override?.precio ?? calculado).toFixed(2)))
+    }
+  }
+
+  async function handleQuitarOverride() {
+    setGuardando(true)
+    const error = await onQuitarOverride()
+    setGuardando(false)
+    if (error) window.alert(error)
   }
 
   return (
@@ -189,11 +209,12 @@ function FilaPrecioProducto({
       </td>
       <td className="px-4 py-2 text-right">
         <input
-          className="h-8 w-28 rounded-md border border-input bg-background px-2 py-1 text-right text-sm"
+          className="h-8 w-28 rounded-md border border-input bg-background px-2 py-1 text-right text-sm disabled:opacity-60"
           inputMode="decimal"
           value={valor}
           onChange={(e) => setValor(sanitizarDecimal(e.target.value))}
           onBlur={handleBlur}
+          disabled={guardando}
         />
       </td>
       <td className="px-4 py-2 text-right">
@@ -202,7 +223,8 @@ function FilaPrecioProducto({
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-muted-foreground"
-            onClick={onQuitarOverride}
+            onClick={handleQuitarOverride}
+            disabled={guardando}
             title="Restablecer al precio calculado"
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -215,11 +237,18 @@ function FilaPrecioProducto({
 
 export default function ListasPrecio() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
 
   const [seleccionada, setSeleccionada] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<ListaPrecio | undefined>()
   const [busqueda, setBusqueda] = useState('')
+  const [eliminandoId, setEliminandoId] = useState<string | null>(null)
+  // Oculta por defecto los productos "solo insumo" (disponible=false) --
+  // mismo criterio que ya usan Productos.tsx y Catalogo.tsx. Sin esto, un
+  // producto-espejo de un insumo (nunca vendible) igual aparecía acá y se le
+  // podía fijar precio, generando ruido para armar la lista de precios real.
+  const [incluirNoDisponibles, setIncluirNoDisponibles] = useState(false)
 
   const listaActual = useMemo(
     () => state.listasPrecio.find((l) => l.id === seleccionada) ?? null,
@@ -227,10 +256,16 @@ export default function ListasPrecio() {
   )
 
   const productosFiltrados = useMemo(() => {
-    if (!busqueda.trim()) return state.productos
-    const q = busqueda.toLowerCase()
-    return state.productos.filter((p) => p.nombre.toLowerCase().includes(q))
-  }, [state.productos, busqueda])
+    let list = state.productos
+    if (!incluirNoDisponibles) {
+      list = list.filter((p) => p.disponible && p.estado === 'activo')
+    }
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase()
+      list = list.filter((p) => p.nombre.toLowerCase().includes(q))
+    }
+    return list
+  }, [state.productos, busqueda, incluirNoDisponibles])
 
   const overridesPorProducto = useMemo(() => {
     const map = new Map<string, ProductoPrecio>()
@@ -251,23 +286,38 @@ export default function ListasPrecio() {
     setDialogOpen(true)
   }
 
-  function handleGuardar(data: { nombre: string; porcentajeRecargo: number }) {
+  async function handleGuardar(data: {
+    nombre: string
+    porcentajeRecargo: number
+  }): Promise<string | void> {
+    if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
     if (editing) {
-      dispatch({ type: 'UPDATE_LISTA_PRECIO', payload: { ...editing, ...data } })
+      const res = await actualizarListaPrecioConfirmada({ ...editing, ...data }, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_LISTA_PRECIO', payload: res.data })
     } else {
-      dispatch({ type: 'ADD_LISTA_PRECIO', payload: data })
+      const res = await crearListaPrecioConfirmada(data, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_LISTA_PRECIO', payload: res.data })
     }
   }
 
-  function handleEliminar(l: ListaPrecio) {
+  async function handleEliminar(l: ListaPrecio) {
     if (
-      window.confirm(
+      !window.confirm(
         `¿Eliminar la lista "${l.nombre}"? Se van a perder los precios manuales cargados para esta lista.`,
       )
-    ) {
-      dispatch({ type: 'DELETE_LISTA_PRECIO', payload: l.id })
-      if (seleccionada === l.id) setSeleccionada(null)
+    )
+      return
+    setEliminandoId(l.id)
+    const res = await eliminarListaPrecioConfirmada(l.id)
+    setEliminandoId(null)
+    if (!res.ok) {
+      window.alert(res.error)
+      return
     }
+    dispatch({ type: 'CONFIRM_DELETE_LISTA_PRECIO', payload: l.id })
+    if (seleccionada === l.id) setSeleccionada(null)
   }
 
   return (
@@ -334,6 +384,7 @@ export default function ListasPrecio() {
                         e.stopPropagation()
                         handleEliminar(l)
                       }}
+                      disabled={eliminandoId === l.id}
                       title="Eliminar"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -365,6 +416,18 @@ export default function ListasPrecio() {
               />
             )}
           </div>
+
+          {listaActual && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={incluirNoDisponibles}
+                onChange={(e) => setIncluirNoDisponibles(e.target.checked)}
+                className="rounded border-input"
+              />
+              Mostrar también los "solo insumo" (no disponibles para venta)
+            </label>
+          )}
 
           {!listaActual ? (
             <EmptyState
@@ -399,18 +462,24 @@ export default function ListasPrecio() {
                       producto={p}
                       lista={listaActual}
                       override={overridesPorProducto.get(p.id)}
-                      onGuardar={(precio) =>
-                        dispatch({
-                          type: 'SET_PRECIO_PRODUCTO',
-                          payload: { productoId: p.id, listaId: listaActual.id, precio },
+                      onGuardar={async (precio) => {
+                        const res = await fijarPrecioProductoConfirmado({
+                          productoId: p.id,
+                          listaId: listaActual.id,
+                          precio,
                         })
-                      }
-                      onQuitarOverride={() =>
-                        dispatch({
-                          type: 'SET_PRECIO_PRODUCTO',
-                          payload: { productoId: p.id, listaId: listaActual.id, precio: null },
+                        if (!res.ok) return res.error
+                        dispatch({ type: 'CONFIRM_PRECIO_PRODUCTO', payload: res.data })
+                      }}
+                      onQuitarOverride={async () => {
+                        const res = await fijarPrecioProductoConfirmado({
+                          productoId: p.id,
+                          listaId: listaActual.id,
+                          precio: null,
                         })
-                      }
+                        if (!res.ok) return res.error
+                        dispatch({ type: 'CONFIRM_PRECIO_PRODUCTO', payload: res.data })
+                      }}
                     />
                   ))}
                 </tbody>

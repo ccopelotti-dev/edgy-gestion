@@ -78,8 +78,11 @@ interface ProductoDialogProps {
   insumos: Insumo[]
   /** Catálogo de marcas del cliente (ver Fase 1 del refactor de Productos). */
   marcas: Marca[]
-  /** Crea una marca nueva en el catálogo compartido (dispatch ADD_MARCA). */
-  onCrearMarca: (nombre: string) => void
+  /** Crea una marca nueva en el catálogo compartido -- guardado confirmado:
+   * espera la escritura real en Supabase y devuelve la marca creada (o un
+   * error) directo, sin depender de que el array `marcas` se actualice
+   * solo para poder auto-seleccionarla. */
+  onCrearMarca: (nombre: string) => Promise<{ ok: true; marca: Marca } | { ok: false; error: string }>
   /** Catálogo de plantillas de garantía (Fase 4). */
   plantillasGarantia: PlantillaGarantia[]
   /** Puntos de venta (locales) del cliente -- Fase 27d. Vacío o con un
@@ -216,27 +219,26 @@ export function ProductoDialog({
     }
   }, [open])
 
-  // Alta rápida de marca desde el propio formulario: se dispara ADD_MARCA en
-  // el padre, y en cuanto la marca nueva aparece en el catálogo (prop
-  // `marcas`, que viene del state global) se auto-selecciona acá.
+  // Alta rápida de marca desde el propio formulario: guardado confirmado
+  // (espera la escritura real y recién ahí auto-selecciona la marca nueva,
+  // en vez de depender de que el array `marcas` se actualice solo).
   const [mostrarNuevaMarca, setMostrarNuevaMarca] = useState(false)
   const [nuevaMarcaNombre, setNuevaMarcaNombre] = useState('')
-  const [pendingMarcaNombre, setPendingMarcaNombre] = useState<string | null>(null)
+  const [creandoMarca, setCreandoMarca] = useState(false)
+  const [errorMarca, setErrorMarca] = useState('')
 
-  useEffect(() => {
-    if (!pendingMarcaNombre) return
-    const encontrada = marcas.find((m) => m.nombre === pendingMarcaNombre)
-    if (encontrada) {
-      setForm((prev) => ({ ...prev, marcaId: encontrada.id }))
-      setPendingMarcaNombre(null)
-    }
-  }, [marcas, pendingMarcaNombre])
-
-  function handleCrearMarca() {
+  async function handleCrearMarca() {
     const nombre = nuevaMarcaNombre.trim()
-    if (!nombre) return
-    onCrearMarca(nombre)
-    setPendingMarcaNombre(nombre)
+    if (!nombre || creandoMarca) return
+    setErrorMarca('')
+    setCreandoMarca(true)
+    const res = await onCrearMarca(nombre)
+    setCreandoMarca(false)
+    if (!res.ok) {
+      setErrorMarca(res.error)
+      return
+    }
+    setForm((prev) => ({ ...prev, marcaId: res.marca.id }))
     setNuevaMarcaNombre('')
     setMostrarNuevaMarca(false)
   }
@@ -653,42 +655,49 @@ export function ProductoDialog({
             <div className="grid gap-1.5">
               <label className="text-sm font-medium">Marca</label>
               {mostrarNuevaMarca ? (
-                <div className="flex gap-2">
-                  <input
-                    className={inputClass}
-                    value={nuevaMarcaNombre}
-                    onChange={(e) => setNuevaMarcaNombre(e.target.value)}
-                    placeholder="Nombre de la marca"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        handleCrearMarca()
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={handleCrearMarca}
-                    disabled={!nuevaMarcaNombre.trim()}
-                  >
-                    Crear
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => {
-                      setMostrarNuevaMarca(false)
-                      setNuevaMarcaNombre('')
-                    }}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
+                <div className="space-y-1">
+                  <div className="flex gap-2">
+                    <input
+                      className={inputClass}
+                      value={nuevaMarcaNombre}
+                      onChange={(e) => setNuevaMarcaNombre(e.target.value)}
+                      placeholder="Nombre de la marca"
+                      autoFocus
+                      disabled={creandoMarca}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleCrearMarca()
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={handleCrearMarca}
+                      disabled={!nuevaMarcaNombre.trim() || creandoMarca}
+                    >
+                      {creandoMarca && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                      Crear
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      disabled={creandoMarca}
+                      onClick={() => {
+                        setMostrarNuevaMarca(false)
+                        setNuevaMarcaNombre('')
+                        setErrorMarca('')
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {errorMarca && <p className="text-xs text-red-600 dark:text-red-400">{errorMarca}</p>}
                 </div>
               ) : (
                 <div className="flex gap-2">
@@ -1439,7 +1448,10 @@ type RecepcionFormData = Omit<Recepcion, 'id' | 'estado' | 'createdAt'>
 interface RecepcionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: RecepcionFormData) => void
+  /** Guardado confirmado (rediseño Stock/Producción): espera la escritura
+   * real en Supabase antes de cerrar. Devuelve un mensaje de error si
+   * falló, o nada si se guardó bien -- mismo contrato que Producto/Insumo. */
+  onSave: (data: RecepcionFormData) => Promise<string | void>
   productos: Producto[]
   insumos: Insumo[]
 }
@@ -1475,6 +1487,8 @@ export function RecepcionDialog({
   const [lineas, setLineas] = useState<LineaForm[]>([])
   const [codigoEscaneado, setCodigoEscaneado] = useState('')
   const [errorEscaneo, setErrorEscaneo] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -1485,6 +1499,8 @@ export function RecepcionDialog({
       setLineas([])
       setCodigoEscaneado('')
       setErrorEscaneo('')
+      setGuardando(false)
+      setErrorGuardado('')
     }
   }, [open])
 
@@ -1606,12 +1622,13 @@ export function RecepcionDialog({
 
   const datosCabeceraValidos = proveedor.trim().length > 0 && numeroRemito.trim().length > 0
 
-  function handleSave() {
+  async function handleSave() {
     const validLineas = lineas.filter(lineaValida)
-    if (validLineas.length === 0) return
-    if (!datosCabeceraValidos) return
+    if (validLineas.length === 0 || !datosCabeceraValidos || guardando) return
 
-    onSave({
+    setErrorGuardado('')
+    setGuardando(true)
+    const error = await onSave({
       fecha,
       proveedor: proveedor.trim(),
       numeroRemito: numeroRemito.trim(),
@@ -1630,6 +1647,11 @@ export function RecepcionDialog({
         fechaVencimiento: l.fechaVencimiento || undefined,
       })),
     })
+    setGuardando(false)
+    if (error) {
+      setErrorGuardado(error)
+      return
+    }
     onOpenChange(false)
   }
 
@@ -1859,16 +1881,23 @@ export function RecepcionDialog({
               )
             })}
           </div>
+
+          {errorGuardado && (
+            <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+              {errorGuardado}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
             Cancelar
           </Button>
           <Button
             onClick={handleSave}
-            disabled={lineas.filter(lineaValida).length === 0 || !datosCabeceraValidos}
+            disabled={lineas.filter(lineaValida).length === 0 || !datosCabeceraValidos || guardando}
           >
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             Crear recepcion
           </Button>
         </DialogFooter>
@@ -2178,7 +2207,7 @@ interface AjusteStockDialogProps {
     cantidad: number
     motivo: MotivoAjuste
     nota: string
-  }) => void
+  }) => Promise<string | void>
   item: { id: string; nombre: string; stock: number; tipo: 'producto' | 'insumo' }
 }
 
@@ -2192,6 +2221,8 @@ export function AjusteStockDialog({
   const [cantidadTexto, setCantidadTexto] = useState('')
   const [motivo, setMotivo] = useState<MotivoAjuste>('conteo_fisico')
   const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -2199,14 +2230,23 @@ export function AjusteStockDialog({
       setCantidadTexto('')
       setMotivo('conteo_fisico')
       setNota('')
+      setGuardando(false)
+      setErrorGuardado('')
     }
   }, [open])
 
   const nuevoStock = item.stock + cantidad
 
-  function handleSave() {
-    if (cantidad === 0) return
-    onSave({ cantidad, motivo, nota })
+  async function handleSave() {
+    if (cantidad === 0 || guardando) return
+    setErrorGuardado('')
+    setGuardando(true)
+    const error = await onSave({ cantidad, motivo, nota })
+    setGuardando(false)
+    if (error) {
+      setErrorGuardado(error)
+      return
+    }
     onOpenChange(false)
   }
 
@@ -2290,13 +2330,20 @@ export function AjusteStockDialog({
               placeholder="Detalle adicional (opcional)"
             />
           </div>
+
+          {errorGuardado && (
+            <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+              {errorGuardado}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={cantidad === 0}>
+          <Button onClick={handleSave} disabled={cantidad === 0 || guardando}>
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             Aplicar ajuste
           </Button>
         </DialogFooter>

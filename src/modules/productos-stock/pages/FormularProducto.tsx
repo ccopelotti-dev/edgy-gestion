@@ -23,6 +23,7 @@ import {
   crearProductoConfirmado,
   guardarFormulaConfirmada,
   actualizarProductoConfirmado,
+  crearMarcaConfirmado,
 } from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { Amount, EmptyState } from '../components/productos/display'
@@ -1263,7 +1264,13 @@ export default function FormularProducto() {
         productos={state.productos}
         insumos={state.insumos}
         marcas={state.marcas}
-        onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
+        onCrearMarca={async (nombre) => {
+          if (!cliente?.id) return { ok: false, error: 'No se pudo identificar la cuenta -- probá recargar la página.' }
+          const res = await crearMarcaConfirmado(nombre, cliente.id)
+          if (!res.ok) return { ok: false, error: res.error }
+          dispatch({ type: 'CONFIRM_MARCA', payload: res.data })
+          return { ok: true, marca: res.data }
+        }}
         plantillasGarantia={state.plantillasGarantia}
       />
     </div>

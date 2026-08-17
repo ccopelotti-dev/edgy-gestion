@@ -4,7 +4,16 @@ import { useMemo, useState } from 'react'
 import { Plus, Pencil, Trash2, Tags, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import {
+  useProductosStock,
+  crearRubroConfirmado,
+  actualizarRubroConfirmado,
+  eliminarRubroConfirmado,
+  crearSubRubroConfirmado,
+  actualizarSubRubroConfirmado,
+  eliminarSubRubroConfirmado,
+} from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import { EmptyState } from '../components/productos/display'
 import { RubroDialog, SubRubroDialog } from '../components/productos/rubro-dialogs'
 import type { Rubro, SubRubro } from '../types'
@@ -24,8 +33,11 @@ const tipoLabel: Record<Rubro['tipo'], string> = {
 
 export default function Rubros() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
 
   const [seleccionado, setSeleccionado] = useState<string | null>(null)
+  const [eliminandoRubroId, setEliminandoRubroId] = useState<string | null>(null)
+  const [eliminandoSubRubroId, setEliminandoSubRubroId] = useState<string | null>(null)
 
   const [rubroDialogOpen, setRubroDialogOpen] = useState(false)
   const [editingRubro, setEditingRubro] = useState<Rubro | undefined>()
@@ -61,28 +73,39 @@ export default function Rubros() {
     setRubroDialogOpen(true)
   }
 
-  function handleGuardarRubro(data: {
+  async function handleGuardarRubro(data: {
     nombre: string
     tipo: Rubro['tipo']
     plantillaGarantiaId?: string
-  }) {
+  }): Promise<string | void> {
+    if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
     if (editingRubro) {
-      dispatch({ type: 'UPDATE_RUBRO', payload: { ...editingRubro, ...data } })
+      const res = await actualizarRubroConfirmado({ ...editingRubro, ...data }, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_RUBRO', payload: res.data })
     } else {
-      dispatch({ type: 'ADD_RUBRO', payload: data })
+      const res = await crearRubroConfirmado(data, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_RUBRO', payload: res.data })
     }
   }
 
-  function handleEliminarRubro(r: Rubro) {
+  async function handleEliminarRubro(r: Rubro) {
     const subCount = conteoSubRubros.get(r.id) ?? 0
     const aviso =
       subCount > 0
         ? `"${r.nombre}" tiene ${subCount} sub-rubro(s), que también se van a eliminar. ¿Continuar?`
         : `¿Eliminar el rubro "${r.nombre}"?`
-    if (window.confirm(aviso)) {
-      dispatch({ type: 'DELETE_RUBRO', payload: r.id })
-      if (seleccionado === r.id) setSeleccionado(null)
+    if (!window.confirm(aviso)) return
+    setEliminandoRubroId(r.id)
+    const res = await eliminarRubroConfirmado(r.id)
+    setEliminandoRubroId(null)
+    if (!res.ok) {
+      window.alert(res.error)
+      return
     }
+    dispatch({ type: 'CONFIRM_DELETE_RUBRO', payload: r.id })
+    if (seleccionado === r.id) setSeleccionado(null)
   }
 
   function handleNuevoSubRubro() {
@@ -95,19 +118,29 @@ export default function Rubros() {
     setSubRubroDialogOpen(true)
   }
 
-  function handleGuardarSubRubro(data: { nombre: string }) {
+  async function handleGuardarSubRubro(data: { nombre: string }): Promise<string | void> {
     if (!seleccionado) return
     if (editingSubRubro) {
-      dispatch({ type: 'UPDATE_SUBRUBRO', payload: { ...editingSubRubro, ...data } })
+      const res = await actualizarSubRubroConfirmado({ ...editingSubRubro, ...data })
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_SUBRUBRO', payload: res.data })
     } else {
-      dispatch({ type: 'ADD_SUBRUBRO', payload: { ...data, rubroId: seleccionado } })
+      const res = await crearSubRubroConfirmado({ ...data, rubroId: seleccionado })
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_SUBRUBRO', payload: res.data })
     }
   }
 
-  function handleEliminarSubRubro(sr: SubRubro) {
-    if (window.confirm(`¿Eliminar el sub-rubro "${sr.nombre}"?`)) {
-      dispatch({ type: 'DELETE_SUBRUBRO', payload: sr.id })
+  async function handleEliminarSubRubro(sr: SubRubro) {
+    if (!window.confirm(`¿Eliminar el sub-rubro "${sr.nombre}"?`)) return
+    setEliminandoSubRubroId(sr.id)
+    const res = await eliminarSubRubroConfirmado(sr.id)
+    setEliminandoSubRubroId(null)
+    if (!res.ok) {
+      window.alert(res.error)
+      return
     }
+    dispatch({ type: 'CONFIRM_DELETE_SUBRUBRO', payload: sr.id })
   }
 
   return (
@@ -172,6 +205,7 @@ export default function Rubros() {
                       e.stopPropagation()
                       handleEliminarRubro(r)
                     }}
+                    disabled={eliminandoRubroId === r.id}
                     title="Eliminar"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -233,6 +267,7 @@ export default function Rubros() {
                     size="icon"
                     className="text-muted-foreground h-7 w-7 hover:text-red-500"
                     onClick={() => handleEliminarSubRubro(sr)}
+                    disabled={eliminandoSubRubroId === sr.id}
                     title="Eliminar"
                   >
                     <Trash2 className="h-3.5 w-3.5" />

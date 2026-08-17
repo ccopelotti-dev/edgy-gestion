@@ -52,7 +52,7 @@ type ComboFormData = Omit<Combo, 'id' | 'createdAt'>
 interface ComboDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: ComboFormData) => void
+  onSave: (data: ComboFormData) => Promise<string | void>
   productos: Producto[]
   rubros: Rubro[]
   /** Combos existentes del cliente, para validar que el nombre no se repita. */
@@ -90,6 +90,8 @@ export function ComboDialog({
   const [subiendo, setSubiendo] = useState(false)
   const [errorImagen, setErrorImagen] = useState('')
   const [errorNombre, setErrorNombre] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Borradores de texto para las cantidades de componentes fijos/elección --
@@ -121,6 +123,8 @@ export function ComboDialog({
       subidasEnEstaSesionRef.current = new Set()
       setErrorImagen('')
       setErrorNombre('')
+      setErrorGuardado('')
+      setGuardando(false)
       if (editData) {
         const { id, createdAt, ...rest } = editData
         setForm({
@@ -331,7 +335,8 @@ export function ComboDialog({
   const tieneComponentes =
     form.componentesFijos.length > 0 || form.componentesEleccion.length > 0
 
-  function handleSave() {
+  async function handleSave() {
+    if (guardando) return
     const nombreLimpio = form.nombre.trim()
     if (!nombreLimpio) return
     if (!tieneComponentes || !componentesValidos) return
@@ -344,9 +349,9 @@ export function ComboDialog({
       return
     }
     setErrorNombre('')
-
-    subidasEnEstaSesionRef.current = new Set()
-    onSave({
+    setErrorGuardado('')
+    setGuardando(true)
+    const error = await onSave({
       ...form,
       nombre: nombreLimpio,
       descripcion: form.descripcion.trim(),
@@ -354,6 +359,12 @@ export function ComboDialog({
       etiqueta: form.etiqueta?.trim() || undefined,
       puntoVentaId: form.puntoVentaId || undefined,
     })
+    setGuardando(false)
+    if (error) {
+      setErrorGuardado(error)
+      return
+    }
+    subidasEnEstaSesionRef.current = new Set()
     onOpenChange(false)
   }
 
@@ -710,10 +721,16 @@ export function ComboDialog({
               Agregá al menos un componente fijo o un slot a elección.
             </p>
           )}
+
+          {errorGuardado && (
+            <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+              {errorGuardado}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancelar}>
+          <Button variant="outline" onClick={handleCancelar} disabled={guardando}>
             Cancelar
           </Button>
           <Button
@@ -722,9 +739,11 @@ export function ComboDialog({
               !form.nombre.trim() ||
               form.precioVenta <= 0 ||
               !tieneComponentes ||
-              !componentesValidos
+              !componentesValidos ||
+              guardando
             }
           >
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {editData ? 'Guardar cambios' : 'Crear combo'}
           </Button>
         </DialogFooter>

@@ -24,6 +24,8 @@ import {
   crearInsumoConfirmado,
   actualizarInsumoConfirmado,
   eliminarInsumoConfirmado,
+  ajustarStockConfirmado,
+  recibirStockConfirmado,
 } from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import {
@@ -37,7 +39,7 @@ import { InsumoDialog, AjusteStockDialog } from '../components/productos/dialogs
 import { DuplicadosDialog, detectarDuplicados } from '../components/productos/duplicados-dialog'
 import { formatARS } from '../lib/format'
 import { unidadAbrev } from '../types'
-import type { Insumo } from '../types'
+import type { Insumo, MotivoAjuste } from '../types'
 
 // ─── Input class ──────────────────────────────────────────────────────────────
 
@@ -200,30 +202,39 @@ export default function Insumos() {
     setAjusteDialogOpen(true)
   }
 
-  function handleAjusteSave(data: { cantidad: number; motivo: string; nota: string }) {
+  async function handleAjusteSave(data: {
+    cantidad: number
+    motivo: MotivoAjuste
+    nota: string
+  }): Promise<string | void> {
     if (!ajusteItem) return
+    if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
 
     if (ajusteMode === 'recibir') {
-      dispatch({
-        type: 'RECIBIR_STOCK',
-        payload: {
+      const res = await recibirStockConfirmado(
+        {
           itemTipo: 'insumo',
           itemId: ajusteItem.id,
           cantidad: Math.abs(data.cantidad),
           nota: data.nota,
         },
-      })
+        cliente.id,
+      )
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
     } else {
-      dispatch({
-        type: 'AJUSTAR_STOCK',
-        payload: {
+      const res = await ajustarStockConfirmado(
+        {
           itemTipo: 'insumo',
           itemId: ajusteItem.id,
           cantidad: data.cantidad,
-          motivo: data.motivo as any,
+          motivo: data.motivo,
           nota: data.nota,
         },
-      })
+        cliente.id,
+      )
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
     }
   }
 

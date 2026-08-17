@@ -10,6 +10,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Loader2 } from 'lucide-react'
 import { sanitizarDecimal, parsearDecimal, decimalATexto } from '@/lib/decimal'
 import type { ListaPrecio } from '../../types'
 
@@ -26,7 +27,7 @@ interface ListaPrecioFormData {
 interface ListaPrecioDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: ListaPrecioFormData) => void
+  onSave: (data: ListaPrecioFormData) => Promise<string | void>
   editData?: ListaPrecio
 }
 
@@ -40,6 +41,8 @@ export function ListaPrecioDialog({
 }: ListaPrecioDialogProps) {
   const [form, setForm] = useState<ListaPrecioFormData>(emptyLista)
   const [porcentajeRecargoTexto, setPorcentajeRecargoTexto] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -49,12 +52,21 @@ export function ListaPrecioDialog({
           : emptyLista,
       )
       setPorcentajeRecargoTexto(editData ? decimalATexto(editData.porcentajeRecargo) : '')
+      setGuardando(false)
+      setErrorGuardado('')
     }
   }, [open, editData])
 
-  function handleSave() {
-    if (!form.nombre.trim()) return
-    onSave({ nombre: form.nombre.trim(), porcentajeRecargo: form.porcentajeRecargo })
+  async function handleSave() {
+    if (!form.nombre.trim() || guardando) return
+    setErrorGuardado('')
+    setGuardando(true)
+    const error = await onSave({ nombre: form.nombre.trim(), porcentajeRecargo: form.porcentajeRecargo })
+    setGuardando(false)
+    if (error) {
+      setErrorGuardado(error)
+      return
+    }
     onOpenChange(false)
   }
 
@@ -100,13 +112,20 @@ export function ListaPrecioDialog({
               puntual desde la tabla de la derecha.
             </p>
           </div>
+
+          {errorGuardado && (
+            <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+              {errorGuardado}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!form.nombre.trim()}>
+          <Button onClick={handleSave} disabled={!form.nombre.trim() || guardando}>
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {editData ? 'Guardar cambios' : 'Crear lista'}
           </Button>
         </DialogFooter>

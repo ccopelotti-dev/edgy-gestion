@@ -18,9 +18,11 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import { useProductosStock, ajustarStockConfirmado, recibirStockConfirmado } from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import { KpiCard, StockBadge, Amount, EmptyState } from '../components/productos/display'
 import { formatARS } from '../lib/format'
 import { unidadAbrev, MOTIVOS_AJUSTE } from '../types'
@@ -60,6 +62,7 @@ interface StockItem {
 
 export default function Stock() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
 
   const [soloAlertas, setSoloAlertas] = useState(false)
   const [rubroFilter, setRubroFilter] = useState('')
@@ -77,6 +80,14 @@ export default function Stock() {
   const [ajustarCantidad, setAjustarCantidad] = useState(0)
   const [ajustarMotivo, setAjustarMotivo] = useState<MotivoAjuste>('conteo_fisico')
   const [ajustarNota, setAjustarNota] = useState('')
+
+  // Guardado confirmado (rediseño Stock/Producción): ambos diálogos esperan
+  // la confirmación real de Supabase antes de cerrar -- si falla, el error
+  // se muestra en el propio diálogo y el stock local NO se toca.
+  const [guardandoRecibir, setGuardandoRecibir] = useState(false)
+  const [errorRecibir, setErrorRecibir] = useState('')
+  const [guardandoAjustar, setGuardandoAjustar] = useState(false)
+  const [errorAjustar, setErrorAjustar] = useState('')
 
   // Build unified list
   const items = useMemo<StockItem[]>(() => {
@@ -177,26 +188,43 @@ export default function Stock() {
   }, [items, soloAlertas, rubroFilter, search])
 
   // Handlers
-  function handleRecibir() {
-    if (!recibirItem || recibirCantidad <= 0) return
-    dispatch({
-      type: 'RECIBIR_STOCK',
-      payload: {
+  async function handleRecibir() {
+    if (!recibirItem || recibirCantidad <= 0 || guardandoRecibir) return
+    if (!cliente?.id) {
+      setErrorRecibir('No se pudo identificar la cuenta -- probá recargar la página.')
+      return
+    }
+    setErrorRecibir('')
+    setGuardandoRecibir(true)
+    const res = await recibirStockConfirmado(
+      {
         itemTipo: recibirItem.tipo,
         itemId: recibirItem.varianteId ? recibirItem.productoId! : recibirItem.id,
         varianteId: recibirItem.varianteId,
         cantidad: recibirCantidad,
         costoUnitario: recibirCosto > 0 ? recibirCosto : undefined,
       },
-    })
+      cliente.id,
+    )
+    setGuardandoRecibir(false)
+    if (!res.ok) {
+      setErrorRecibir(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
     setRecibirItem(null)
   }
 
-  function handleAjustar() {
-    if (!ajustarItem || ajustarCantidad === 0) return
-    dispatch({
-      type: 'AJUSTAR_STOCK',
-      payload: {
+  async function handleAjustar() {
+    if (!ajustarItem || ajustarCantidad === 0 || guardandoAjustar) return
+    if (!cliente?.id) {
+      setErrorAjustar('No se pudo identificar la cuenta -- probá recargar la página.')
+      return
+    }
+    setErrorAjustar('')
+    setGuardandoAjustar(true)
+    const res = await ajustarStockConfirmado(
+      {
         itemTipo: ajustarItem.tipo,
         itemId: ajustarItem.varianteId ? ajustarItem.productoId! : ajustarItem.id,
         varianteId: ajustarItem.varianteId,
@@ -204,13 +232,21 @@ export default function Stock() {
         motivo: ajustarMotivo,
         nota: ajustarNota || undefined,
       },
-    })
+      cliente.id,
+    )
+    setGuardandoAjustar(false)
+    if (!res.ok) {
+      setErrorAjustar(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
     setAjustarItem(null)
   }
 
   function openRecibir(item: StockItem) {
     setRecibirCantidad(0)
     setRecibirCosto(0)
+    setErrorRecibir('')
     setRecibirItem(item)
   }
 
@@ -218,6 +254,7 @@ export default function Stock() {
     setAjustarCantidad(0)
     setAjustarMotivo('conteo_fisico')
     setAjustarNota('')
+    setErrorAjustar('')
     setAjustarItem(item)
   }
 
@@ -378,7 +415,7 @@ export default function Stock() {
       )}
 
       {/* ── Dialog: Recibir stock ───────────────────────────────────────────── */}
-      <Dialog open={!!recibirItem} onOpenChange={(open) => !open && setRecibirItem(null)}>
+      <Dialog open={!!recibirItem} onOpenChange={(open) => !open && !guardandoRecibir && setRecibirItem(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Recibir stock</DialogTitle>
@@ -433,13 +470,20 @@ export default function Stock() {
                 </div>
               </div>
             )}
+
+            {errorRecibir && (
+              <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                {errorRecibir}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRecibirItem(null)}>
+            <Button variant="outline" onClick={() => setRecibirItem(null)} disabled={guardandoRecibir}>
               Cancelar
             </Button>
-            <Button onClick={handleRecibir} disabled={recibirCantidad <= 0}>
+            <Button onClick={handleRecibir} disabled={recibirCantidad <= 0 || guardandoRecibir}>
+              {guardandoRecibir && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Confirmar recepcion
             </Button>
           </DialogFooter>
@@ -447,7 +491,7 @@ export default function Stock() {
       </Dialog>
 
       {/* ── Dialog: Ajustar stock ──────────────────────────────────────────── */}
-      <Dialog open={!!ajustarItem} onOpenChange={(open) => !open && setAjustarItem(null)}>
+      <Dialog open={!!ajustarItem} onOpenChange={(open) => !open && !guardandoAjustar && setAjustarItem(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Ajustar stock</DialogTitle>
@@ -520,13 +564,20 @@ export default function Stock() {
                 placeholder="Detalle adicional"
               />
             </div>
+
+            {errorAjustar && (
+              <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                {errorAjustar}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAjustarItem(null)}>
+            <Button variant="outline" onClick={() => setAjustarItem(null)} disabled={guardandoAjustar}>
               Cancelar
             </Button>
-            <Button onClick={handleAjustar} disabled={ajustarCantidad === 0}>
+            <Button onClick={handleAjustar} disabled={ajustarCantidad === 0 || guardandoAjustar}>
+              {guardandoAjustar && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Aplicar ajuste
             </Button>
           </DialogFooter>

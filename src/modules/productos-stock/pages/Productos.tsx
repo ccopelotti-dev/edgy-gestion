@@ -5,7 +5,12 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Plus, Pencil, Trash2, ImageOff, QrCode, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock, crearProductoConfirmado, actualizarProductoConfirmado } from '../data/store'
+import {
+  useProductosStock,
+  crearProductoConfirmado,
+  actualizarProductoConfirmado,
+  crearMarcaConfirmado,
+} from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import {
   KpiCard,
@@ -332,7 +337,13 @@ export default function Productos() {
         productos={state.productos}
         insumos={state.insumos}
         marcas={state.marcas}
-        onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
+        onCrearMarca={async (nombre) => {
+          if (!cliente?.id) return { ok: false, error: 'No se pudo identificar la cuenta -- probá recargar la página.' }
+          const res = await crearMarcaConfirmado(nombre, cliente.id)
+          if (!res.ok) return { ok: false, error: res.error }
+          dispatch({ type: 'CONFIRM_MARCA', payload: res.data })
+          return { ok: true, marca: res.data }
+        }}
         plantillasGarantia={state.plantillasGarantia}
         puntosVenta={puntosVenta}
         formulas={state.formulas}

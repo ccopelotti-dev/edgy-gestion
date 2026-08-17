@@ -80,3 +80,30 @@ export async function ajustarStockPuntoVenta(params: {
     p_delta: params.delta,
   })
 }
+
+/**
+ * Hermana de `ajustarStockPuntoVenta`, para el path de clientes de UN SOLO
+ * LOCAL (`resolverPuntoVentaId()` devolvió `null`) -- rediseño Fase
+ * siguiente a #410/#411 (auditoría de guardado confirmado). Antes, ese path
+ * leía `producto.stock`/`insumo.stock` en el cliente, sumaba el delta en JS
+ * y mandaba el valor absoluto en un `.update()` -- una lectura-modificación-
+ * escritura NO atómica a nivel de base (dos ajustes casi simultáneos podían
+ * pisarse). Esta RPC (migración `ajustar_stock_plano_rpc`) hace
+ * `stock = stock + delta` atómico directo en Postgres, mismo criterio que
+ * `ajustar_stock_punto_venta` pero escribiendo en las columnas planas
+ * (`productos.stock` / `insumos.stock` / `producto_variantes.stock`, con el
+ * total del producto padre recalculado como suma de sus variantes).
+ */
+export async function ajustarStockPlano(params: {
+  itemTipo: 'producto' | 'insumo'
+  itemId: string
+  varianteId?: string
+  delta: number
+}) {
+  return supabase.rpc('ajustar_stock_plano', {
+    p_item_tipo: params.itemTipo,
+    p_item_id: params.itemId,
+    p_variante_id: params.varianteId ?? null,
+    p_delta: params.delta,
+  })
+}

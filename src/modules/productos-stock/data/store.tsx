@@ -92,10 +92,11 @@ import type {
   ReglaControl,
   RegistroControl,
   UnidadMedida,
+  MotivoAjuste,
 } from '../types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
-import { resolverPuntoVentaId, ajustarStockPuntoVenta } from '@/lib/puntoVenta'
+import { resolverPuntoVentaId, ajustarStockPuntoVenta, ajustarStockPlano } from '@/lib/puntoVenta'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { todayISO } from '../lib/format'
 
@@ -219,6 +220,45 @@ type Action =
   // crearInsumoConfirmado/actualizarInsumoConfirmado/eliminarInsumoConfirmado.
   | { type: 'CONFIRM_INSUMO'; payload: Insumo }
   | { type: 'CONFIRM_DELETE_INSUMO'; payload: string }
+  // Fase siguiente (Stock y Producción, 17/08 en adelante): un único action
+  // "genérico" para todo lo que toca stock -- AJUSTAR_STOCK, RECIBIR_STOCK,
+  // REGISTRAR_PRODUCCION, ADD_RECEPCION, CONFIRMAR_RECEPCION,
+  // CANCELAR_RECEPCION y el ajuste que dispara Control de Stock -- en vez de
+  // un CONFIRM_* por acción. Todas comparten la misma forma real: "acá está
+  // el estado post-escritura, YA confirmado por Supabase, mergealo". Las
+  // funciones ajustarStockConfirmado/recibirStockConfirmado/
+  // registrarProduccionConfirmada/crearRecepcionConfirmada/
+  // confirmarRecepcionConfirmada/cancelarRecepcionConfirmada/
+  // registrarControlConfirmado (más abajo) arman el payload después de
+  // escribir y confirmar en Supabase -- ver el comentario grande junto a
+  // ResultadoGuardado.
+  | {
+      type: 'CONFIRM_STOCK_SYNC'
+      payload: {
+        productos?: Producto[]
+        insumos?: Insumo[]
+        movimientos?: MovimientoStock[]
+        produccion?: Produccion
+        recepcion?: Recepcion
+        registroControl?: RegistroControl
+      }
+    }
+  // Cierre de la fase (17/08, último sector de menor volumen): mismo
+  // criterio confirmado, ahora para Rubros/SubRubros, Marcas, Listas de
+  // precio (+ el precio por producto/lista) y Combos.
+  | { type: 'CONFIRM_RUBRO'; payload: Rubro }
+  | { type: 'CONFIRM_DELETE_RUBRO'; payload: string }
+  | { type: 'CONFIRM_SUBRUBRO'; payload: SubRubro }
+  | { type: 'CONFIRM_DELETE_SUBRUBRO'; payload: string }
+  | { type: 'CONFIRM_MARCA'; payload: Marca }
+  | { type: 'CONFIRM_LISTA_PRECIO'; payload: ListaPrecio }
+  | { type: 'CONFIRM_DELETE_LISTA_PRECIO'; payload: string }
+  | {
+      type: 'CONFIRM_PRECIO_PRODUCTO'
+      payload: { productoId: string; listaId: string; precio: number | null; id?: string }
+    }
+  | { type: 'CONFIRM_COMBO'; payload: Combo }
+  | { type: 'CONFIRM_DELETE_COMBO'; payload: string }
 
 // ─── Reducer (copia EXACTA del original, más SET_STATE) ────
 
@@ -491,6 +531,127 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
       return {
         ...state,
         insumos: state.insumos.filter((i) => i.id !== action.payload),
+      }
+
+    case 'CONFIRM_STOCK_SYNC': {
+      const { productos, insumos, movimientos, produccion, recepcion, registroControl } =
+        action.payload
+      return {
+        ...state,
+        productos:
+          productos && productos.length
+            ? state.productos.map((p) => productos.find((np) => np.id === p.id) ?? p)
+            : state.productos,
+        insumos:
+          insumos && insumos.length
+            ? state.insumos.map((i) => insumos.find((ni) => ni.id === i.id) ?? i)
+            : state.insumos,
+        movimientos:
+          movimientos && movimientos.length ? [...state.movimientos, ...movimientos] : state.movimientos,
+        producciones: produccion ? [...state.producciones, produccion] : state.producciones,
+        recepciones: recepcion
+          ? state.recepciones.some((r) => r.id === recepcion.id)
+            ? state.recepciones.map((r) => (r.id === recepcion.id ? recepcion : r))
+            : [...state.recepciones, recepcion]
+          : state.recepciones,
+        registrosControl: registroControl
+          ? [...state.registrosControl, registroControl]
+          : state.registrosControl,
+      }
+    }
+
+    case 'CONFIRM_RUBRO': {
+      const existe = state.rubros.some((r) => r.id === action.payload.id)
+      return {
+        ...state,
+        rubros: existe
+          ? state.rubros.map((r) => (r.id === action.payload.id ? action.payload : r))
+          : [...state.rubros, action.payload],
+      }
+    }
+    case 'CONFIRM_DELETE_RUBRO':
+      return {
+        ...state,
+        rubros: state.rubros.filter((r) => r.id !== action.payload),
+        subRubros: state.subRubros.filter((sr) => sr.rubroId !== action.payload),
+      }
+    case 'CONFIRM_SUBRUBRO': {
+      const existe = state.subRubros.some((sr) => sr.id === action.payload.id)
+      return {
+        ...state,
+        subRubros: existe
+          ? state.subRubros.map((sr) => (sr.id === action.payload.id ? action.payload : sr))
+          : [...state.subRubros, action.payload],
+      }
+    }
+    case 'CONFIRM_DELETE_SUBRUBRO':
+      return {
+        ...state,
+        subRubros: state.subRubros.filter((sr) => sr.id !== action.payload),
+      }
+    case 'CONFIRM_MARCA': {
+      const existe = state.marcas.some((m) => m.id === action.payload.id)
+      return {
+        ...state,
+        marcas: existe
+          ? state.marcas.map((m) => (m.id === action.payload.id ? action.payload : m))
+          : [...state.marcas, action.payload],
+      }
+    }
+    case 'CONFIRM_LISTA_PRECIO': {
+      const existe = state.listasPrecio.some((l) => l.id === action.payload.id)
+      return {
+        ...state,
+        listasPrecio: existe
+          ? state.listasPrecio.map((l) => (l.id === action.payload.id ? action.payload : l))
+          : [...state.listasPrecio, action.payload],
+      }
+    }
+    case 'CONFIRM_DELETE_LISTA_PRECIO':
+      return {
+        ...state,
+        listasPrecio: state.listasPrecio.filter((l) => l.id !== action.payload),
+        productosPrecios: state.productosPrecios.filter((pp) => pp.listaId !== action.payload),
+      }
+    case 'CONFIRM_PRECIO_PRODUCTO': {
+      const { productoId, listaId, precio, id } = action.payload
+      if (precio === null) {
+        return {
+          ...state,
+          productosPrecios: state.productosPrecios.filter(
+            (pp) => !(pp.productoId === productoId && pp.listaId === listaId),
+          ),
+        }
+      }
+      const existente = state.productosPrecios.find(
+        (pp) => pp.productoId === productoId && pp.listaId === listaId,
+      )
+      if (existente) {
+        return {
+          ...state,
+          productosPrecios: state.productosPrecios.map((pp) =>
+            pp.id === existente.id ? { ...pp, precio } : pp,
+          ),
+        }
+      }
+      return {
+        ...state,
+        productosPrecios: [...state.productosPrecios, { id: id ?? uid(), productoId, listaId, precio }],
+      }
+    }
+    case 'CONFIRM_COMBO': {
+      const existe = state.combos.some((c) => c.id === action.payload.id)
+      return {
+        ...state,
+        combos: existe
+          ? state.combos.map((c) => (c.id === action.payload.id ? action.payload : c))
+          : [...state.combos, action.payload],
+      }
+    }
+    case 'CONFIRM_DELETE_COMBO':
+      return {
+        ...state,
+        combos: state.combos.filter((c) => c.id !== action.payload),
       }
 
     case 'REGISTRAR_PRODUCCION': {
@@ -1533,6 +1694,18 @@ async function syncToSupabase(
     case 'CONFIRM_INSUMO':
     case 'CONFIRM_DELETE_INSUMO':
       return
+    case 'CONFIRM_STOCK_SYNC':
+    case 'CONFIRM_RUBRO':
+    case 'CONFIRM_DELETE_RUBRO':
+    case 'CONFIRM_SUBRUBRO':
+    case 'CONFIRM_DELETE_SUBRUBRO':
+    case 'CONFIRM_MARCA':
+    case 'CONFIRM_LISTA_PRECIO':
+    case 'CONFIRM_DELETE_LISTA_PRECIO':
+    case 'CONFIRM_PRECIO_PRODUCTO':
+    case 'CONFIRM_COMBO':
+    case 'CONFIRM_DELETE_COMBO':
+      return
 
     case 'REGISTRAR_PRODUCCION': {
       // Fase 9 (cierre): la fila de `producciones` es el registro real del
@@ -2335,6 +2508,918 @@ export async function guardarFormulaConfirmada(
   }
 
   return { ok: true, data: formula }
+}
+
+// ─── Stock y Producción (rediseño, fase siguiente a #410/#411) ─────────────
+// Mismo criterio confirmado de arriba, ahora para AJUSTAR_STOCK/RECIBIR_
+// STOCK/REGISTRAR_PRODUCCION/Recepción/Control de stock -- el grupo que
+// quedaba con más riesgo real: son escrituras encadenadas (stock + costo +
+// movimiento de Kardex, a veces sobre varias líneas), y para clientes de un
+// solo local el ajuste de stock viejo era un read-modify-write NO atómico
+// en el cliente (leer stock actual, sumar en JS, mandar el valor absoluto)
+// -- dos ajustes casi simultáneos podían pisarse. `aplicarAjusteAtomico`
+// reemplaza eso por un delta atómico en la base (RPC `ajustar_stock_plano`
+// para un solo local, `ajustar_stock_punto_venta` para multi-sucursal,
+// mismo patrón que ya usaba Fase 27e-2) y encadena costo + espejo sobre el
+// insumo vinculado, todo esperado y confirmado antes de tocar el estado
+// local. Igual que con Insumos: si algo a mitad de camino falla, el error
+// vuelve tal cual al componente que llamó, con el mensaje más específico
+// posible sobre qué SÍ se llegó a guardar (no hay "todo o nada" real acá
+// porque no es una única transacción de base -- pero tampoco hay más
+// fallos silenciosos: cada paso se espera y cualquier error se reporta).
+
+async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
+  const uniqueIds = Array.from(new Set(ids))
+  if (!uniqueIds.length) return []
+  const [productosRes, variantesRes] = await Promise.all([
+    supabase.from('productos').select('*').in('id', uniqueIds),
+    supabase.from('producto_variantes').select('*').in('producto_id', uniqueIds).order('orden'),
+  ])
+  const variantesByProducto = new Map<string, ProductoVariante[]>()
+  for (const r of variantesRes.data ?? []) {
+    const arr = variantesByProducto.get(r.producto_id) ?? []
+    arr.push({
+      id: r.id,
+      color: r.color ?? undefined,
+      talle: r.talle ?? undefined,
+      codigoBarras: r.codigo_barras ?? undefined,
+      stock: Number(r.stock),
+    })
+    variantesByProducto.set(r.producto_id, arr)
+  }
+  return (productosRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    codigo: r.codigo ?? '',
+    nombre: r.nombre,
+    descripcion: r.descripcion ?? '',
+    rubroId: r.rubro_id ?? '',
+    subRubroId: r.sub_rubro_id ?? undefined,
+    precioVenta: Number(r.precio_venta),
+    costo: Number(r.costo),
+    iva: Number(r.iva) as Producto['iva'],
+    unidadVenta: r.unidad_venta,
+    stock: Number(r.stock),
+    stockMinimo: Number(r.stock_minimo),
+    controlaStock: r.controla_stock,
+    disponible: r.disponible,
+    estado: r.estado,
+    tieneFormula: r.tiene_formula,
+    imagenes: r.imagenes ?? [],
+    codigoBarras: r.codigo_barras ?? undefined,
+    marcaId: r.marca_id ?? undefined,
+    proveedorId: r.proveedor_id ?? undefined,
+    tipo: (r.tipo as Producto['tipo']) ?? 'unico',
+    variantes: variantesByProducto.get(r.id) ?? [],
+    plantillaGarantiaId: r.plantilla_garantia_id ?? undefined,
+    diasDisponibles: r.dias_disponibles ?? undefined,
+    puntoVentaId: r.punto_venta_id ?? undefined,
+    esInsumo: r.es_insumo ?? false,
+    servicioAsociadoId: r.servicio_asociado_id ?? undefined,
+    servicioAsociadoObligatorio: r.servicio_asociado_obligatorio ?? false,
+    margenGanancia: r.margen_ganancia ?? undefined,
+    createdAt: (r.created_at ?? '').slice(0, 10),
+  }))
+}
+
+async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
+  const uniqueIds = Array.from(new Set(ids))
+  if (!uniqueIds.length) return []
+  const { data } = await supabase.from('insumos').select('*').in('id', uniqueIds)
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    nombre: r.nombre,
+    rubroId: r.rubro_id ?? '',
+    subRubroId: r.sub_rubro_id ?? undefined,
+    unidad: r.unidad,
+    stock: Number(r.stock),
+    stockMinimo: Number(r.stock_minimo),
+    costo: Number(r.costo),
+    esComercializable: r.es_comercializable,
+    productoVinculadoId: r.producto_vinculado_id ?? undefined,
+    createdAt: (r.created_at ?? '').slice(0, 10),
+  }))
+}
+
+type ResultadoAjusteAtomico = ResultadoGuardado<{
+  itemTipoEfectivo: 'producto' | 'insumo'
+  itemIdEfectivo: string
+  puntoVentaId: string | null
+  /** Insumos vinculados que se espejaron como consecuencia (0 o 1, casi
+   * siempre -- ver comentario en espejarInsumoVinculado). */
+  insumosVinculadosIds: string[]
+}>
+
+/** Aplica UN delta de stock (+costo opcional) de forma atómica, con la
+ * misma redirección "insumo vinculado -> producto" y el mismo espejo de
+ * vuelta que ya usaba el reducer optimista -- pero acá cada paso se espera
+ * y se confirma contra Supabase antes de seguir. No inserta el movimiento
+ * de Kardex (eso lo arma cada función de arriba, porque a veces conviene
+ * insertar varios movimientos juntos en una sola llamada). */
+async function aplicarAjusteAtomico(params: {
+  itemTipo: 'producto' | 'insumo'
+  itemId: string
+  varianteId?: string
+  delta: number
+  costoUnitario?: number
+  clienteId: string
+}): Promise<ResultadoAjusteAtomico> {
+  const { itemTipo, itemId, varianteId, delta, costoUnitario, clienteId } = params
+
+  let itemTipoEfectivo: 'producto' | 'insumo' = itemTipo
+  let itemIdEfectivo = itemId
+
+  if (itemTipo === 'insumo') {
+    const { data: insumoRow, error: errBuscar } = await supabase
+      .from('insumos')
+      .select('id, producto_vinculado_id')
+      .eq('id', itemId)
+      .maybeSingle()
+    if (errBuscar) return { ok: false, error: `No se pudo verificar el insumo: ${errBuscar.message}` }
+    if (!insumoRow) return { ok: false, error: 'El insumo no existe o fue eliminado -- recargá la página.' }
+    if (insumoRow.producto_vinculado_id) {
+      itemTipoEfectivo = 'producto'
+      itemIdEfectivo = insumoRow.producto_vinculado_id
+    }
+  }
+
+  const puntoVentaId = await resolverPuntoVentaId(clienteId)
+
+  if (delta !== 0) {
+    const { error: errAjuste } = puntoVentaId
+      ? await ajustarStockPuntoVenta({
+          clienteId,
+          puntoVentaId,
+          itemTipo: itemTipoEfectivo,
+          itemId: itemIdEfectivo,
+          varianteId,
+          delta,
+        })
+      : await ajustarStockPlano({
+          itemTipo: itemTipoEfectivo,
+          itemId: itemIdEfectivo,
+          varianteId,
+          delta,
+        })
+    if (errAjuste) return { ok: false, error: `No se pudo actualizar el stock: ${errAjuste.message}` }
+  }
+
+  if (costoUnitario != null && costoUnitario > 0) {
+    const tabla = itemTipoEfectivo === 'producto' ? 'productos' : 'insumos'
+    const { data: filaCosto, error: errCosto } = await supabase
+      .from(tabla)
+      .update({ costo: costoUnitario })
+      .eq('id', itemIdEfectivo)
+      .select('id')
+    if (errCosto) {
+      return { ok: false, error: `El stock se actualizó, pero no se pudo guardar el costo: ${errCosto.message}` }
+    }
+    if (!filaCosto || filaCosto.length === 0) {
+      return { ok: false, error: 'El stock se actualizó, pero no se encontró el ítem para guardar el costo.' }
+    }
+  }
+
+  let insumosVinculadosIds: string[] = []
+  if (itemTipoEfectivo === 'producto') {
+    const { data: productoRow, error: errProd } = await supabase
+      .from('productos')
+      .select('stock, costo')
+      .eq('id', itemIdEfectivo)
+      .maybeSingle()
+    if (errProd) {
+      return {
+        ok: false,
+        error: `El stock se actualizó, pero no se pudo leer el producto para espejar el insumo vinculado: ${errProd.message}`,
+      }
+    }
+    if (productoRow) {
+      const { data: espejados, error: errEspejo } = await supabase
+        .from('insumos')
+        .update({ stock: productoRow.stock, costo: productoRow.costo })
+        .eq('producto_vinculado_id', itemIdEfectivo)
+        .select('id')
+      if (errEspejo) {
+        return {
+          ok: false,
+          error: `El stock se actualizó, pero no se pudo espejar sobre el insumo vinculado: ${errEspejo.message}`,
+        }
+      }
+      insumosVinculadosIds = (espejados ?? []).map((r) => r.id as string)
+    }
+  }
+
+  return { ok: true, data: { itemTipoEfectivo, itemIdEfectivo, puntoVentaId, insumosVinculadosIds } }
+}
+
+async function moverStockConfirmado(
+  params: {
+    itemTipo: 'producto' | 'insumo'
+    itemId: string
+    varianteId?: string
+    cantidad: number
+    tipo: 'ajuste' | 'ingreso'
+    origen: 'ajuste_manual' | 'recepcion'
+    motivo?: MotivoAjuste
+    costoUnitario?: number
+    nota?: string
+  },
+  clienteId: string,
+): Promise<ResultadoGuardado<{ productos: Producto[]; insumos: Insumo[]; movimientos: MovimientoStock[] }>> {
+  const { itemTipo, itemId, varianteId, cantidad, tipo, origen, motivo, costoUnitario, nota } = params
+
+  const ajuste = await aplicarAjusteAtomico({
+    itemTipo,
+    itemId,
+    varianteId,
+    delta: cantidad,
+    costoUnitario,
+    clienteId,
+  })
+  if (!ajuste.ok) return ajuste
+
+  const { itemTipoEfectivo, itemIdEfectivo, puntoVentaId, insumosVinculadosIds } = ajuste.data
+
+  const movimiento: MovimientoStock = {
+    id: uid(),
+    tipo,
+    itemTipo: itemTipoEfectivo,
+    itemId: itemIdEfectivo,
+    varianteId,
+    cantidad,
+    motivo,
+    nota,
+    costoUnitario,
+    fecha: todayISO(),
+    origen,
+  }
+  const { error: errMov } = await supabase
+    .from('movimientos_stock')
+    .insert({ ...movimientoToRow(movimiento, clienteId), punto_venta_id: puntoVentaId })
+  if (errMov) {
+    return {
+      ok: false,
+      error: `El stock se actualizó, pero no se pudo registrar el movimiento en el Kardex: ${errMov.message}. Revisá Movimientos -- el historial puede haber quedado incompleto.`,
+    }
+  }
+
+  const productoIds = itemTipoEfectivo === 'producto' ? [itemIdEfectivo] : []
+  const insumoIds = itemTipoEfectivo === 'insumo' ? [itemIdEfectivo, ...insumosVinculadosIds] : insumosVinculadosIds
+
+  const [productos, insumos] = await Promise.all([
+    fetchProductosPorId(productoIds),
+    fetchInsumosPorId(insumoIds),
+  ])
+
+  return { ok: true, data: { productos, insumos, movimientos: [movimiento] } }
+}
+
+/** Reemplaza AJUSTAR_STOCK (ajuste manual, ej. conteo físico/merma/rotura). */
+export async function ajustarStockConfirmado(
+  params: {
+    itemTipo: 'producto' | 'insumo'
+    itemId: string
+    varianteId?: string
+    cantidad: number
+    motivo: MotivoAjuste
+    nota?: string
+  },
+  clienteId: string,
+): Promise<ResultadoGuardado<{ productos: Producto[]; insumos: Insumo[]; movimientos: MovimientoStock[] }>> {
+  return moverStockConfirmado({ ...params, tipo: 'ajuste', origen: 'ajuste_manual' }, clienteId)
+}
+
+/** Reemplaza RECIBIR_STOCK (ingreso de mercadería individual, con costo opcional). */
+export async function recibirStockConfirmado(
+  params: {
+    itemTipo: 'producto' | 'insumo'
+    itemId: string
+    varianteId?: string
+    cantidad: number
+    costoUnitario?: number
+    nota?: string
+  },
+  clienteId: string,
+): Promise<ResultadoGuardado<{ productos: Producto[]; insumos: Insumo[]; movimientos: MovimientoStock[] }>> {
+  return moverStockConfirmado({ ...params, tipo: 'ingreso', origen: 'recepcion' }, clienteId)
+}
+
+/** Reemplaza REGISTRAR_PRODUCCION -- ejecuta una Fórmula como un lote real:
+ * descuenta cada insumo consumido (uno por uno, atómico) y suma el stock
+ * del producto terminado. `formula` viene del estado local (ya cargado en
+ * Produccion.tsx) porque sus líneas no cambian entre que se lee y se
+ * ejecuta el lote -- evita una vuelta extra a la base solo para releerla. */
+export async function registrarProduccionConfirmada(
+  params: {
+    formulaId: string
+    factor: number
+    cantidadRealProducida: number
+    fecha: string
+    notas?: string
+  },
+  formula: Formula,
+  clienteId: string,
+): Promise<ResultadoGuardado<{
+  produccion: Produccion
+  productos: Producto[]
+  insumos: Insumo[]
+  movimientos: MovimientoStock[]
+}>> {
+  const { formulaId, factor, cantidadRealProducida, fecha, notas } = params
+
+  const loteId = uid()
+  const nuevaProduccion: Produccion = {
+    id: loteId,
+    formulaId,
+    productoId: formula.productoId,
+    factor,
+    cantidadTeorica: formula.cantidadProducida * factor,
+    cantidadRealProducida,
+    fecha,
+    notas,
+    createdAt: todayISO(),
+  }
+
+  const { error: errProduccion } = await supabase
+    .from('producciones')
+    .insert(produccionToRow(nuevaProduccion, clienteId))
+  if (errProduccion) {
+    return { ok: false, error: `No se pudo registrar el lote de producción: ${errProduccion.message}` }
+  }
+
+  const movimientos: MovimientoStock[] = []
+  const productoIdsAfectados = new Set<string>()
+  const insumoIdsAfectados = new Set<string>()
+  let puntoVentaId: string | null = null
+
+  for (const linea of formula.lineas) {
+    if (linea.tipo !== 'insumo' || !linea.insumoId) continue
+    const cantidadConsumida = linea.cantidad * factor
+
+    const ajuste = await aplicarAjusteAtomico({
+      itemTipo: 'insumo',
+      itemId: linea.insumoId,
+      delta: -cantidadConsumida,
+      clienteId,
+    })
+    if (!ajuste.ok) {
+      return {
+        ok: false,
+        error: `El lote quedó registrado, pero falló el descuento de un insumo de la fórmula: ${ajuste.error}. Revisá el stock manualmente antes de seguir produciendo -- puede haber quedado a mitad de camino.`,
+      }
+    }
+
+    const { itemTipoEfectivo, itemIdEfectivo, insumosVinculadosIds } = ajuste.data
+    puntoVentaId = ajuste.data.puntoVentaId
+    if (itemTipoEfectivo === 'producto') productoIdsAfectados.add(itemIdEfectivo)
+    else insumoIdsAfectados.add(itemIdEfectivo)
+    insumosVinculadosIds.forEach((id) => insumoIdsAfectados.add(id))
+
+    movimientos.push({
+      id: uid(),
+      tipo: 'egreso',
+      itemTipo: itemTipoEfectivo,
+      itemId: itemIdEfectivo,
+      cantidad: cantidadConsumida,
+      nota: notas,
+      fecha,
+      origen: 'formula',
+      origenId: loteId,
+    })
+  }
+
+  const ajusteProducto = await aplicarAjusteAtomico({
+    itemTipo: 'producto',
+    itemId: formula.productoId,
+    delta: cantidadRealProducida,
+    clienteId,
+  })
+  if (!ajusteProducto.ok) {
+    return {
+      ok: false,
+      error: `El lote se registró y se descontaron los insumos, pero falló sumar el stock del producto terminado: ${ajusteProducto.error}. Revisá el stock manualmente.`,
+    }
+  }
+  productoIdsAfectados.add(ajusteProducto.data.itemIdEfectivo)
+  ajusteProducto.data.insumosVinculadosIds.forEach((id) => insumoIdsAfectados.add(id))
+  puntoVentaId = ajusteProducto.data.puntoVentaId
+
+  movimientos.push({
+    id: uid(),
+    tipo: 'ingreso',
+    itemTipo: 'producto',
+    itemId: formula.productoId,
+    cantidad: cantidadRealProducida,
+    nota: notas,
+    fecha,
+    origen: 'formula',
+    origenId: loteId,
+  })
+
+  const { error: errMovs } = await supabase
+    .from('movimientos_stock')
+    .insert(movimientos.map((m) => ({ ...movimientoToRow(m, clienteId), punto_venta_id: puntoVentaId })))
+  if (errMovs) {
+    return {
+      ok: false,
+      error: `El lote se registró y el stock se actualizó, pero no se pudieron guardar los movimientos del Kardex: ${errMovs.message}. El historial puede quedar incompleto.`,
+    }
+  }
+
+  const [productos, insumos] = await Promise.all([
+    fetchProductosPorId([...productoIdsAfectados]),
+    fetchInsumosPorId([...insumoIdsAfectados]),
+  ])
+
+  return { ok: true, data: { produccion: nuevaProduccion, productos, insumos, movimientos } }
+}
+
+/** Reemplaza ADD_RECEPCION -- crea la recepción en borrador (sin tocar stock
+ * todavía, igual que antes: el stock se aplica recién al Confirmar). */
+export async function crearRecepcionConfirmada(
+  data: {
+    fecha: string
+    proveedor: string
+    numeroRemito: string
+    lineas: LineaRecepcion[]
+    notas: string
+  },
+  clienteId: string,
+): Promise<ResultadoGuardado<Recepcion>> {
+  const nueva: Recepcion = {
+    ...data,
+    id: uid(),
+    estado: 'borrador',
+    createdAt: todayISO(),
+  }
+  const { error: errRecepcion } = await supabase
+    .from('recepciones')
+    .insert(recepcionToRow(nueva, clienteId))
+  if (errRecepcion) return { ok: false, error: `No se pudo crear la recepción: ${errRecepcion.message}` }
+
+  if (nueva.lineas.length) {
+    const { error: errLineas } = await supabase
+      .from('recepcion_lineas')
+      .insert(nueva.lineas.map((l) => recepcionLineaToRow(l, nueva.id)))
+    if (errLineas) {
+      return {
+        ok: false,
+        error: `La recepción se creó, pero no se pudieron guardar sus líneas: ${errLineas.message}. Borrala (queda como borrador vacío) y volvé a cargarla.`,
+      }
+    }
+  }
+  return { ok: true, data: nueva }
+}
+
+/** Reemplaza CONFIRMAR_RECEPCION -- aplica cada línea como un ingreso
+ * atómico de stock (con su costo) y solo cambia el estado a 'confirmada' si
+ * TODAS las líneas se aplicaron. El UPDATE del estado lleva
+ * `.eq('estado','borrador')` + chequeo de fila afectada, para no confirmar
+ * dos veces la misma recepción si dos personas la tocan casi a la vez. */
+export async function confirmarRecepcionConfirmada(
+  recepcion: Recepcion,
+  clienteId: string,
+): Promise<ResultadoGuardado<{
+  recepcion: Recepcion
+  productos: Producto[]
+  insumos: Insumo[]
+  movimientos: MovimientoStock[]
+}>> {
+  if (recepcion.estado !== 'borrador') {
+    return {
+      ok: false,
+      error: 'Esta recepción ya no está en borrador -- puede que ya se haya confirmado o cancelado. Recargá la página.',
+    }
+  }
+
+  const { data: filaEstado, error: errEstado } = await supabase
+    .from('recepciones')
+    .update({ estado: 'confirmada' })
+    .eq('id', recepcion.id)
+    .eq('estado', 'borrador')
+    .select('id')
+  if (errEstado) return { ok: false, error: `No se pudo confirmar la recepción: ${errEstado.message}` }
+  if (!filaEstado || filaEstado.length === 0) {
+    return {
+      ok: false,
+      error: 'Esta recepción ya no está en borrador -- puede que ya se haya confirmado o cancelado. Recargá la página.',
+    }
+  }
+
+  const movimientos: MovimientoStock[] = []
+  const productoIdsAfectados = new Set<string>()
+  const insumoIdsAfectados = new Set<string>()
+  let puntoVentaId: string | null = null
+
+  for (const linea of recepcion.lineas) {
+    const ajuste = await aplicarAjusteAtomico({
+      itemTipo: linea.itemTipo,
+      itemId: linea.itemId,
+      varianteId: linea.varianteId,
+      delta: linea.cantidad,
+      costoUnitario: linea.costoUnitario,
+      clienteId,
+    })
+    if (!ajuste.ok) {
+      return {
+        ok: false,
+        error: `La recepción quedó marcada como confirmada, pero falló aplicar una de sus líneas: ${ajuste.error}. Puede haber quedado parcialmente aplicada -- revisá el stock y los movimientos antes de seguir.`,
+      }
+    }
+    const { itemTipoEfectivo, itemIdEfectivo, insumosVinculadosIds } = ajuste.data
+    puntoVentaId = ajuste.data.puntoVentaId
+    if (itemTipoEfectivo === 'producto') productoIdsAfectados.add(itemIdEfectivo)
+    else insumoIdsAfectados.add(itemIdEfectivo)
+    insumosVinculadosIds.forEach((id) => insumoIdsAfectados.add(id))
+
+    movimientos.push({
+      id: uid(),
+      tipo: 'ingreso',
+      itemTipo: itemTipoEfectivo,
+      itemId: itemIdEfectivo,
+      varianteId: linea.varianteId,
+      cantidad: linea.cantidad,
+      costoUnitario: linea.costoUnitario,
+      fecha: recepcion.fecha,
+      origen: 'recepcion',
+      origenId: recepcion.id,
+      fechaVencimiento: linea.fechaVencimiento,
+    })
+  }
+
+  if (movimientos.length) {
+    const { error: errMovs } = await supabase
+      .from('movimientos_stock')
+      .insert(movimientos.map((m) => ({ ...movimientoToRow(m, clienteId), punto_venta_id: puntoVentaId })))
+    if (errMovs) {
+      return {
+        ok: false,
+        error: `La recepción se confirmó y el stock se actualizó, pero no se pudieron guardar los movimientos del Kardex: ${errMovs.message}. El historial puede quedar incompleto.`,
+      }
+    }
+  }
+
+  const [productos, insumos] = await Promise.all([
+    fetchProductosPorId([...productoIdsAfectados]),
+    fetchInsumosPorId([...insumoIdsAfectados]),
+  ])
+
+  return {
+    ok: true,
+    data: { recepcion: { ...recepcion, estado: 'confirmada' }, productos, insumos, movimientos },
+  }
+}
+
+/** Reemplaza CANCELAR_RECEPCION -- no toca stock (una recepción en borrador
+ * nunca llegó a aplicarlo), solo cambia el estado. Mismo guardrail
+ * `.eq('estado','borrador')` que confirmarRecepcionConfirmada. */
+export async function cancelarRecepcionConfirmada(
+  recepcion: Recepcion,
+): Promise<ResultadoGuardado<Recepcion>> {
+  if (recepcion.estado !== 'borrador') {
+    return { ok: false, error: 'Esta recepción ya no está en borrador.' }
+  }
+  const { data, error } = await supabase
+    .from('recepciones')
+    .update({ estado: 'cancelada' })
+    .eq('id', recepcion.id)
+    .eq('estado', 'borrador')
+    .select('id')
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error: 'Esta recepción ya no está en borrador -- puede que ya haya sido confirmada o cancelada.',
+    }
+  }
+  return { ok: true, data: { ...recepcion, estado: 'cancelada' } }
+}
+
+/** Reemplaza ADD_REGISTRO_CONTROL -- Control de Stock dispara esta acción
+ * y, si el conteo físico difiere del sistema, encadena ajustarStockConfirmado
+ * (ver ControlStock.tsx). Se mantienen separadas porque el registro de
+ * auditoría tiene sentido guardarlo aunque la diferencia sea 0. */
+export async function registrarControlConfirmado(
+  data: {
+    reglaId: string
+    itemTipo: 'producto' | 'insumo'
+    itemId: string
+    stockSistema: number
+    stockContado: number
+    diferencia: number
+    fecha: string
+  },
+  clienteId: string,
+): Promise<ResultadoGuardado<RegistroControl>> {
+  const nuevo: RegistroControl = { ...data, id: uid() }
+  const { error } = await supabase.from('registros_control').insert(registroControlToRow(nuevo, clienteId))
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: nuevo }
+}
+
+// ─── Cierre de fase: Rubros/SubRubros, Marcas, Listas de precio, Combos ────
+// Último sector -- el de menor volumen real (rubros=9, sub_rubros=35,
+// marcas=8, listas_precio=3, combos=1 en la cuenta hecha al arrancar esta
+// fase). Mismo criterio que todo lo de arriba: escribir primero, esperar
+// confirmación, y solo tocar el estado local si Supabase confirmó.
+
+export async function crearRubroConfirmado(
+  data: Omit<Rubro, 'id'>,
+  clienteId: string,
+): Promise<ResultadoGuardado<Rubro>> {
+  const nuevo: Rubro = { ...data, id: uid() }
+  const { error } = await supabase.from('rubros').insert(rubroToRow(nuevo, clienteId))
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: nuevo }
+}
+
+export async function actualizarRubroConfirmado(
+  r: Rubro,
+  clienteId: string,
+): Promise<ResultadoGuardado<Rubro>> {
+  const { data, error } = await supabase
+    .from('rubros')
+    .update(rubroToRow(r, clienteId))
+    .eq('id', r.id)
+    .select('id')
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return { ok: false, error: 'No se encontró este rubro en la base -- puede que nunca se haya guardado.' }
+  }
+  return { ok: true, data: r }
+}
+
+/** El borrado sigue el mismo orden que ya usaba syncToSupabase (sub-rubros
+ * primero, después el rubro), pero ahora esperado: si el rubro está en uso
+ * (productos, insumos, o `combo_componentes_eleccion` -- ver migración
+ * 0027, FK sin cascade) el DELETE real rechaza con 23503 y acá se traduce
+ * a un mensaje claro, en vez del "borrado fantasma" que tenían Insumos
+ * antes de la fase anterior. */
+export async function eliminarRubroConfirmado(id: string): Promise<ResultadoGuardado<null>> {
+  const { error: errSub } = await supabase.from('sub_rubros').delete().eq('rubro_id', id)
+  if (errSub) return { ok: false, error: `No se pudieron borrar los sub-rubros asociados: ${errSub.message}` }
+  const { error } = await supabase.from('rubros').delete().eq('id', id)
+  if (error) {
+    if (error.code === '23503') {
+      return {
+        ok: false,
+        error:
+          'Los sub-rubros se borraron, pero este rubro está en uso (en productos, insumos o un combo) y no se pudo eliminar. Reasigná esos ítems a otro rubro y volvé a intentar.',
+      }
+    }
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, data: null }
+}
+
+export async function crearSubRubroConfirmado(
+  data: Omit<SubRubro, 'id'>,
+): Promise<ResultadoGuardado<SubRubro>> {
+  const nuevo: SubRubro = { ...data, id: uid() }
+  const { error } = await supabase.from('sub_rubros').insert(subRubroToRow(nuevo))
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: nuevo }
+}
+
+export async function actualizarSubRubroConfirmado(
+  sr: SubRubro,
+): Promise<ResultadoGuardado<SubRubro>> {
+  const { data, error } = await supabase
+    .from('sub_rubros')
+    .update(subRubroToRow(sr))
+    .eq('id', sr.id)
+    .select('id')
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return { ok: false, error: 'No se encontró este sub-rubro en la base -- puede que nunca se haya guardado.' }
+  }
+  return { ok: true, data: sr }
+}
+
+export async function eliminarSubRubroConfirmado(id: string): Promise<ResultadoGuardado<null>> {
+  const { error } = await supabase.from('sub_rubros').delete().eq('id', id)
+  if (error) {
+    if (error.code === '23503') {
+      return {
+        ok: false,
+        error: 'Este sub-rubro está en uso y no se puede eliminar. Reasigná esos ítems a otro sub-rubro primero.',
+      }
+    }
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, data: null }
+}
+
+/** Único punto real de escritura de Marca hoy (alta rápida inline desde
+ * ProductoDialog -- no hay pantalla propia de Marcas todavía, ver
+ * FormularProducto.tsx/Productos.tsx). Antes dependía de que ADD_MARCA
+ * fuera optimista para auto-seleccionar la marca recién creada por nombre
+ * (matching contra el array `marcas` del store) -- acá se devuelve la marca
+ * ya confirmada directo, sin ese paso intermedio frágil. */
+export async function crearMarcaConfirmado(
+  nombre: string,
+  clienteId: string,
+): Promise<ResultadoGuardado<Marca>> {
+  const nueva: Marca = { id: uid(), nombre }
+  const { error } = await supabase.from('marcas').insert(marcaToRow(nueva, clienteId))
+  if (error) {
+    if (error.code === '23505') return { ok: false, error: 'Ya existe una marca con ese nombre.' }
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, data: nueva }
+}
+
+export async function crearListaPrecioConfirmada(
+  data: Omit<ListaPrecio, 'id'>,
+  clienteId: string,
+): Promise<ResultadoGuardado<ListaPrecio>> {
+  const nueva: ListaPrecio = { ...data, id: uid() }
+  const { error } = await supabase.from('listas_precio').insert(listaPrecioToRow(nueva, clienteId))
+  if (error) {
+    if (error.code === '23505') return { ok: false, error: 'Ya existe una lista de precio con ese nombre.' }
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, data: nueva }
+}
+
+export async function actualizarListaPrecioConfirmada(
+  l: ListaPrecio,
+  clienteId: string,
+): Promise<ResultadoGuardado<ListaPrecio>> {
+  const { data, error } = await supabase
+    .from('listas_precio')
+    .update(listaPrecioToRow(l, clienteId))
+    .eq('id', l.id)
+    .select('id')
+  if (error) {
+    if (error.code === '23505') return { ok: false, error: 'Ya existe una lista de precio con ese nombre.' }
+    return { ok: false, error: error.message }
+  }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error: 'No se encontró esta lista de precio en la base -- puede que nunca se haya guardado.',
+    }
+  }
+  return { ok: true, data: l }
+}
+
+/** `producto_precios` tiene ON DELETE CASCADE sobre `lista_id` (migración
+ * 0025) -- no hace falta borrar los overrides a mano antes. */
+export async function eliminarListaPrecioConfirmada(id: string): Promise<ResultadoGuardado<null>> {
+  const { error } = await supabase.from('listas_precio').delete().eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: null }
+}
+
+/** Reemplaza SET_PRECIO_PRODUCTO. A diferencia del resto, este es un
+ * guardado por-celda (onBlur de cada fila en ListasPrecio.tsx), muy
+ * frecuente -- por eso usa upsert con onConflict en vez de decidir
+ * insert-vs-update en el cliente (evita una condición de carrera si el
+ * usuario tipea rápido en dos celdas y ambos blur casi simultáneos
+ * intentan crear el mismo (producto_id, lista_id); el `unique` real de la
+ * tabla lo protegería igual, pero el upsert lo resuelve directamente en
+ * vez de devolver un 23505 al usuario). */
+export async function fijarPrecioProductoConfirmado(params: {
+  productoId: string
+  listaId: string
+  precio: number | null
+}): Promise<ResultadoGuardado<{ productoId: string; listaId: string; precio: number | null; id?: string }>> {
+  const { productoId, listaId, precio } = params
+
+  if (precio === null) {
+    const { error } = await supabase
+      .from('producto_precios')
+      .delete()
+      .eq('producto_id', productoId)
+      .eq('lista_id', listaId)
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, data: { productoId, listaId, precio: null } }
+  }
+
+  const { data, error } = await supabase
+    .from('producto_precios')
+    .upsert({ producto_id: productoId, lista_id: listaId, precio }, { onConflict: 'producto_id,lista_id' })
+    .select('id')
+    .single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: { productoId, listaId, precio, id: data?.id as string | undefined } }
+}
+
+/** Reemplaza ADD_COMBO. Mismo orden estricto padre→hijos que ya usaba
+ * syncToSupabase (ver comentario histórico junto a ADD_COMBO más arriba):
+ * los componentes recién se insertan después de que el INSERT del combo
+ * confirmó, porque la política RLS de combo_componentes_* depende de que
+ * el combo padre ya sea visible. */
+export async function crearComboConfirmado(
+  data: Omit<Combo, 'id' | 'createdAt'>,
+  clienteId: string,
+): Promise<ResultadoGuardado<Combo>> {
+  const nuevo: Combo = { ...data, id: uid(), createdAt: todayISO() }
+
+  const { error: errCombo } = await supabase.from('combos').insert(comboToRow(nuevo, clienteId))
+  if (errCombo) {
+    if (errCombo.code === '23505') return { ok: false, error: 'Ya existe un combo con ese nombre.' }
+    return { ok: false, error: errCombo.message }
+  }
+
+  if (nuevo.componentesFijos.length) {
+    const { error } = await supabase
+      .from('combo_componentes_fijos')
+      .insert(nuevo.componentesFijos.map((cf) => comboComponenteFijoToRow(cf, nuevo.id)))
+    if (error) {
+      return {
+        ok: false,
+        error: `El combo se creó, pero fallaron sus componentes fijos: ${error.message}. Editalo para volver a guardarlos.`,
+      }
+    }
+  }
+  if (nuevo.componentesEleccion.length) {
+    const { error } = await supabase
+      .from('combo_componentes_eleccion')
+      .insert(nuevo.componentesEleccion.map((ce) => comboComponenteEleccionToRow(ce, nuevo.id)))
+    if (error) {
+      return {
+        ok: false,
+        error: `El combo se creó, pero fallaron sus componentes a elección: ${error.message}. Editalo para volver a guardarlos.`,
+      }
+    }
+  }
+
+  return { ok: true, data: nuevo }
+}
+
+/** Reemplaza UPDATE_COMBO. Mismo criterio delete+reinsert de ambas tablas
+ * hijas que ya usaba syncComboComponentes -- seguro porque el diálogo
+ * siempre manda la lista completa de componentes, nunca un delta. */
+export async function actualizarComboConfirmado(
+  c: Combo,
+  clienteId: string,
+): Promise<ResultadoGuardado<Combo>> {
+  const { data, error: errCombo } = await supabase
+    .from('combos')
+    .update(comboToRow(c, clienteId))
+    .eq('id', c.id)
+    .select('id')
+  if (errCombo) {
+    if (errCombo.code === '23505') return { ok: false, error: 'Ya existe un combo con ese nombre.' }
+    return { ok: false, error: errCombo.message }
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, error: 'No se encontró este combo en la base -- puede que nunca se haya guardado.' }
+  }
+
+  const { error: errDelFijos } = await supabase
+    .from('combo_componentes_fijos')
+    .delete()
+    .eq('combo_id', c.id)
+  if (errDelFijos) {
+    return {
+      ok: false,
+      error: `El combo se actualizó, pero no se pudieron reemplazar sus componentes fijos: ${errDelFijos.message}`,
+    }
+  }
+  if (c.componentesFijos.length) {
+    const { error } = await supabase
+      .from('combo_componentes_fijos')
+      .insert(c.componentesFijos.map((cf) => comboComponenteFijoToRow(cf, c.id)))
+    if (error) {
+      return {
+        ok: false,
+        error: `El combo se actualizó, pero fallaron sus componentes fijos: ${error.message}. Volvé a guardar.`,
+      }
+    }
+  }
+
+  const { error: errDelEleccion } = await supabase
+    .from('combo_componentes_eleccion')
+    .delete()
+    .eq('combo_id', c.id)
+  if (errDelEleccion) {
+    return {
+      ok: false,
+      error: `El combo se actualizó, pero no se pudieron reemplazar sus componentes a elección: ${errDelEleccion.message}`,
+    }
+  }
+  if (c.componentesEleccion.length) {
+    const { error } = await supabase
+      .from('combo_componentes_eleccion')
+      .insert(c.componentesEleccion.map((ce) => comboComponenteEleccionToRow(ce, c.id)))
+    if (error) {
+      return {
+        ok: false,
+        error: `El combo se actualizó, pero fallaron sus componentes a elección: ${error.message}. Volvé a guardar.`,
+      }
+    }
+  }
+
+  return { ok: true, data: c }
+}
+
+/** combo_componentes_fijos y combo_componentes_eleccion tienen ON DELETE
+ * CASCADE (migración 0027) -- no hace falta borrar los hijos a mano. */
+export async function eliminarComboConfirmado(id: string): Promise<ResultadoGuardado<null>> {
+  const { error } = await supabase.from('combos').delete().eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: null }
 }
 
 // ─── Context ───────────────────────────────────────────────────────────────────

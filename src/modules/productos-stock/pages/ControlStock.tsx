@@ -8,6 +8,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  Loader2,
 } from 'lucide-react'
 import {
   Dialog,
@@ -19,7 +20,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import { useProductosStock, registrarControlConfirmado, ajustarStockConfirmado } from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import { KpiCard, EmptyState } from '../components/productos/display'
 import { formatDate, todayISO } from '../lib/format'
 import { unidadAbrev } from '../types'
@@ -79,6 +81,7 @@ interface AlertaVencimiento {
 
 export default function ControlStock() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
 
   // Dialog states - Regla
   const [reglaDialogOpen, setReglaDialogOpen] = useState(false)
@@ -89,6 +92,8 @@ export default function ControlStock() {
   // Dialog states - Registro control
   const [controlItem, setControlItem] = useState<ControlItem | null>(null)
   const [stockContado, setStockContado] = useState(0)
+  const [guardandoControl, setGuardandoControl] = useState(false)
+  const [errorControl, setErrorControl] = useState('')
 
   const today = todayISO()
 
@@ -250,11 +255,12 @@ export default function ControlStock() {
 
   function openRegistroControl(item: ControlItem) {
     setStockContado(item.stock)
+    setErrorControl('')
     setControlItem(item)
   }
 
-  function handleRegistroControl() {
-    if (!controlItem) return
+  async function handleRegistroControl() {
+    if (!controlItem || guardandoControl) return
 
     // Find applicable rule
     const rule = state.reglasControl.find(
@@ -262,11 +268,18 @@ export default function ControlStock() {
     )
     if (!rule) return
 
+    if (!cliente?.id) {
+      setErrorControl('No se pudo identificar la cuenta -- probá recargar la página.')
+      return
+    }
+
     const diferencia = stockContado - controlItem.stock
 
-    dispatch({
-      type: 'ADD_REGISTRO_CONTROL',
-      payload: {
+    setErrorControl('')
+    setGuardandoControl(true)
+
+    const resRegistro = await registrarControlConfirmado(
+      {
         reglaId: rule.id,
         itemTipo: controlItem.tipo,
         itemId: controlItem.id,
@@ -275,16 +288,21 @@ export default function ControlStock() {
         diferencia,
         fecha: today,
       },
-    })
+      cliente.id,
+    )
+    if (!resRegistro.ok) {
+      setGuardandoControl(false)
+      setErrorControl(resRegistro.error)
+      return
+    }
 
     // Cierra el círculo del control: si el conteo físico difiere del
     // sistema, el ajuste de stock se aplica acá mismo (antes esto quedaba
     // como un paso manual aparte en Stock/Insumos, que muchas veces no se
     // hacía y el registro de auditoría quedaba desconectado del stock real).
     if (diferencia !== 0) {
-      dispatch({
-        type: 'AJUSTAR_STOCK',
-        payload: {
+      const resAjuste = await ajustarStockConfirmado(
+        {
           itemTipo: controlItem.tipo,
           itemId:
             controlItem.tipo === 'producto' ? (controlItem.productoId ?? controlItem.id) : controlItem.id,
@@ -293,8 +311,28 @@ export default function ControlStock() {
           motivo: 'conteo_fisico',
           nota: `Ajuste automático por control de stock (regla: ${rule.nombre})`,
         },
+        cliente.id,
+      )
+      setGuardandoControl(false)
+      if (!resAjuste.ok) {
+        // El registro de auditoría YA quedó guardado -- se lo dejamos
+        // reflejado en el estado local igual, pero avisamos con precisión
+        // qué parte falló para que no quede como un fallo silencioso.
+        dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: { registroControl: resRegistro.data } })
+        setErrorControl(
+          `El registro de control se guardó, pero el ajuste de stock falló: ${resAjuste.error}`,
+        )
+        return
+      }
+      dispatch({
+        type: 'CONFIRM_STOCK_SYNC',
+        payload: { registroControl: resRegistro.data, ...resAjuste.data },
       })
+    } else {
+      setGuardandoControl(false)
+      dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: { registroControl: resRegistro.data } })
     }
+
     setControlItem(null)
   }
 
@@ -589,7 +627,7 @@ export default function ControlStock() {
       {/* ── Dialog: Registrar control ──────────────────────────────────────── */}
       <Dialog
         open={!!controlItem}
-        onOpenChange={(open) => !open && setControlItem(null)}
+        onOpenChange={(open) => !open && !guardandoControl && setControlItem(null)}
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -651,13 +689,20 @@ export default function ControlStock() {
                 )}
               </div>
             )}
+
+            {errorControl && (
+              <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                {errorControl}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setControlItem(null)}>
+            <Button variant="outline" onClick={() => setControlItem(null)} disabled={guardandoControl}>
               Cancelar
             </Button>
-            <Button onClick={handleRegistroControl}>
+            <Button onClick={handleRegistroControl} disabled={guardandoControl}>
+              {guardandoControl && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {controlItem && stockContado - controlItem.stock !== 0 ? 'Registrar y ajustar stock' : 'Registrar'}
             </Button>
           </DialogFooter>

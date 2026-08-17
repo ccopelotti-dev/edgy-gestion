@@ -18,10 +18,11 @@
 // ============================================================
 
 import { useState, useMemo } from 'react'
-import { Factory, Boxes, CalendarClock, FlaskConical } from 'lucide-react'
+import { Factory, Boxes, CalendarClock, FlaskConical, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock } from '../data/store'
+import { useProductosStock, registrarProduccionConfirmada } from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import { KpiCard, EmptyState } from '../components/productos/display'
 import { formatDate, todayISO } from '../lib/format'
 import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
@@ -32,6 +33,7 @@ const inputClass =
 
 export default function Produccion() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
 
   // Solo productos que tienen una fórmula guardada pueden producirse acá.
   // (producto.tieneFormula no es confiable -- ver comentario en
@@ -50,6 +52,8 @@ export default function Produccion() {
   const [cantidadRealTexto, setCantidadRealTexto] = useState('')
   const [fecha, setFecha] = useState(todayISO())
   const [notas, setNotas] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   const formulaSeleccionada = useMemo(
     () => state.formulas.find((f) => f.productoId === selectedProductoId) ?? null,
@@ -60,21 +64,34 @@ export default function Produccion() {
     ? formulaSeleccionada.cantidadProducida * factor
     : 0
 
-  function handleRegistrar() {
-    if (!formulaSeleccionada) return
+  async function handleRegistrar() {
+    if (!formulaSeleccionada || guardando) return
     const real = cantidadReal === '' ? cantidadTeorica : cantidadReal
     if (real <= 0 || factor <= 0) return
+    if (!cliente?.id) {
+      setErrorGuardado('No se pudo identificar la cuenta -- probá recargar la página.')
+      return
+    }
 
-    dispatch({
-      type: 'REGISTRAR_PRODUCCION',
-      payload: {
+    setErrorGuardado('')
+    setGuardando(true)
+    const res = await registrarProduccionConfirmada(
+      {
         formulaId: formulaSeleccionada.id,
         factor,
         cantidadRealProducida: real,
         fecha,
         notas: notas || undefined,
       },
-    })
+      formulaSeleccionada,
+      cliente.id,
+    )
+    setGuardando(false)
+    if (!res.ok) {
+      setErrorGuardado(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
 
     setSelectedProductoId('')
     setFactor(1)
@@ -246,9 +263,19 @@ export default function Produccion() {
               </>
             )}
 
+            {errorGuardado && (
+              <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400 mb-3">
+                {errorGuardado}
+              </div>
+            )}
+
             <div className="flex justify-end">
-              <Button onClick={handleRegistrar} disabled={!formulaSeleccionada}>
-                <Factory className="h-4 w-4 mr-2" />
+              <Button onClick={handleRegistrar} disabled={!formulaSeleccionada || guardando}>
+                {guardando ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Factory className="h-4 w-4 mr-2" />
+                )}
                 Registrar producción
               </Button>
             </div>

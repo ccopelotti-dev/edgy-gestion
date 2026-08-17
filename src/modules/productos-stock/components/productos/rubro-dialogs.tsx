@@ -10,6 +10,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Loader2 } from 'lucide-react'
 import type { Rubro, PlantillaGarantia } from '../../types'
 
 const inputClass =
@@ -32,7 +33,9 @@ interface RubroFormData {
 interface RubroDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: Omit<RubroFormData, 'tieneGarantia'>) => void
+  /** Guardado confirmado: espera la escritura real en Supabase antes de
+   * cerrar. Devuelve un mensaje de error si falló. */
+  onSave: (data: Omit<RubroFormData, 'tieneGarantia'>) => Promise<string | void>
   editData?: Rubro
   plantillasGarantia: PlantillaGarantia[]
 }
@@ -52,6 +55,8 @@ export function RubroDialog({
   plantillasGarantia,
 }: RubroDialogProps) {
   const [form, setForm] = useState<RubroFormData>(emptyRubro)
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -65,18 +70,27 @@ export function RubroDialog({
             }
           : emptyRubro,
       )
+      setGuardando(false)
+      setErrorGuardado('')
     }
   }, [open, editData])
 
   const garantiaIncompleta = form.tieneGarantia && !form.plantillaGarantiaId
 
-  function handleSave() {
-    if (!form.nombre.trim() || garantiaIncompleta) return
-    onSave({
+  async function handleSave() {
+    if (!form.nombre.trim() || garantiaIncompleta || guardando) return
+    setErrorGuardado('')
+    setGuardando(true)
+    const error = await onSave({
       nombre: form.nombre.trim(),
       tipo: form.tipo,
       plantillaGarantiaId: form.tieneGarantia ? form.plantillaGarantiaId : undefined,
     })
+    setGuardando(false)
+    if (error) {
+      setErrorGuardado(error)
+      return
+    }
     onOpenChange(false)
   }
 
@@ -164,13 +178,20 @@ export function RubroDialog({
               </>
             )}
           </div>
+
+          {errorGuardado && (
+            <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+              {errorGuardado}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!form.nombre.trim() || garantiaIncompleta}>
+          <Button onClick={handleSave} disabled={!form.nombre.trim() || garantiaIncompleta || guardando}>
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {editData ? 'Guardar cambios' : 'Crear rubro'}
           </Button>
         </DialogFooter>
@@ -188,7 +209,7 @@ interface SubRubroFormData {
 interface SubRubroDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: SubRubroFormData) => void
+  onSave: (data: SubRubroFormData) => Promise<string | void>
   rubroNombre: string
   editData?: { nombre: string }
 }
@@ -201,16 +222,27 @@ export function SubRubroDialog({
   editData,
 }: SubRubroDialogProps) {
   const [nombre, setNombre] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   useEffect(() => {
     if (open) {
       setNombre(editData?.nombre ?? '')
+      setGuardando(false)
+      setErrorGuardado('')
     }
   }, [open, editData])
 
-  function handleSave() {
-    if (!nombre.trim()) return
-    onSave({ nombre: nombre.trim() })
+  async function handleSave() {
+    if (!nombre.trim() || guardando) return
+    setErrorGuardado('')
+    setGuardando(true)
+    const error = await onSave({ nombre: nombre.trim() })
+    setGuardando(false)
+    if (error) {
+      setErrorGuardado(error)
+      return
+    }
     onOpenChange(false)
   }
 
@@ -233,13 +265,20 @@ export function SubRubroDialog({
               autoFocus
             />
           </div>
+
+          {errorGuardado && (
+            <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+              {errorGuardado}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!nombre.trim()}>
+          <Button onClick={handleSave} disabled={!nombre.trim() || guardando}>
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {editData ? 'Guardar cambios' : 'Crear sub-rubro'}
           </Button>
         </DialogFooter>
