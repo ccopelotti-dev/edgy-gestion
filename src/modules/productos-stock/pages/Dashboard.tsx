@@ -85,10 +85,10 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           title="Total Productos"
-          value={String(state.productos.length)}
+          value={String(productosDisponibles)}
           accent="primary"
           icon={Package}
-          subtitle={`${productosDisponibles} disponibles · ${productosSoloInsumo} solo insumo`}
+          subtitle={`${state.productos.length} en catálogo · ${productosSoloInsumo} solo insumo`}
         />
         <KpiCard
           title="Total Insumos"
