@@ -368,6 +368,15 @@ export default function FormularProducto() {
   const [formula, setFormula] = useState<FormulaLocal | null>(null)
   const [dirty, setDirty] = useState(false)
 
+  // Precio de venta automático por margen (17/08, a pedido de Carlos): en vez
+  // de tener que ir a Productos a cargar el Precio venta a mano después de
+  // armar la fórmula, acá se puede calcular como costo * (1 + margen / 100)
+  // o cargarlo manual. Se guarda en Producto.margenGanancia -- ver
+  // comentario en types/index.ts.
+  const [modoPrecio, setModoPrecio] = useState<'margen' | 'manual'>('margen')
+  const [margenTexto, setMargenTexto] = useState('30')
+  const [precioManualTexto, setPrecioManualTexto] = useState('')
+
   // Auto-seleccionar producto vía ?productoId=... -- lo usa el link "Ir a
   // Formular Producto" del banner de bloqueo de Costo en ProductoDialog
   // (ver Productos.tsx), para caer directo sobre la fórmula correcta en vez
@@ -425,6 +434,18 @@ export default function FormularProducto() {
       setFormula(null)
     }
     setDirty(false)
+
+    // Precarga el bloque de Precio de venta con lo que ya tenga guardado el
+    // producto (si venía en modo margen, mantiene el % elegido).
+    const producto = state.productos.find((p) => p.id === prodId)
+    if (producto?.margenGanancia != null) {
+      setModoPrecio('margen')
+      setMargenTexto(decimalATexto(producto.margenGanancia))
+    } else {
+      setModoPrecio('manual')
+      setMargenTexto('30')
+    }
+    setPrecioManualTexto(producto ? decimalATexto(producto.precioVenta) : '')
   }
 
   function handleCrearFormula() {
@@ -535,6 +556,16 @@ export default function FormularProducto() {
     return { insumos, manoDeObra, operativos, total, unitario }
   }, [formula])
 
+  // Precio de venta sugerido/manual (ver comentario en el useState de
+  // modoPrecio más arriba).
+  const margenNum = parsearDecimal(margenTexto) ?? 0
+  const precioCalculado = useMemo(() => {
+    if (modoPrecio === 'margen') {
+      return Math.round(costos.unitario * (1 + margenNum / 100) * 100) / 100
+    }
+    return Math.round((parsearDecimal(precioManualTexto) ?? 0) * 100) / 100
+  }, [modoPrecio, margenNum, precioManualTexto, costos.unitario])
+
   // Margin
   const margen = useMemo(() => {
     if (!selectedProducto || costos.unitario === 0) return null
@@ -592,10 +623,30 @@ export default function FormularProducto() {
     // real, justamente para que este valor no se pise a mano en silencio.
     if (selectedProducto) {
       const costoRedondeado = Math.round(costos.unitario * 100) / 100
+      const cambios: Partial<Producto> = {}
       if (costoRedondeado !== selectedProducto.costo || !selectedProducto.tieneFormula) {
+        cambios.costo = costoRedondeado
+        cambios.tieneFormula = true
+      }
+
+      // Precio de venta: en modo margen se recalcula (costo * (1 + % / 100))
+      // y se guarda el % elegido para la próxima vez; en modo manual se
+      // toma el valor tipeado y se limpia el margen (para no dejar un %
+      // viejo dando vueltas si después vuelve a modo margen). A pedido de
+      // Carlos (17/08): "resultaría mas amigable poder... agregarle un
+      // porcentaje de Ganancia... o ingresarlo manualmente".
+      const nuevoMargen = modoPrecio === 'margen' ? margenNum : undefined
+      if (precioCalculado !== selectedProducto.precioVenta) {
+        cambios.precioVenta = precioCalculado
+      }
+      if (nuevoMargen !== selectedProducto.margenGanancia) {
+        cambios.margenGanancia = nuevoMargen
+      }
+
+      if (Object.keys(cambios).length > 0) {
         dispatch({
           type: 'UPDATE_PRODUCTO',
-          payload: { ...selectedProducto, costo: costoRedondeado, tieneFormula: true },
+          payload: { ...selectedProducto, ...cambios },
         })
       }
     }
@@ -827,6 +878,90 @@ export default function FormularProducto() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Precio de venta */}
+          <div className="rounded-lg border bg-card p-4 shadow-sm">
+            <h4 className="text-sm font-semibold mb-4">Precio de venta</h4>
+            <div className="flex gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setModoPrecio('margen')
+                  setDirty(true)
+                }}
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-sm font-medium border',
+                  modoPrecio === 'margen'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background text-muted-foreground',
+                )}
+              >
+                Por margen (%)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setModoPrecio('manual')
+                  setDirty(true)
+                }}
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-sm font-medium border',
+                  modoPrecio === 'manual'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background text-muted-foreground',
+                )}
+              >
+                Manual
+              </button>
+            </div>
+            {modoPrecio === 'margen' ? (
+              <div className="flex items-end gap-4">
+                <div className="w-32">
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Ganancia sobre costo
+                  </label>
+                  <div className="relative">
+                    <input
+                      className={inputClass}
+                      value={margenTexto}
+                      onChange={(e) => {
+                        setMargenTexto(sanitizarDecimal(e.target.value))
+                        setDirty(true)
+                      }}
+                      placeholder="30"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                      %
+                    </span>
+                  </div>
+                </div>
+                <div className="flex-1 text-right">
+                  <p className="text-xs text-muted-foreground">Precio de venta sugerido</p>
+                  <p className="text-lg font-bold tabular-nums">{formatARS(precioCalculado)}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="w-48">
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Precio de venta
+                </label>
+                <input
+                  className={inputClass}
+                  value={precioManualTexto}
+                  onChange={(e) => {
+                    setPrecioManualTexto(sanitizarDecimal(e.target.value))
+                    setDirty(true)
+                  }}
+                  placeholder="0,00"
+                />
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground mt-3">
+              Se guarda en la ficha del Producto al guardar la fórmula. En modo &quot;Por
+              margen&quot;, el precio se recalcula solo la próxima vez que se guarde acá (si
+              cambia el costo).
+            </p>
           </div>
 
           {/* Notas */}

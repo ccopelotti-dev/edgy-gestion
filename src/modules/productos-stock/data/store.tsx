@@ -827,6 +827,8 @@ function productoToRow(p: Producto, clienteId: string) {
     // Fase 40: ver comentario en types/index.ts (Producto.servicioAsociadoId).
     servicio_asociado_id: p.servicioAsociadoId || null,
     servicio_asociado_obligatorio: p.servicioAsociadoObligatorio ?? false,
+    // Precio automático por margen (17/08) -- ver comentario en types/index.ts.
+    margen_ganancia: p.margenGanancia ?? null,
   }
 }
 
@@ -1843,6 +1845,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     esInsumo: r.es_insumo ?? false,
     servicioAsociadoId: r.servicio_asociado_id ?? undefined,
     servicioAsociadoObligatorio: r.servicio_asociado_obligatorio ?? false,
+    margenGanancia: r.margen_ganancia ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 

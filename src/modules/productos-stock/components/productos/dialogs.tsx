@@ -141,6 +141,11 @@ export function ProductoDialog({
 }: ProductoDialogProps) {
   const tieneFormulaReal =
     !!editData && (formulas?.some((f) => f.productoId === editData.id) ?? false)
+  // Precio automático por margen (17/08): si el producto tiene fórmula Y
+  // esa fórmula está calculando el precio por %, se bloquea también el
+  // Precio venta acá -- mismo motivo que el bloqueo de Costo, para que no
+  // se pise en silencio.
+  const precioAutomatico = tieneFormulaReal && editData?.margenGanancia != null
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
   // Buffers de texto de los 3 campos numéricos con coma decimal (ver
   // @/lib/decimal) -- separados de `form` para no pisar la coma que el
@@ -793,6 +798,7 @@ export function ProductoDialog({
                 type="text"
                 inputMode="decimal"
                 value={precioVentaTexto}
+                disabled={precioAutomatico}
                 onChange={(e) => {
                   const texto = sanitizarDecimal(e.target.value)
                   setPrecioVentaTexto(texto)
@@ -823,8 +829,12 @@ export function ProductoDialog({
               <div className="space-y-1">
                 <p>
                   Este producto tiene una Fórmula asociada. El Costo se calcula solo (suma de
-                  insumos + mano de obra + costos operativos) y se bloquea acá para que un cambio
-                  manual no se pise en silencio la próxima vez que se guarde la fórmula.
+                  insumos + mano de obra + costos operativos)
+                  {precioAutomatico
+                    ? ' y el Precio venta se calcula con el margen definido en la fórmula -- ambos'
+                    : ' y'}{' '}
+                  se bloquea{precioAutomatico ? 'n' : ''} acá para que un cambio manual no se pise
+                  en silencio la próxima vez que se guarde la fórmula.
                 </p>
                 {editData && onIrAFormula && (
                   <Button

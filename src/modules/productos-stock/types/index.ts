@@ -356,6 +356,17 @@ export interface Producto {
    * cliente retira el producto y lo coloca él mismo).
    */
   servicioAsociadoObligatorio?: boolean
+  /**
+   * % de ganancia sobre el costo, usado para calcular `precioVenta`
+   * automáticamente desde Formular Producto (precioVenta = costo * (1 +
+   * margenGanancia / 100)) -- a pedido de Carlos (17/08), para no tener que
+   * ir a la ficha del Producto a cargar el precio a mano después de armar
+   * la fórmula. `undefined` = el producto usa precio manual (default,
+   * compatible con productos existentes/sin fórmula). Cuando está seteado,
+   * el campo Precio venta se bloquea en ProductoDialog (mismo patrón que
+   * Costo) y se recalcula solo la próxima vez que se guarde la fórmula.
+   */
+  margenGanancia?: number
   createdAt: string
 }
 
