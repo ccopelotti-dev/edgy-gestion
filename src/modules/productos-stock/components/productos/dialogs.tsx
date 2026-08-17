@@ -259,12 +259,18 @@ export function ProductoDialog({
           // Copia profunda de las variantes -- el editor las muta localmente
           // hasta que se guarda, sin tocar el state global.
           variantes: rest.variantes.map((v) => ({ ...v })),
+          // Normaliza a la lista explícita de los 7 días -- ver comentario
+          // en handleToggleDia/handleToggleTodosDias más abajo. Un producto
+          // guardado antes de este fix con diasDisponibles vacío/undefined
+          // significaba "todos los días" igual, así que esto no le cambia
+          // la disponibilidad real, solo la muestra tildada.
+          diasDisponibles: rest.diasDisponibles?.length ? rest.diasDisponibles : DIAS_SEMANA_ORDEN.slice(),
         })
         setPrecioVentaTexto(decimalATexto(rest.precioVenta))
         setCostoTexto(decimalATexto(rest.costo))
         setStockMinimoTexto(decimalATexto(rest.stockMinimo))
       } else {
-        setForm(emptyProducto)
+        setForm({ ...emptyProducto, diasDisponibles: DIAS_SEMANA_ORDEN.slice() })
         setPrecioVentaTexto('')
         setCostoTexto('')
         setStockMinimoTexto('')
@@ -306,15 +312,26 @@ export function ProductoDialog({
   }
 
   // ── Días disponibles (Fase 24a) ──────────────────────────────────────────
-  // Sin selección = disponible todos los días (default, ver comentario en
-  // types/index.ts). Toggle simple: agrega/quita el día del array.
+  // Vacío/undefined = disponible todos los días para el motor (Catálogo
+  // Público, Viandas -- ver dias_disponibles en store.tsx/generarEntregaVianda.ts).
+  // A pedido de Carlos (18/08): antes ese significado era implícito y
+  // confuso (nada tildado = disponible igual todos los días). Ahora el
+  // formulario siempre trabaja con la lista explícita de los 7 días (se
+  // normaliza al abrir, ver useEffect de arriba) y agrega una casilla
+  // "Todos los días" que tilda/destilda el conjunto completo de una, y
+  // arranca tildada por defecto.
   function handleToggleDia(dia: number) {
     setForm((f) => {
       const actual = f.diasDisponibles ?? []
-      const nuevo = actual.includes(dia)
-        ? actual.filter((d) => d !== dia)
-        : [...actual, dia]
+      const nuevo = actual.includes(dia) ? actual.filter((d) => d !== dia) : [...actual, dia]
       return { ...f, diasDisponibles: nuevo }
+    })
+  }
+
+  function handleToggleTodosDias() {
+    setForm((f) => {
+      const todosMarcados = (f.diasDisponibles ?? []).length === DIAS_SEMANA_ORDEN.length
+      return { ...f, diasDisponibles: todosMarcados ? [] : DIAS_SEMANA_ORDEN.slice() }
     })
   }
 
@@ -1097,7 +1114,16 @@ export function ProductoDialog({
               cualquier producto. Sin marcar ninguno = todos los días. */}
           <div className="grid gap-1.5">
             <label className="text-sm font-medium">Días disponibles</label>
-            <div className="flex flex-wrap gap-3">
+            <label className="flex items-center gap-1.5 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={(form.diasDisponibles ?? []).length === DIAS_SEMANA_ORDEN.length}
+                onChange={handleToggleTodosDias}
+                className="rounded border-input"
+              />
+              Todos los días
+            </label>
+            <div className="flex flex-wrap gap-3 pl-1">
               {DIAS_SEMANA_ORDEN.map((dia) => (
                 <label key={dia} className="flex items-center gap-1.5 text-sm">
                   <input
@@ -1111,9 +1137,9 @@ export function ProductoDialog({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              Sin marcar ninguno, el producto está disponible todos los días. Esto solo se
-              respeta en el Catálogo Público/Menú QR -- el personal siempre puede vender el
-              producto desde Punto de Venta, Comandas, etc.
+              Tildá los días en los que este producto está disponible. Esto solo se respeta en
+              el Catálogo Público/Menú QR -- el personal siempre puede vender el producto desde
+              Punto de Venta, Comandas, etc.
             </p>
           </div>
         </div>
