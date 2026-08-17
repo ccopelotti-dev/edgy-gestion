@@ -35,6 +35,7 @@ import type {
   AlicuotaIVA,
   UnidadMedida,
   MotivoAjuste,
+  Formula,
 } from '../../types'
 import {
   ALICUOTAS_IVA,
@@ -82,6 +83,15 @@ interface ProductoDialogProps {
    * solo elemento en un cliente de un solo local: el selector de
    * "Disponible en" directamente no se muestra en ese caso. */
   puntosVenta?: { id: string; alias: string }[]
+  /** Fórmulas existentes -- para saber si este producto tiene una receta
+   * real que le calcula el costo (ver Formular Producto). OJO:
+   * `Producto.tieneFormula` no es confiable (no se mantiene sincronizado
+   * en todos los casos), por eso acá se busca en esta lista en vez de
+   * confiar en ese campo. */
+  formulas?: Formula[]
+  /** Navega a Formular Producto con este producto seleccionado (para editar
+   * el costo desde la fórmula en vez de acá). */
+  onIrAFormula?: (productoId: string) => void
   editData?: Producto
 }
 
@@ -125,8 +135,12 @@ export function ProductoDialog({
   onCrearMarca,
   plantillasGarantia,
   puntosVenta = [],
+  formulas,
+  onIrAFormula,
   editData,
 }: ProductoDialogProps) {
+  const tieneFormulaReal =
+    !!editData && (formulas?.some((f) => f.productoId === editData.id) ?? false)
   const [form, setForm] = useState<ProductoFormData>(emptyProducto)
   // Buffers de texto de los 3 campos numéricos con coma decimal (ver
   // @/lib/decimal) -- separados de `form` para no pisar la coma que el
@@ -793,6 +807,7 @@ export function ProductoDialog({
                 type="text"
                 inputMode="decimal"
                 value={costoTexto}
+                disabled={tieneFormulaReal}
                 onChange={(e) => {
                   const texto = sanitizarDecimal(e.target.value)
                   setCostoTexto(texto)
@@ -801,6 +816,30 @@ export function ProductoDialog({
               />
             </div>
           </div>
+
+          {tieneFormulaReal && (
+            <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-300">
+              <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p>
+                  Este producto tiene una Fórmula asociada. El Costo se calcula solo (suma de
+                  insumos + mano de obra + costos operativos) y se bloquea acá para que un cambio
+                  manual no se pise en silencio la próxima vez que se guarde la fórmula.
+                </p>
+                {editData && onIrAFormula && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-blue-800 underline dark:text-blue-300"
+                    onClick={() => onIrAFormula(editData.id)}
+                  >
+                    Ir a Formular Producto
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* IVA y Unidad */}
           <div className="grid grid-cols-2 gap-4">

@@ -283,12 +283,28 @@ function FormulaSection({
 
 export default function FormularProducto() {
   const { state, dispatch } = useProductosStock()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   const base = pathname.match(/^(\/m\/[^/]+)/)?.[1] ?? ''
 
   const [selectedProductoId, setSelectedProductoId] = useState('')
   const [formula, setFormula] = useState<FormulaLocal | null>(null)
   const [dirty, setDirty] = useState(false)
+
+  // Auto-seleccionar producto vía ?productoId=... -- lo usa el link "Ir a
+  // Formular Producto" del banner de bloqueo de Costo en ProductoDialog
+  // (ver Productos.tsx), para caer directo sobre la fórmula correcta en vez
+  // de tener que buscarlo de nuevo en el desplegable.
+  const productoIdPreseleccionado = useRef<string | null>(
+    new URLSearchParams(search).get('productoId'),
+  )
+  useEffect(() => {
+    const id = productoIdPreseleccionado.current
+    if (id && state.productos.some((p) => p.id === id)) {
+      productoIdPreseleccionado.current = null
+      handleProductoChange(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.productos])
 
   // Alta de producto nuevo directamente desde esta pantalla, sin tener que
   // ir primero a la pestaña "Productos". Reutiliza el mismo ProductoDialog
@@ -488,6 +504,24 @@ export default function FormularProducto() {
         },
       })
     }
+
+    // Sincroniza el costo calculado (insumos + mano de obra + costos
+    // operativos, prorrateado por cantidadProducida) hacia la ficha del
+    // Producto -- a pedido explícito de Carlos (16/08): "necesito que
+    // escriba el total... en el costo de la ficha del producto, ya que eso
+    // es la composición del precio". El campo Costo se bloquea del lado de
+    // ProductoDialog (ver dialogs.tsx) cuando el producto tiene una fórmula
+    // real, justamente para que este valor no se pise a mano en silencio.
+    if (selectedProducto) {
+      const costoRedondeado = Math.round(costos.unitario * 100) / 100
+      if (costoRedondeado !== selectedProducto.costo || !selectedProducto.tieneFormula) {
+        dispatch({
+          type: 'UPDATE_PRODUCTO',
+          payload: { ...selectedProducto, costo: costoRedondeado, tieneFormula: true },
+        })
+      }
+    }
+
     setDirty(false)
   }
 

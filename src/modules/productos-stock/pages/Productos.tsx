@@ -334,6 +334,11 @@ export default function Productos() {
         onCrearMarca={(nombre) => dispatch({ type: 'ADD_MARCA', payload: { nombre } })}
         plantillasGarantia={state.plantillasGarantia}
         puntosVenta={puntosVenta}
+        formulas={state.formulas}
+        onIrAFormula={(productoId) => {
+          setDialogOpen(false)
+          navigate(`${base}/formular?productoId=${productoId}`)
+        }}
         editData={editingProducto}
       />
 
