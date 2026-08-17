@@ -64,6 +64,21 @@ export default function Dashboard() {
 
   const totalStockBajo = stockBajo.productos.length + stockBajo.insumos.length
 
+  // Desglose disponible/solo-insumo -- aclara por qué "Total Productos" no
+  // baja cuando se marca disponible=false en un lote (ej. kits/herrajes de
+  // Cortina que solo se usan desde Formular Producto): el registro sigue
+  // existiendo, solo se oculta de la venta.
+  const productosDisponibles = useMemo(
+    () => state.productos.filter((p) => p.disponible && p.estado === 'activo').length,
+    [state.productos],
+  )
+  const productosSoloInsumo = state.productos.length - productosDisponibles
+  const insumosVinculados = useMemo(
+    () => state.insumos.filter((i) => i.productoVinculadoId).length,
+    [state.insumos],
+  )
+  const insumosPuros = state.insumos.length - insumosVinculados
+
   return (
     <div className="space-y-6">
       {/* KPI Cards */}
@@ -73,12 +88,14 @@ export default function Dashboard() {
           value={String(state.productos.length)}
           accent="primary"
           icon={Package}
+          subtitle={`${productosDisponibles} disponibles · ${productosSoloInsumo} solo insumo`}
         />
         <KpiCard
           title="Total Insumos"
           value={String(state.insumos.length)}
           accent="primary"
           icon={Boxes}
+          subtitle={`${insumosPuros} puros · ${insumosVinculados} vinculados a producto`}
         />
         <KpiCard
           title="Stock Bajo"
