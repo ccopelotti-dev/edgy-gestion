@@ -215,6 +215,10 @@ type Action =
   // comentario grande antes de esas funciones para el motivo completo.
   | { type: 'CONFIRM_PRODUCTO'; payload: Producto }
   | { type: 'CONFIRM_FORMULA'; payload: Formula }
+  // Fase siguiente (18/08): mismo criterio, ahora para Insumos -- ver
+  // crearInsumoConfirmado/actualizarInsumoConfirmado/eliminarInsumoConfirmado.
+  | { type: 'CONFIRM_INSUMO'; payload: Insumo }
+  | { type: 'CONFIRM_DELETE_INSUMO'; payload: string }
 
 // ─── Reducer (copia EXACTA del original, más SET_STATE) ────
 
@@ -473,6 +477,21 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           : [...state.formulas, f],
       }
     }
+    case 'CONFIRM_INSUMO': {
+      const i = action.payload
+      const existe = state.insumos.some((x) => x.id === i.id)
+      return {
+        ...state,
+        insumos: existe
+          ? state.insumos.map((x) => (x.id === i.id ? i : x))
+          : [...state.insumos, i],
+      }
+    }
+    case 'CONFIRM_DELETE_INSUMO':
+      return {
+        ...state,
+        insumos: state.insumos.filter((i) => i.id !== action.payload),
+      }
 
     case 'REGISTRAR_PRODUCCION': {
       const { formulaId, factor, cantidadRealProducida, fecha, notas } = action.payload
@@ -1511,6 +1530,9 @@ async function syncToSupabase(
       return
     case 'CONFIRM_FORMULA':
       return
+    case 'CONFIRM_INSUMO':
+    case 'CONFIRM_DELETE_INSUMO':
+      return
 
     case 'REGISTRAR_PRODUCCION': {
       // Fase 9 (cierre): la fila de `producciones` es el registro real del
@@ -2152,19 +2174,19 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
 // desaparecieron dos productos de prueba de Carlos, y así una Fórmula
 // completa (con costo y precio ya calculados) se perdió en silencio.
 //
-// Estas dos funciones se usan en los dos puntos exactos donde eso pasó:
-// crear un Producto y guardar una Fórmula (+ sincronizar costo/precio a la
-// ficha del Producto) desde Formular Producto. Escriben a Supabase primero,
-// ESPERAN la respuesta, y devuelven { ok:false, error } si algo falla --
-// recién si { ok:true }, el componente que llama refleja el cambio en el
-// estado local (con las acciones CONFIRM_PRODUCTO/CONFIRM_FORMULA, que no
-// vuelven a escribir nada, ver el reducer y syncToSupabase más arriba).
+// Estas funciones se usan en los puntos que ya se migraron a este patrón:
+// Producto y Fórmula (17/08, donde se originó el problema) e Insumos
+// (18/08, fase siguiente -- ver comentario junto a crearInsumoConfirmado
+// más abajo). Escriben a Supabase primero, ESPERAN la respuesta, y
+// devuelven { ok:false, error } si algo falla -- recién si { ok:true }, el
+// componente que llama refleja el cambio en el estado local (con acciones
+// CONFIRM_* que no vuelven a escribir nada, ver el reducer y
+// syncToSupabase más arriba).
 //
-// Esto NO es una reescritura del store entero -- el resto de las +50
-// acciones sigue siendo optimista, sería un cambio mucho más grande y
-// arriesgado tocar todo de una. Se aplica acá primero porque es donde
-// Carlos lo sufrió hoy; si el patrón conviene, se puede ir extendiendo a
-// otras pantallas más adelante.
+// Esto NO es una reescritura del store entero -- el resto de las +40
+// acciones que quedan (Rubros, Combos, Recepción, Ajustes de stock,
+// Producción, etc.) sigue siendo optimista. Se va extendiendo pantalla por
+// pantalla, en orden de riesgo real, no de una sola vez.
 
 export type ResultadoGuardado<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -2196,6 +2218,66 @@ export async function actualizarProductoConfirmado(
     }
   }
   return { ok: true, data: p }
+}
+
+// Insumos (Fase siguiente, 18/08 -- mismo criterio que Producto/Fórmula
+// arriba, ahora extendido a Insumos porque es el segundo punto de mayor
+// riesgo: 899 insumos, la mayoría cargados por SQL directo, y son
+// justo lo que alimenta las Fórmulas.
+//
+// El borrado de insumo tenía el mismo problema de fondo pero al revés:
+// `insumo_id` tiene FK "NO ACTION" desde formula_lineas, comprobante_compra_items,
+// cotizacion_compra_items y orden_compra_items -- si el insumo está en uso
+// en cualquiera de esas, el DELETE en Supabase rechaza con 23503 (foreign
+// key violation). El dispatch optimista viejo (DELETE_INSUMO) ya sacaba el
+// insumo de la lista ANTES de intentar el borrado real, así que un rechazo
+// se veía en pantalla como "borrado con éxito" cuando en realidad seguía
+// completo en la base -- un "borrado fantasma", el espejo del "guardado
+// fantasma" que ya resolvimos. eliminarInsumoConfirmado espera la
+// confirmación real y traduce el 23503 a un mensaje que tiene sentido.
+export async function crearInsumoConfirmado(
+  data: Omit<Insumo, 'id' | 'createdAt'>,
+  clienteId: string,
+): Promise<ResultadoGuardado<Insumo>> {
+  const nuevo: Insumo = { ...data, id: uid(), createdAt: todayISO() }
+  const { error } = await supabase.from('insumos').insert(insumoToRow(nuevo, clienteId))
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: nuevo }
+}
+
+export async function actualizarInsumoConfirmado(
+  i: Insumo,
+  clienteId: string,
+): Promise<ResultadoGuardado<Insumo>> {
+  const { data, error } = await supabase
+    .from('insumos')
+    .update(insumoToRow(i, clienteId))
+    .eq('id', i.id)
+    .select('id')
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error:
+        'No se encontró este insumo en la base -- puede que nunca se haya guardado. Probá crearlo de nuevo.',
+    }
+  }
+  return { ok: true, data: i }
+}
+
+export async function eliminarInsumoConfirmado(id: string): Promise<ResultadoGuardado<null>> {
+  const { error } = await supabase.from('insumos').delete().eq('id', id)
+  if (error) {
+    if (error.code === '23503') {
+      return {
+        ok: false,
+        error:
+          'Este insumo está en uso (en una fórmula, un comprobante o una orden de compra) y no se puede eliminar. Si ya no lo necesitás, quitalo primero de donde se usa.',
+      }
+    }
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, data: null }
 }
 
 export async function guardarFormulaConfirmada(

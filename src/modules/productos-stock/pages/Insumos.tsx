@@ -18,7 +18,14 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock, fetchProductosStockState } from '../data/store'
+import {
+  useProductosStock,
+  fetchProductosStockState,
+  crearInsumoConfirmado,
+  actualizarInsumoConfirmado,
+  eliminarInsumoConfirmado,
+} from '../data/store'
+import { useClienteActual } from '@/hooks/useClienteActual'
 import {
   KpiCard,
   StockBadge,
@@ -41,6 +48,7 @@ const inputClass =
 
 export default function Insumos() {
   const { state, dispatch } = useProductosStock()
+  const { cliente } = useClienteActual()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Fase 16.2: acceso rápido a Movimientos filtrado por este insumo.
@@ -51,6 +59,13 @@ export default function Insumos() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingInsumo, setEditingInsumo] = useState<Insumo | undefined>()
   const [duplicadosOpen, setDuplicadosOpen] = useState(false)
+  // Guardado/borrado confirmado (18/08, fase siguiente a Producto/Fórmula):
+  // `eliminandoId` deshabilita el botón de borrar de esa fila puntual
+  // mientras se espera la confirmación real de Supabase -- evita doble
+  // click y, junto con eliminarInsumoConfirmado, evita el "borrado
+  // fantasma" (insumo que desaparece de la lista pero sigue en la base
+  // porque el DELETE fue rechazado por estar en uso en una fórmula/compra).
+  const [eliminandoId, setEliminandoId] = useState<string | null>(null)
 
   // Fase 34+ (fix): insumos sueltos que comparten nombre con un producto
   // vinculado -- ver duplicados-dialog.tsx. Se calcula acá arriba (no solo
@@ -125,23 +140,30 @@ export default function Insumos() {
     setDialogOpen(true)
   }
 
-  function handleDelete(id: string) {
-    if (window.confirm('Estas seguro de eliminar este insumo?')) {
-      dispatch({ type: 'DELETE_INSUMO', payload: id })
+  async function handleDelete(id: string) {
+    if (!window.confirm('Estas seguro de eliminar este insumo?')) return
+    setEliminandoId(id)
+    const res = await eliminarInsumoConfirmado(id)
+    setEliminandoId(null)
+    if (!res.ok) {
+      window.alert(res.error)
+      return
     }
+    dispatch({ type: 'CONFIRM_DELETE_INSUMO', payload: id })
   }
 
-  function handleSave(data: Omit<Insumo, 'id' | 'stock' | 'createdAt' | 'productoVinculadoId'>) {
+  async function handleSave(
+    data: Omit<Insumo, 'id' | 'stock' | 'createdAt' | 'productoVinculadoId'>,
+  ): Promise<string | void> {
+    if (!cliente?.id) return 'No se pudo identificar la cuenta -- probá recargar la página.'
     if (editingInsumo) {
-      dispatch({
-        type: 'UPDATE_INSUMO',
-        payload: { ...editingInsumo, ...data },
-      })
+      const res = await actualizarInsumoConfirmado({ ...editingInsumo, ...data }, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_INSUMO', payload: res.data })
     } else {
-      dispatch({
-        type: 'ADD_INSUMO',
-        payload: { ...data, stock: 0 },
-      })
+      const res = await crearInsumoConfirmado({ ...data, stock: 0 }, cliente.id)
+      if (!res.ok) return res.error
+      dispatch({ type: 'CONFIRM_INSUMO', payload: res.data })
     }
   }
 
@@ -379,6 +401,7 @@ export default function Insumos() {
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-red-500"
                         onClick={() => handleDelete(i.id)}
+                        disabled={eliminandoId === i.id}
                         title="Eliminar"
                       >
                         <Trash2 className="h-4 w-4" />

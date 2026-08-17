@@ -1170,7 +1170,10 @@ type InsumoFormData = Omit<Insumo, 'id' | 'stock' | 'createdAt' | 'productoVincu
 interface InsumoDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: InsumoFormData) => void
+  /** Guardado confirmado (18/08, fase siguiente a Producto/Fórmula): espera
+   * la escritura real en Supabase antes de cerrar. Devuelve un mensaje de
+   * error si falló, o nada si se guardó bien. */
+  onSave: (data: InsumoFormData) => Promise<string | void>
   rubros: Rubro[]
   subRubros: SubRubro[]
   editData?: Insumo
@@ -1204,6 +1207,8 @@ export function InsumoDialog({
   const [form, setForm] = useState<InsumoFormData>(emptyInsumo)
   const [stockMinimoTexto, setStockMinimoTexto] = useState('')
   const [costoTexto, setCostoTexto] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardado, setErrorGuardado] = useState('')
 
   // Fase 34+ (fix): si el insumo es un espejo, nombre/rubro/sub-rubro/
   // unidad/stock mínimo/costo se re-escriben solos cada vez que se guarda
@@ -1217,6 +1222,8 @@ export function InsumoDialog({
 
   useEffect(() => {
     if (open) {
+      setGuardando(false)
+      setErrorGuardado('')
       if (editData) {
         const { id, stock, createdAt, productoVinculadoId, ...rest } = editData
         setForm(rest)
@@ -1234,9 +1241,17 @@ export function InsumoDialog({
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.nombre.trim()) return
-    onSave({ ...form, subRubroId: form.subRubroId || undefined })
+    if (guardando) return
+    setErrorGuardado('')
+    setGuardando(true)
+    const errorGuardar = await onSave({ ...form, subRubroId: form.subRubroId || undefined })
+    setGuardando(false)
+    if (errorGuardar) {
+      setErrorGuardado(errorGuardar)
+      return
+    }
     onOpenChange(false)
   }
 
@@ -1401,11 +1416,14 @@ export function InsumoDialog({
           </label>
         </div>
 
+        {errorGuardado && <p className="text-sm text-red-500 px-6">{errorGuardado}</p>}
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!form.nombre.trim()}>
+          <Button onClick={handleSave} disabled={!form.nombre.trim() || guardando}>
+            {guardando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {editData ? 'Guardar cambios' : 'Crear insumo'}
           </Button>
         </DialogFooter>
