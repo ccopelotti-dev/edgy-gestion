@@ -38,6 +38,12 @@ export default function Productos() {
 
   const [search, setSearch] = useState('')
   const [rubroFilter, setRubroFilter] = useState('')
+  // Oculta por defecto los productos "solo insumo" (disponible=false) --
+  // mismo criterio que ya usa Catalogo.tsx. Evita el ruido de ver mezclados
+  // los productos vendibles con insumos como kits/herrajes que solo se
+  // consumen desde Formular Producto (ver auditoría Fase 34+ punto sobre
+  // disponible/estado).
+  const [incluirNoDisponibles, setIncluirNoDisponibles] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProducto, setEditingProducto] = useState<Producto | undefined>()
   const [etiquetaProductoId, setEtiquetaProductoId] = useState<string | null>(null)
@@ -68,6 +74,9 @@ export default function Productos() {
   // Filtered products
   const filtered = useMemo(() => {
     let list = state.productos
+    if (!incluirNoDisponibles) {
+      list = list.filter((p) => p.disponible && p.estado === 'activo')
+    }
     if (rubroFilter) {
       list = list.filter((p) => p.rubroId === rubroFilter)
     }
@@ -81,7 +90,7 @@ export default function Productos() {
       )
     }
     return list
-  }, [state.productos, search, rubroFilter])
+  }, [state.productos, search, rubroFilter, incluirNoDisponibles])
 
   function handleOpenNew() {
     setEditingProducto(undefined)
@@ -163,6 +172,16 @@ export default function Productos() {
         </Button>
       </div>
 
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={incluirNoDisponibles}
+          onChange={(e) => setIncluirNoDisponibles(e.target.checked)}
+          className="rounded border-input"
+        />
+        Mostrar también los "solo insumo" (no disponibles para venta)
+      </label>
+
       {/* Table */}
       {filtered.length === 0 ? (
         <EmptyState
@@ -242,7 +261,17 @@ export default function Productos() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <EstadoBadge estado={p.estado} />
+                      <div className="flex items-center gap-1.5">
+                        <EstadoBadge estado={p.estado} />
+                        {!p.disponible && (
+                          <span
+                            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                            title="No aparece en Catálogo ni en la venta -- solo se usa como insumo"
+                          >
+                            Solo insumo
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
