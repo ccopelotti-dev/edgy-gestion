@@ -261,6 +261,134 @@ function InsumoCombobox({ value, options, onSelect }: InsumoComboboxProps) {
   )
 }
 
+// ─── Buscador de producto (combobox) ──────────────────────────────────────────
+// A pedido de Carlos (18/08): el selector de "Producto:" de esta pantalla
+// era un <select> nativo -- con el catálogo grande (Gla & Co., Punto Tex)
+// se volvía una lista larguísima para recorrer a ciegas. Mismo patrón que
+// InsumoCombobox de arriba (portal + position:fixed, filtra a medida que
+// se escribe), aplicado acá para que buscar un producto se sienta igual
+// que el buscador de la pestaña Productos.
+
+interface ProductoOpcion {
+  id: string
+  nombre: string
+  codigo: string
+}
+
+interface ProductoComboboxProps {
+  value: string
+  options: ProductoOpcion[]
+  onSelect: (producto: ProductoOpcion) => void
+}
+
+function ProductoCombobox({ value, options, onSelect }: ProductoComboboxProps) {
+  const seleccionado = options.find((o) => o.id === value)
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  const actualizarPosicion = useCallback(() => {
+    const el = inputRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setRect({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 260) })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    actualizarPosicion()
+    window.addEventListener('scroll', actualizarPosicion, true)
+    window.addEventListener('resize', actualizarPosicion)
+    return () => {
+      window.removeEventListener('scroll', actualizarPosicion, true)
+      window.removeEventListener('resize', actualizarPosicion)
+    }
+  }, [open, actualizarPosicion])
+
+  useEffect(() => {
+    function handleClickFuera(e: MouseEvent) {
+      const target = e.target as Node
+      const dentroInput = inputRef.current?.contains(target)
+      const dentroDropdown = dropdownRef.current?.contains(target)
+      if (!dentroInput && !dentroDropdown) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickFuera)
+    return () => document.removeEventListener('mousedown', handleClickFuera)
+  }, [])
+
+  const filtradas = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const base = q
+      ? options.filter(
+          (o) => o.nombre.toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q),
+        )
+      : options
+    return base.slice(0, 40)
+  }, [query, options])
+
+  function seleccionar(o: ProductoOpcion) {
+    onSelect(o)
+    setOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <div className="relative flex-1 sm:max-w-sm">
+      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+      <input
+        ref={inputRef}
+        className={cn(inputClass, 'pl-7')}
+        value={open ? query : seleccionado ? `${seleccionado.nombre} (${seleccionado.codigo})` : ''}
+        placeholder="Buscar producto por nombre o código..."
+        onFocus={() => {
+          setQuery('')
+          setOpen(true)
+        }}
+        onChange={(e) => {
+          setQuery(e.target.value)
+          setOpen(true)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            if (filtradas.length > 0) seleccionar(filtradas[0])
+          } else if (e.key === 'Escape') {
+            setOpen(false)
+          }
+        }}
+      />
+      {open &&
+        rect &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed z-50 max-h-64 overflow-y-auto rounded-md border bg-popover shadow-lg"
+            style={{ top: rect.top, left: rect.left, width: rect.width }}
+          >
+            {filtradas.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</p>
+            ) : (
+              filtradas.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                  onClick={() => seleccionar(o)}
+                >
+                  <span className="truncate">{o.nombre}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{o.codigo}</span>
+                </button>
+              ))
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
+
 // ─── Section table component ──────────────────────────────────────────────────
 
 interface SectionProps {
@@ -777,18 +905,11 @@ export default function FormularProducto() {
             <FlaskConical className="h-5 w-5 text-muted-foreground" />
             <label className="text-sm font-medium">Producto:</label>
           </div>
-          <select
-            className={cn(inputClass, 'flex-1 sm:max-w-sm')}
+          <ProductoCombobox
             value={selectedProductoId}
-            onChange={(e) => handleProductoChange(e.target.value)}
-          >
-            <option value="">Seleccionar un producto...</option>
-            {state.productos.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre} ({p.codigo})
-              </option>
-            ))}
-          </select>
+            options={state.productos.map((p) => ({ id: p.id, nombre: p.nombre, codigo: p.codigo }))}
+            onSelect={(p) => handleProductoChange(p.id)}
+          />
 
           <Button variant="outline" onClick={handleAbrirNuevoProducto}>
             <Plus className="h-4 w-4 mr-1" />
