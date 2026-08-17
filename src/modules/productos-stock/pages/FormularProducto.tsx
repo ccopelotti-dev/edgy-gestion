@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Plus,
   Trash2,
@@ -114,6 +115,24 @@ function formulaToLocal(f: Formula): FormulaLocal {
 // escribe (mismo criterio de búsqueda "includes" que ya usa el buscador de
 // catálogo en Ventas), y sí cierra al hacer click afuera -- algo que ese
 // patrón de Ventas no maneja hoy.
+//
+// FIX (17/08, reporte de Carlos): la primera versión renderizaba el
+// desplegable como <div absolute> DENTRO de la fila de la tabla. La tabla
+// de la sección vive dentro de un contenedor con overflow-x-auto (para
+// poder scrollear en pantallas chicas) -- y por regla de CSS, si
+// overflow-x no es "visible" el overflow-y calculado pasa a "auto"
+// aunque no se haya pedido, aunque no se pidiera explícitamente. Eso
+// convierte a ese contenedor en un contexto de recorte/scroll, así que el
+// desplegable (que se dibuja MÁS ABAJO del input) quedaba cortado por ese
+// borde -- a veces invisible, a veces una tira angosta con su propia
+// barra de scroll interna, dependiendo de dónde caía el corte. Es
+// exactamente el "problema de vista y barras de desplazamiento" que
+// reportó. Fix: el desplegable ahora se renderiza con un Portal
+// directamente en <body> y se posiciona con position:fixed calculado
+// desde getBoundingClientRect() del input -- así queda completamente
+// afuera del contenedor con scroll y no lo puede recortar.
+// También se agrega manejo de Enter (selecciona el primer resultado
+// filtrado) y Escape (cierra), que antes no hacían nada.
 
 interface InsumoOpcion {
   id: string
@@ -132,13 +151,36 @@ function InsumoCombobox({ value, options, onSelect }: InsumoComboboxProps) {
   const seleccionado = options.find((o) => o.id === value)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  const actualizarPosicion = useCallback(() => {
+    const el = inputRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setRect({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 240) })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    actualizarPosicion()
+    // Recalcula si se scrollea (la tabla o la página) o se redimensiona la
+    // ventana -- el portal está fijo en pantalla, no sigue al input solo.
+    window.addEventListener('scroll', actualizarPosicion, true)
+    window.addEventListener('resize', actualizarPosicion)
+    return () => {
+      window.removeEventListener('scroll', actualizarPosicion, true)
+      window.removeEventListener('resize', actualizarPosicion)
+    }
+  }, [open, actualizarPosicion])
 
   useEffect(() => {
     function handleClickFuera(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      const target = e.target as Node
+      const dentroInput = inputRef.current?.contains(target)
+      const dentroDropdown = dropdownRef.current?.contains(target)
+      if (!dentroInput && !dentroDropdown) setOpen(false)
     }
     document.addEventListener('mousedown', handleClickFuera)
     return () => document.removeEventListener('mousedown', handleClickFuera)
@@ -150,47 +192,63 @@ function InsumoCombobox({ value, options, onSelect }: InsumoComboboxProps) {
     return base.slice(0, 40)
   }, [query, options])
 
+  function seleccionar(o: InsumoOpcion) {
+    onSelect(o)
+    setOpen(false)
+    setQuery('')
+  }
+
   return (
-    <div className="relative" ref={containerRef}>
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-        <input
-          className={cn(inputClass, 'text-xs pl-6')}
-          value={open ? query : (seleccionado?.nombre ?? '')}
-          placeholder="Buscar insumo..."
-          onFocus={() => {
-            setQuery('')
-            setOpen(true)
-          }}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setOpen(true)
-          }}
-        />
-      </div>
-      {open && (
-        <div className="absolute z-20 mt-1 max-h-56 w-64 overflow-y-auto rounded-md border bg-popover shadow-lg">
-          {filtradas.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-muted-foreground">Sin resultados</p>
-          ) : (
-            filtradas.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted"
-                onClick={() => {
-                  onSelect(o)
-                  setOpen(false)
-                  setQuery('')
-                }}
-              >
-                <span className="truncate">{o.nombre}</span>
-                <span className="shrink-0 text-muted-foreground">{formatARS(o.costo)}</span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+      <input
+        ref={inputRef}
+        className={cn(inputClass, 'text-xs pl-6')}
+        value={open ? query : (seleccionado?.nombre ?? '')}
+        placeholder="Buscar insumo..."
+        onFocus={() => {
+          setQuery('')
+          setOpen(true)
+        }}
+        onChange={(e) => {
+          setQuery(e.target.value)
+          setOpen(true)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            if (filtradas.length > 0) seleccionar(filtradas[0])
+          } else if (e.key === 'Escape') {
+            setOpen(false)
+          }
+        }}
+      />
+      {open &&
+        rect &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed z-50 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-lg"
+            style={{ top: rect.top, left: rect.left, width: rect.width }}
+          >
+            {filtradas.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">Sin resultados</p>
+            ) : (
+              filtradas.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted"
+                  onClick={() => seleccionar(o)}
+                >
+                  <span className="truncate">{o.nombre}</span>
+                  <span className="shrink-0 text-muted-foreground">{formatARS(o.costo)}</span>
+                </button>
+              ))
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
