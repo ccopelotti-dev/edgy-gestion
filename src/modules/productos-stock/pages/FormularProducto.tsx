@@ -10,6 +10,7 @@ import {
   Wrench,
   Cog,
   Factory,
+  Search,
 } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
@@ -106,6 +107,94 @@ function formulaToLocal(f: Formula): FormulaLocal {
   }
 }
 
+// ─── Buscador de insumo (combobox) ────────────────────────────────────────────
+// Reemplaza el <select> nativo de la línea de insumo -- con 876 insumos
+// cargados (caso Punto Tex), un <select> solo permite saltar por la
+// primera letra tipeada, no filtrar. Este combobox filtra a medida que se
+// escribe (mismo criterio de búsqueda "includes" que ya usa el buscador de
+// catálogo en Ventas), y sí cierra al hacer click afuera -- algo que ese
+// patrón de Ventas no maneja hoy.
+
+interface InsumoOpcion {
+  id: string
+  nombre: string
+  costo: number
+  unidad: UnidadMedida
+}
+
+interface InsumoComboboxProps {
+  value: string
+  options: InsumoOpcion[]
+  onSelect: (insumo: InsumoOpcion) => void
+}
+
+function InsumoCombobox({ value, options, onSelect }: InsumoComboboxProps) {
+  const seleccionado = options.find((o) => o.id === value)
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickFuera(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickFuera)
+    return () => document.removeEventListener('mousedown', handleClickFuera)
+  }, [])
+
+  const filtradas = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const base = q ? options.filter((o) => o.nombre.toLowerCase().includes(q)) : options
+    return base.slice(0, 40)
+  }, [query, options])
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+        <input
+          className={cn(inputClass, 'text-xs pl-6')}
+          value={open ? query : (seleccionado?.nombre ?? '')}
+          placeholder="Buscar insumo..."
+          onFocus={() => {
+            setQuery('')
+            setOpen(true)
+          }}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setOpen(true)
+          }}
+        />
+      </div>
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-56 w-64 overflow-y-auto rounded-md border bg-popover shadow-lg">
+          {filtradas.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-muted-foreground">Sin resultados</p>
+          ) : (
+            filtradas.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted"
+                onClick={() => {
+                  onSelect(o)
+                  setOpen(false)
+                  setQuery('')
+                }}
+              >
+                <span className="truncate">{o.nombre}</span>
+                <span className="shrink-0 text-muted-foreground">{formatARS(o.costo)}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Section table component ──────────────────────────────────────────────────
 
 interface SectionProps {
@@ -170,30 +259,19 @@ function FormulaSection({
                 <tr key={l.id} className="border-b last:border-0">
                   <td className="px-3 py-2">
                     {isInsumo ? (
-                      <select
-                        className={cn(inputClass, 'text-xs')}
+                      <InsumoCombobox
                         value={l.insumoId}
-                        onChange={(e) => {
-                          const insumo = insumosOptions?.find(
-                            (x) => x.id === e.target.value,
-                          )
-                          const nuevoCosto = insumo?.costo ?? l.costoUnitario
+                        options={insumosOptions ?? []}
+                        onSelect={(insumo) =>
                           onUpdateLine(l.id, {
-                            insumoId: e.target.value,
-                            costoUnitario: nuevoCosto,
-                            costoUnitarioTexto: decimalATexto(nuevoCosto),
-                            unidad: insumo?.unidad ?? l.unidad,
-                            descripcion: insumo?.nombre ?? '',
+                            insumoId: insumo.id,
+                            costoUnitario: insumo.costo,
+                            costoUnitarioTexto: decimalATexto(insumo.costo),
+                            unidad: insumo.unidad,
+                            descripcion: insumo.nombre,
                           })
-                        }}
-                      >
-                        <option value="">Seleccionar insumo...</option>
-                        {insumosOptions?.map((ins) => (
-                          <option key={ins.id} value={ins.id}>
-                            {ins.nombre}
-                          </option>
-                        ))}
-                      </select>
+                        }
+                      />
                     ) : (
                       <input
                         className={cn(inputClass, 'text-xs')}
