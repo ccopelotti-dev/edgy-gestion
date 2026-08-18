@@ -73,6 +73,8 @@ interface LocalLinea {
    * perderla mientras el usuario todavía está escribiendo. */
   cantidadTexto: string
   costoUnitarioTexto: string
+  /** Fase 41 (Producción a medida): solo aplica si unidad === 'metro'. */
+  fuenteDimension?: 'ancho' | 'alto'
 }
 
 interface FormulaLocal {
@@ -113,6 +115,7 @@ function formulaToLocal(f: Formula): FormulaLocal {
       costoUnitario: l.costoUnitario,
       cantidadTexto: decimalATexto(l.cantidad),
       costoUnitarioTexto: decimalATexto(l.costoUnitario),
+      fuenteDimension: l.fuenteDimension,
     })),
     notas: f.notas,
     mermaPorcentaje: f.mermaPorcentaje ?? 0,
@@ -563,6 +566,21 @@ function FormulaSection({
                         </option>
                       ))}
                     </select>
+                    {l.unidad === 'metro' && (
+                      <select
+                        className={cn(inputClass, 'text-xs mt-1')}
+                        value={l.fuenteDimension ?? 'ancho'}
+                        onChange={(e) =>
+                          onUpdateLine(l.id, {
+                            fuenteDimension: e.target.value as 'ancho' | 'alto',
+                          })
+                        }
+                        title="Producción a medida: de qué medida del paño sale la longitud (Ancho: barral/riel/zócalo; Alto: correas/cadenas verticales)"
+                      >
+                        <option value="ancho">Según Ancho</option>
+                        <option value="alto">Según Alto</option>
+                      </select>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <input
@@ -906,6 +924,7 @@ export default function FormularProducto() {
       cantidad: l.cantidad,
       unidad: l.unidad,
       costoUnitario: l.costoUnitario,
+      fuenteDimension: l.unidad === 'metro' ? l.fuenteDimension ?? 'ancho' : undefined,
     }))
 
     setGuardandoFormula(true)

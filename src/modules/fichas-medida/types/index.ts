@@ -58,6 +58,12 @@ export interface PanoMedida {
 export interface ItemFichaMedida {
   id: string
   producto: string
+  /** Fase 41 (Producción a medida): vínculo opcional a un Producto real del
+   * catálogo (con Fórmula propia) -- si está cargado, Producción puede
+   * ejecutar esa fórmula para este ítem calculando las cantidades desde
+   * los paños (m2/ml/unidad) en vez de tipearlas a mano. Si no está
+   * cargado, el ítem sigue siendo solo texto libre, como hasta ahora. */
+  productoId?: string
   tela?: string
   cantidad: number
   // Genérica

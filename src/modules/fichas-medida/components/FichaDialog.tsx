@@ -49,6 +49,9 @@ interface CandidatoCliente {
 interface ItemFormRow {
   key: string;
   producto: string;
+  /** Fase 41 (Producción a medida): vínculo opcional a un Producto real
+   * del catálogo -- ver comentario en types/index.ts. */
+  productoId: string;
   tela: string;
   textoCantidad: string;
   medida: string;
@@ -64,6 +67,7 @@ function nuevaFilaItem(): ItemFormRow {
   return {
     key: crypto.randomUUID(),
     producto: '',
+    productoId: '',
     tela: '',
     textoCantidad: '1',
     medida: '',
@@ -84,6 +88,7 @@ function itemFormAFila(it: ItemFichaMedida): ItemFormRow {
   return {
     key: it.id,
     producto: it.producto,
+    productoId: it.productoId ?? '',
     tela: it.tela ?? '',
     textoCantidad: String(it.cantidad ?? 1),
     medida: it.medida ?? '',
@@ -215,6 +220,28 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     };
   }, [busquedaCliente, open, clienteTenantId]);
 
+  // ── Catálogo de productos (Fase 41, Producción a medida) ─────
+  // Fetch único al abrir el diálogo -- catálogo de un comercio a medida,
+  // no miles de filas, no hace falta debounce ni paginar (mismo criterio
+  // que el resto de este archivo, ver comentario de SELECT_FICHA).
+  const [productosCatalogo, setProductosCatalogo] = useState<{ id: string; nombre: string }[]>([]);
+  useEffect(() => {
+    if (!open || !clienteTenantId) return;
+    let activo = true;
+    supabase
+      .from('productos')
+      .select('id, nombre')
+      .eq('cliente_id', clienteTenantId)
+      .eq('disponible', true)
+      .order('nombre')
+      .then(({ data }) => {
+        if (activo) setProductosCatalogo((data ?? []) as { id: string; nombre: string }[]);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [open, clienteTenantId]);
+
   function elegirCliente(c: CandidatoCliente) {
     setClienteVentaId(c.id);
     setClienteNombre(c.nombre);
@@ -316,6 +343,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       notas: notas.trim() || undefined,
       items: itemsValidos.map((it) => ({
         producto: it.producto.trim(),
+        productoId: it.productoId || undefined,
         tela: it.tela.trim() || undefined,
         cantidad: parseDecimal(it.textoCantidad) || 1,
         medida: tipo === 'generica' ? it.medida.trim() || undefined : undefined,
@@ -552,6 +580,21 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                           placeholder="Ej. Cortina living"
                           className={inputClass}
                         />
+                        {productosCatalogo.length > 0 && (
+                          <select
+                            className={inputClass + ' mt-1'}
+                            value={it.productoId}
+                            onChange={(e) => actualizarItem(it.key, { productoId: e.target.value })}
+                            title="Opcional: vincular a un Producto real del catálogo (con Fórmula) para que Producción pueda fabricarlo a medida calculando las cantidades desde estas medidas"
+                          >
+                            <option value="">Vincular a producto del catálogo (opcional)</option>
+                            {productosCatalogo.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.nombre}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                       <div>
                         <label className="mb-1 block text-xs text-gray-500">Tela</label>

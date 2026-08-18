@@ -133,6 +133,72 @@ export function convertirCostoPorUnidad(
   return (costo / factorDesde) * factorHacia
 }
 
+// ─── Producción a medida (Fase 41) ───────────────────────────────────────────────
+//
+// Cortinas Punto Tex (y cualquier rubro que se fabrique contra un pedido
+// puntual, no para stock genérico): la cantidad de cada línea de la
+// Fórmula ya no sale de "cantidad fija × factor de lote", sino de las
+// medidas reales del paño/ventana del cliente (Ficha de medida). El campo
+// `cantidad` de la línea pasa a ser un MULTIPLICADOR sobre esa medida (ej.
+// 1.05 = 5% de desperdicio/sisa), salvo en líneas "unidad" donde sigue
+// siendo una cantidad por paño (ej. 2 soportes por ventana).
+//
+//   m2     -> cantidad × (Σ ancho×alto de todos los paños)
+//   metro  -> cantidad × (Σ ancho, o Σ alto si fuenteDimension='alto')
+//   unidad -> cantidad × cantidad de paños
+//   otras  -> cantidad tal cual (no aplica factor de lote en modo a medida)
+
+export interface PanoParaCalculo {
+  ancho: number | null
+  alto: number | null
+}
+
+export type ResultadoCalculoAMedida =
+  | { ok: true; cantidades: Map<string, number> }
+  | { ok: false; error: string }
+
+/** Calcula la cantidad necesaria de cada línea de una fórmula a partir de
+ * los paños reales de un ítem de Ficha de medida. Si falta una medida que
+ * alguna línea necesita, devuelve error en vez de tratarla como 0 --
+ * nunca hay que asumir en silencio con datos de fabricación real. */
+export function calcularCantidadesAMedida(
+  lineas: LineaFormula[],
+  panos: PanoParaCalculo[],
+): ResultadoCalculoAMedida {
+  if (panos.length === 0) {
+    return { ok: false, error: 'Este ítem de la ficha no tiene paños con medidas cargadas.' }
+  }
+
+  const necesitaAncho = lineas.some(
+    (l) => l.unidad === 'metro' && (l.fuenteDimension ?? 'ancho') === 'ancho',
+  )
+  const necesitaAlto = lineas.some((l) => l.unidad === 'metro' && l.fuenteDimension === 'alto')
+  const necesitaArea = lineas.some((l) => l.unidad === 'm2')
+
+  if ((necesitaAncho || necesitaArea) && panos.some((p) => p.ancho === null)) {
+    return { ok: false, error: 'Hay un paño sin Ancho cargado -- completá la medida antes de producir.' }
+  }
+  if ((necesitaAlto || necesitaArea) && panos.some((p) => p.alto === null)) {
+    return { ok: false, error: 'Hay un paño sin Alto cargado -- completá la medida antes de producir.' }
+  }
+
+  const sumaAncho = panos.reduce((acc, p) => acc + (p.ancho ?? 0), 0)
+  const sumaAlto = panos.reduce((acc, p) => acc + (p.alto ?? 0), 0)
+  const sumaArea = panos.reduce((acc, p) => acc + (p.ancho ?? 0) * (p.alto ?? 0), 0)
+  const cantidadPanos = panos.length
+
+  const cantidades = new Map<string, number>()
+  for (const l of lineas) {
+    if (l.unidad === 'm2') cantidades.set(l.id, l.cantidad * sumaArea)
+    else if (l.unidad === 'metro') {
+      const dimension = (l.fuenteDimension ?? 'ancho') === 'alto' ? sumaAlto : sumaAncho
+      cantidades.set(l.id, l.cantidad * dimension)
+    } else if (l.unidad === 'unidad') cantidades.set(l.id, l.cantidad * cantidadPanos)
+    else cantidades.set(l.id, l.cantidad)
+  }
+  return { ok: true, cantidades }
+}
+
 // ─── IVA ────────────────────────────────────────────────────────────────────────
 
 export type AlicuotaIVA = 0 | 10.5 | 21 | 27
@@ -361,6 +427,12 @@ export interface Producto {
   estado: EstadoProducto
   /** Si tiene fórmula, el costo se calcula automáticamente */
   tieneFormula: boolean
+  /** Fase 41: 'deposito' (default) es stock genérico y fungible -- Producción
+   * suma al stock del producto, disponible para cualquier venta futura.
+   * 'a_medida' es fabricación contra un pedido puntual (ver Ficha de
+   * medida) -- Producción NO suma stock genérico, el lote queda imputado
+   * 1 a 1 al pedido que lo originó hasta que se factura. */
+  modalidadStock: 'deposito' | 'a_medida'
   /**
    * Galería de fotos del producto, para el catálogo visual.
    * URLs públicas (Supabase Storage, bucket "productos-imagenes").
@@ -502,6 +574,11 @@ export interface LineaFormula {
   origenModulo?: string
   /** ID del recurso en el módulo origen */
   origenId?: string
+  /** Fase 41 (Producción a medida): solo aplica si unidad === 'metro' --
+   * de qué medida del paño sale la longitud (ancho: barral/riel/zócalo,
+   * que corren a lo ancho de la ventana; alto: correas/cadenas tensoras
+   * verticales). Si no está cargado, se asume 'ancho'. */
+  fuenteDimension?: 'ancho' | 'alto'
 }
 
 export interface Formula {
@@ -552,6 +629,12 @@ export interface Produccion {
   fecha: string
   notas?: string
   createdAt: string
+  /** Fase 41: si está cargado, esta producción es "a medida" -- se ejecutó
+   * atada a este ítem puntual de Ficha de medida (ver
+   * calcularCantidadesAMedida), no sumó stock genérico del producto, y el
+   * pedido se considera cerrado cuando se factura el presupuesto vinculado
+   * a la ficha. */
+  fichaItemId?: string
 }
 
 // ─── Stock ──────────────────────────────────────────────────────────────────────

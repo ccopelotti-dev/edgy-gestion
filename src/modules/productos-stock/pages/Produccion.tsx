@@ -17,16 +17,21 @@
 // acá se puede listar el historial completo, cosa que antes no existía.
 // ============================================================
 
-import { useState, useMemo } from 'react'
-import { Factory, Boxes, CalendarClock, FlaskConical, Loader2 } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useProductosStock, registrarProduccionConfirmada } from '../data/store'
+import {
+  useProductosStock,
+  registrarProduccionConfirmada,
+  fetchPedidosAMedidaPendientes,
+  type PedidoAMedidaPendiente,
+} from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { KpiCard, EmptyState } from '../components/productos/display'
 import { formatDate, todayISO } from '../lib/format'
 import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
-import { unidadAbrev } from '../types'
+import { unidadAbrev, calcularCantidadesAMedida } from '../types'
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -100,6 +105,87 @@ export default function Produccion() {
     setCantidadRealTexto('')
     setFecha(todayISO())
     setNotas('')
+  }
+
+  // ── Pedidos a medida (Fase 41) ────────────────────────────────────────
+  // Fichas de medida con un ítem vinculado a un Producto real, sin
+  // producción todavía y sin facturar -- ver fetchPedidosAMedidaPendientes
+  // en data/store.tsx para el criterio exacto (todo derivado, sin estado
+  // propio que se pueda desincronizar).
+  const [pedidosAMedida, setPedidosAMedida] = useState<PedidoAMedidaPendiente[]>([])
+  const [cargandoPedidos, setCargandoPedidos] = useState(false)
+  const [pedidoSeleccionadoId, setPedidoSeleccionadoId] = useState('')
+  const [fechaAMedida, setFechaAMedida] = useState(todayISO())
+  const [notasAMedida, setNotasAMedida] = useState('')
+  const [guardandoAMedida, setGuardandoAMedida] = useState(false)
+  const [errorAMedida, setErrorAMedida] = useState('')
+
+  const cargarPedidosAMedida = useCallback(async () => {
+    if (!cliente?.id) return
+    setCargandoPedidos(true)
+    const pedidos = await fetchPedidosAMedidaPendientes(cliente.id)
+    setPedidosAMedida(pedidos)
+    setCargandoPedidos(false)
+  }, [cliente?.id])
+
+  useEffect(() => {
+    cargarPedidosAMedida()
+  }, [cargarPedidosAMedida])
+
+  const pedidoSeleccionado = useMemo(
+    () => pedidosAMedida.find((p) => p.itemId === pedidoSeleccionadoId) ?? null,
+    [pedidosAMedida, pedidoSeleccionadoId],
+  )
+  const formulaAMedida = useMemo(
+    () =>
+      pedidoSeleccionado
+        ? state.formulas.find((f) => f.productoId === pedidoSeleccionado.productoId) ?? null
+        : null,
+    [state.formulas, pedidoSeleccionado],
+  )
+  const productoAMedida = pedidoSeleccionado
+    ? state.productos.find((p) => p.id === pedidoSeleccionado.productoId)
+    : undefined
+
+  // Preview de cantidades -- mismo cálculo que va a usar el store al
+  // registrar, mostrado ANTES de confirmar para que el operador vea qué se
+  // va a descontar (y el motivo exacto si falta una medida) sin tener que
+  // adivinar.
+  const previewAMedida = useMemo(() => {
+    if (!pedidoSeleccionado || !formulaAMedida) return null
+    return calcularCantidadesAMedida(formulaAMedida.lineas, pedidoSeleccionado.panos)
+  }, [pedidoSeleccionado, formulaAMedida])
+
+  async function handleRegistrarAMedida() {
+    if (!pedidoSeleccionado || !formulaAMedida || guardandoAMedida) return
+    if (!cliente?.id) {
+      setErrorAMedida('No se pudo identificar la cuenta -- probá recargar la página.')
+      return
+    }
+    setErrorAMedida('')
+    setGuardandoAMedida(true)
+    const res = await registrarProduccionConfirmada(
+      {
+        formulaId: formulaAMedida.id,
+        factor: 1,
+        cantidadRealProducida: formulaAMedida.cantidadProducida,
+        fecha: fechaAMedida,
+        notas: notasAMedida || undefined,
+        fichaItem: { id: pedidoSeleccionado.itemId, panos: pedidoSeleccionado.panos },
+      },
+      formulaAMedida,
+      cliente.id,
+    )
+    setGuardandoAMedida(false)
+    if (!res.ok) {
+      setErrorAMedida(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
+    setPedidoSeleccionadoId('')
+    setNotasAMedida('')
+    setFechaAMedida(todayISO())
+    await cargarPedidosAMedida()
   }
 
   // KPIs
@@ -279,6 +365,140 @@ export default function Produccion() {
                 Registrar producción
               </Button>
             </div>
+          </>
+        )}
+      </div>
+
+      {/* Pedidos a medida (Fase 41) */}
+      <div className="rounded-lg border bg-card p-4 shadow-sm">
+        <div className="flex items-center gap-2 mb-1">
+          <Ruler className="h-4 w-4 text-muted-foreground" />
+          <h4 className="text-sm font-semibold">Pedidos a medida pendientes</h4>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          Ítems de Ficha de medida vinculados a un producto del catálogo, todavía sin producir.
+          Acá las cantidades de cada línea salen de las medidas reales del pedido (m2/ML/unidad),
+          no de un factor de lote -- y el lote no suma stock genérico: queda imputado a este
+          pedido hasta que se facture.
+        </p>
+
+        {cargandoPedidos ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+            <Loader2 className="h-4 w-4 animate-spin" /> Cargando pedidos...
+          </div>
+        ) : pedidosAMedida.length === 0 ? (
+          <EmptyState
+            icon={Ruler}
+            title="Sin pedidos a medida pendientes"
+            description="Cuando un ítem de una Ficha de medida esté vinculado a un producto del catálogo, va a aparecer acá para producir."
+          />
+        ) : (
+          <>
+            <div className="mb-3">
+              <label className="text-xs text-muted-foreground block mb-1">Pedido</label>
+              <select
+                className={inputClass}
+                value={pedidoSeleccionadoId}
+                onChange={(e) => {
+                  setPedidoSeleccionadoId(e.target.value)
+                  setErrorAMedida('')
+                }}
+              >
+                <option value="">Seleccionar un pedido...</option>
+                {pedidosAMedida.map((p) => (
+                  <option key={p.itemId} value={p.itemId}>
+                    {p.clienteNombre} — {p.descripcion} (pedido {formatDate(p.fechaPedido)})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {pedidoSeleccionado && !formulaAMedida && (
+              <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 px-3 py-2 text-sm text-amber-700 dark:text-amber-400 mb-3 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  {productoAMedida?.nombre ?? 'Este producto'} todavía no tiene una fórmula
+                  guardada -- andá a Formular Producto para cargarla antes de producir este
+                  pedido.
+                </span>
+              </div>
+            )}
+
+            {pedidoSeleccionado && formulaAMedida && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Fecha</label>
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={fechaAMedida}
+                      onChange={(e) => setFechaAMedida(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">
+                      Notas (opcional)
+                    </label>
+                    <input
+                      className={inputClass}
+                      value={notasAMedida}
+                      onChange={(e) => setNotasAMedida(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {previewAMedida && !previewAMedida.ok ? (
+                  <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400 mb-3">
+                    {previewAMedida.error}
+                  </div>
+                ) : previewAMedida ? (
+                  <div className="rounded-md border overflow-x-auto mb-3">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-muted-foreground bg-muted/30">
+                          <th className="px-3 py-2 font-medium">Línea</th>
+                          <th className="px-3 py-2 font-medium text-right">Cantidad a consumir</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {formulaAMedida.lineas
+                          .filter((l) => l.tipo === 'insumo')
+                          .map((l) => (
+                            <tr key={l.id} className="border-b last:border-0">
+                              <td className="px-3 py-2">{l.descripcion}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {(previewAMedida.cantidades.get(l.id) ?? 0).toFixed(2)}{' '}
+                                {unidadAbrev(l.unidad)}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+
+                {errorAMedida && (
+                  <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400 mb-3">
+                    {errorAMedida}
+                  </div>
+                )}
+
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleRegistrarAMedida}
+                    disabled={guardandoAMedida || (previewAMedida ? !previewAMedida.ok : false)}
+                  >
+                    {guardandoAMedida ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Ruler className="h-4 w-4 mr-2" />
+                    )}
+                    Registrar producción a medida
+                  </Button>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

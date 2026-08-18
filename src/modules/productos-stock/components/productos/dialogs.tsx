@@ -127,6 +127,7 @@ const emptyProducto: ProductoFormData = {
   esInsumo: false,
   servicioAsociadoId: undefined,
   servicioAsociadoObligatorio: false,
+  modalidadStock: 'deposito',
 }
 
 export function ProductoDialog({
@@ -1076,6 +1077,18 @@ export function ProductoDialog({
                 className="rounded border-input"
               />
               Disponible
+            </label>
+            <label
+              className="flex items-center gap-2 text-sm"
+              title="Fabricación contra un pedido puntual (ej. cortinas a medida): Producción no suma stock genérico de este producto, queda imputado al pedido hasta que se entregue/facture."
+            >
+              <input
+                type="checkbox"
+                checked={form.modalidadStock === 'a_medida'}
+                onChange={(e) => update('modalidadStock', e.target.checked ? 'a_medida' : 'deposito')}
+                className="rounded border-input"
+              />
+              A medida (sin stock genérico)
             </label>
             <label className="flex items-center gap-2 text-sm">
               <input

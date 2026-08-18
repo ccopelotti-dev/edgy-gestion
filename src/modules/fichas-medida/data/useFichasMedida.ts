@@ -21,6 +21,7 @@ function filaAFicha(row: any): FichaMedida {
     .map((it: any) => ({
       id: it.id,
       producto: it.producto,
+      productoId: it.producto_id ?? undefined,
       tela: it.tela ?? undefined,
       cantidad: Number(it.cantidad),
       medida: it.medida ?? undefined,
@@ -149,6 +150,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
         id: itemId,
         ficha_id: fichaId,
         producto: it.producto,
+        producto_id: it.productoId || null,
         tela: it.tela || null,
         cantidad: it.cantidad,
         medida: it.medida || null,

@@ -94,7 +94,7 @@ import type {
   UnidadMedida,
   MotivoAjuste,
 } from '../types'
-import { convertirCantidad, unidadLabel } from '../types'
+import { convertirCantidad, unidadLabel, calcularCantidadesAMedida, type PanoParaCalculo } from '../types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
 import { resolverPuntoVentaId, ajustarStockPuntoVenta, ajustarStockPlano } from '@/lib/puntoVenta'
@@ -1050,6 +1050,8 @@ function productoToRow(p: Producto, clienteId: string) {
     servicio_asociado_obligatorio: p.servicioAsociadoObligatorio ?? false,
     // Precio automático por margen (17/08) -- ver comentario en types/index.ts.
     margen_ganancia: p.margenGanancia ?? null,
+    // Fase 41: ver comentario en types/index.ts (Producto.modalidadStock).
+    modalidad_stock: p.modalidadStock ?? 'deposito',
   }
 }
 
@@ -1348,6 +1350,8 @@ function formulaLineaToRow(l: LineaFormula, formulaId: string) {
     costo_unitario: l.costoUnitario,
     origen_modulo: l.origenModulo || null,
     origen_id: l.origenId || null,
+    // Fase 41: ver comentario en types/index.ts (LineaFormula.fuenteDimension).
+    fuente_dimension: l.fuenteDimension || null,
   }
 }
 
@@ -1362,6 +1366,8 @@ function produccionToRow(p: Produccion, clienteId: string) {
     cantidad_real_producida: p.cantidadRealProducida,
     fecha: p.fecha,
     notas: p.notas || null,
+    // Fase 41: ver comentario en types/index.ts (Produccion.fichaItemId).
+    ficha_item_id: p.fichaItemId || null,
   }
 }
 
@@ -2093,6 +2099,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     servicioAsociadoId: r.servicio_asociado_id ?? undefined,
     servicioAsociadoObligatorio: r.servicio_asociado_obligatorio ?? false,
     margenGanancia: r.margen_ganancia ?? undefined,
+    modalidadStock: (r.modalidad_stock as Producto['modalidadStock']) ?? 'deposito',
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -2200,6 +2207,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
       costoUnitario: Number(r.costo_unitario),
       origenModulo: r.origen_modulo ?? undefined,
       origenId: r.origen_id ?? undefined,
+      fuenteDimension: (r.fuente_dimension as LineaFormula['fuenteDimension']) ?? undefined,
     })
     formulaLineasByFormula.set(r.formula_id, arr)
   }
@@ -2225,6 +2233,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     fecha: r.fecha,
     notas: r.notas ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
+    fichaItemId: r.ficha_item_id ?? undefined,
   }))
 
   const movimientos: MovimientoStock[] = (movimientosRes.data ?? []).map((r: any) => ({
@@ -2578,6 +2587,7 @@ async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
     servicioAsociadoId: r.servicio_asociado_id ?? undefined,
     servicioAsociadoObligatorio: r.servicio_asociado_obligatorio ?? false,
     margenGanancia: r.margen_ganancia ?? undefined,
+    modalidadStock: (r.modalidad_stock as Producto['modalidadStock']) ?? 'deposito',
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 }
@@ -2815,6 +2825,12 @@ export async function registrarProduccionConfirmada(
     cantidadRealProducida: number
     fecha: string
     notas?: string
+    /** Fase 41: si se pasa, esta producción es "a medida" -- ata el lote a
+     * un ítem puntual de Ficha de medida. Las cantidades de cada línea
+     * salen de sus paños (m2/ml/unidad, ver calcularCantidadesAMedida) en
+     * vez de `factor`, y el lote NO suma stock genérico del producto
+     * terminado (ver Producto.modalidadStock en types/index.ts). */
+    fichaItem?: { id: string; panos: PanoParaCalculo[] }
   },
   formula: Formula,
   clienteId: string,
@@ -2824,19 +2840,31 @@ export async function registrarProduccionConfirmada(
   insumos: Insumo[]
   movimientos: MovimientoStock[]
 }>> {
-  const { formulaId, factor, cantidadRealProducida, fecha, notas } = params
+  const { formulaId, factor, cantidadRealProducida, fecha, notas, fichaItem } = params
+
+  const esAMedida = Boolean(fichaItem)
+  let cantidadesAMedida: Map<string, number> | null = null
+  if (fichaItem) {
+    const calculo = calcularCantidadesAMedida(formula.lineas, fichaItem.panos)
+    if (!calculo.ok) return { ok: false, error: calculo.error }
+    cantidadesAMedida = calculo.cantidades
+  }
+  // Modo a medida: no existe "el doble de este pedido" -- el factor de
+  // lote solo tiene sentido para fabricación a stock genérico.
+  const factorEfectivo = esAMedida ? 1 : factor
 
   const loteId = uid()
   const nuevaProduccion: Produccion = {
     id: loteId,
     formulaId,
     productoId: formula.productoId,
-    factor,
-    cantidadTeorica: formula.cantidadProducida * factor,
+    factor: factorEfectivo,
+    cantidadTeorica: formula.cantidadProducida * factorEfectivo,
     cantidadRealProducida,
     fecha,
     notas,
     createdAt: todayISO(),
+    fichaItemId: fichaItem?.id,
   }
 
   const { error: errProduccion } = await supabase
@@ -2876,17 +2904,23 @@ export async function registrarProduccionConfirmada(
   for (const linea of formula.lineas) {
     if (linea.tipo !== 'insumo' || !linea.insumoId) continue
 
+    // Modo a medida: la cantidad "cruda" de la línea sale de los paños del
+    // pedido (m2/ml/unidad), no del número tipeado en la fórmula -- ver
+    // calcularCantidadesAMedida. Modo depósito: sigue siendo el número
+    // tipeado tal cual, sin cambios de comportamiento.
+    const cantidadBase = cantidadesAMedida ? cantidadesAMedida.get(linea.id) ?? 0 : linea.cantidad
+
     const unidadNativa = unidadesNativas.get(linea.insumoId)
     const cantidadConvertida = unidadNativa
-      ? convertirCantidad(linea.cantidad, linea.unidad, unidadNativa)
-      : linea.cantidad
+      ? convertirCantidad(cantidadBase, linea.unidad, unidadNativa)
+      : cantidadBase
     if (cantidadConvertida === null) {
       return {
         ok: false,
         error: `La línea "${linea.descripcion}" está cargada en ${unidadLabel(linea.unidad)}, una unidad incompatible con la del insumo (${unidadLabel(unidadNativa!)}). Corregí la unidad de esa línea en la fórmula antes de producir.`,
       }
     }
-    const cantidadConsumida = cantidadConvertida * factor
+    const cantidadConsumida = cantidadConvertida * factorEfectivo
 
     const ajuste = await aplicarAjusteAtomico({
       itemTipo: 'insumo',
@@ -2920,41 +2954,53 @@ export async function registrarProduccionConfirmada(
     })
   }
 
-  const ajusteProducto = await aplicarAjusteAtomico({
-    itemTipo: 'producto',
-    itemId: formula.productoId,
-    delta: cantidadRealProducida,
-    clienteId,
-  })
-  if (!ajusteProducto.ok) {
-    return {
-      ok: false,
-      error: `El lote se registró y se descontaron los insumos, pero falló sumar el stock del producto terminado: ${ajusteProducto.error}. Revisá el stock manualmente.`,
+  // Modo a medida: el lote NO es stock genérico -- no se le suma nada al
+  // Producto.stock (quedaría disponible para vendérselo a otro cliente, que
+  // es exactamente lo que no queremos) ni se registra un "ingreso" en el
+  // Kardex de depósito. El registro de `producciones` con fichaItemId ya es
+  // la trazabilidad real de este lote: quedó producido e imputado al
+  // pedido hasta que se facture el presupuesto vinculado a la ficha.
+  if (!esAMedida) {
+    const ajusteProducto = await aplicarAjusteAtomico({
+      itemTipo: 'producto',
+      itemId: formula.productoId,
+      delta: cantidadRealProducida,
+      clienteId,
+    })
+    if (!ajusteProducto.ok) {
+      return {
+        ok: false,
+        error: `El lote se registró y se descontaron los insumos, pero falló sumar el stock del producto terminado: ${ajusteProducto.error}. Revisá el stock manualmente.`,
+      }
     }
+    productoIdsAfectados.add(ajusteProducto.data.itemIdEfectivo)
+    ajusteProducto.data.insumosVinculadosIds.forEach((id) => insumoIdsAfectados.add(id))
+    puntoVentaId = ajusteProducto.data.puntoVentaId
+
+    movimientos.push({
+      id: uid(),
+      tipo: 'ingreso',
+      itemTipo: 'producto',
+      itemId: formula.productoId,
+      cantidad: cantidadRealProducida,
+      nota: notas,
+      fecha,
+      origen: 'formula',
+      origenId: loteId,
+    })
   }
-  productoIdsAfectados.add(ajusteProducto.data.itemIdEfectivo)
-  ajusteProducto.data.insumosVinculadosIds.forEach((id) => insumoIdsAfectados.add(id))
-  puntoVentaId = ajusteProducto.data.puntoVentaId
 
-  movimientos.push({
-    id: uid(),
-    tipo: 'ingreso',
-    itemTipo: 'producto',
-    itemId: formula.productoId,
-    cantidad: cantidadRealProducida,
-    nota: notas,
-    fecha,
-    origen: 'formula',
-    origenId: loteId,
-  })
-
-  const { error: errMovs } = await supabase
-    .from('movimientos_stock')
-    .insert(movimientos.map((m) => ({ ...movimientoToRow(m, clienteId), punto_venta_id: puntoVentaId })))
-  if (errMovs) {
-    return {
-      ok: false,
-      error: `El lote se registró y el stock se actualizó, pero no se pudieron guardar los movimientos del Kardex: ${errMovs.message}. El historial puede quedar incompleto.`,
+  // A medida con fórmula sin líneas de insumo (ej. solo mano de obra) no
+  // deja movimiento alguno -- insert([]) no tiene sentido, se salta.
+  if (movimientos.length > 0) {
+    const { error: errMovs } = await supabase
+      .from('movimientos_stock')
+      .insert(movimientos.map((m) => ({ ...movimientoToRow(m, clienteId), punto_venta_id: puntoVentaId })))
+    if (errMovs) {
+      return {
+        ok: false,
+        error: `El lote se registró y el stock se actualizó, pero no se pudieron guardar los movimientos del Kardex: ${errMovs.message}. El historial puede quedar incompleto.`,
+      }
     }
   }
 
@@ -2964,6 +3010,110 @@ export async function registrarProduccionConfirmada(
   ])
 
   return { ok: true, data: { produccion: nuevaProduccion, productos, insumos, movimientos } }
+}
+
+// ─── Producción a medida (Fase 41) ───────────────────────────────────────────
+// Lee directo de las tablas del módulo Fichas de medida (que no tiene
+// Context/reducer propio, mismo motivo por el que generarPresupuesto.ts
+// habla directo con Supabase) para armar la lista de "pedidos a medida
+// pendientes de producir" que usa Producción.tsx. No hay una columna de
+// estado propia: el pendiente/producido/cerrado se DERIVA en cada consulta
+// de datos que ya son la fuente de verdad (ver comentario de la migración
+// fase41_cortinas_a_medida) para que nunca se pueda desincronizar.
+export interface PedidoAMedidaPendiente {
+  itemId: string
+  fichaId: string
+  productoId: string
+  clienteVentaId: string
+  clienteNombre: string
+  descripcion: string
+  cantidadItem: number
+  fechaPedido: string
+  fechaEntrega?: string
+  panos: PanoParaCalculo[]
+}
+
+export async function fetchPedidosAMedidaPendientes(
+  clienteId: string,
+): Promise<PedidoAMedidaPendiente[]> {
+  const { data: fichasRows, error: errFichas } = await supabase
+    .from('fichas_medida')
+    .select('id, presupuesto_id, cliente_venta_id, fecha_pedido, fecha_entrega')
+    .eq('cliente_id', clienteId)
+  if (errFichas || !fichasRows || fichasRows.length === 0) return []
+
+  const fichaIds = fichasRows.map((f) => f.id)
+
+  const { data: itemsRows, error: errItems } = await supabase
+    .from('ficha_medida_items')
+    .select('id, ficha_id, producto_id, producto, cantidad')
+    .in('ficha_id', fichaIds)
+    .not('producto_id', 'is', null)
+  if (errItems || !itemsRows || itemsRows.length === 0) return []
+
+  const itemIds = itemsRows.map((i) => i.id)
+
+  const [{ data: produccionesRows }, { data: panosRows }] = await Promise.all([
+    supabase.from('producciones').select('ficha_item_id').in('ficha_item_id', itemIds),
+    supabase.from('ficha_medida_panos').select('item_id, ancho, alto').in('item_id', itemIds),
+  ])
+  const yaProducidos = new Set((produccionesRows ?? []).map((p: any) => p.ficha_item_id))
+
+  const presupuestoIds = Array.from(
+    new Set(fichasRows.map((f) => f.presupuesto_id).filter((id): id is string => Boolean(id))),
+  )
+  const presupuestosPorId = new Map<string, string>()
+  if (presupuestoIds.length > 0) {
+    const { data: presRows } = await supabase
+      .from('presupuestos')
+      .select('id, estado')
+      .in('id', presupuestoIds)
+    for (const p of presRows ?? []) presupuestosPorId.set(p.id, p.estado)
+  }
+
+  const clienteVentaIds = Array.from(new Set(fichasRows.map((f) => f.cliente_venta_id)))
+  const { data: clientesRows } =
+    clienteVentaIds.length > 0
+      ? await supabase.from('clientes_venta').select('id, nombre').in('id', clienteVentaIds)
+      : { data: [] as { id: string; nombre: string }[] }
+  const nombreClientePorId = new Map((clientesRows ?? []).map((c: any) => [c.id, c.nombre as string]))
+
+  const panosPorItem = new Map<string, PanoParaCalculo[]>()
+  for (const p of panosRows ?? []) {
+    const arr = panosPorItem.get((p as any).item_id) ?? []
+    arr.push({
+      ancho: (p as any).ancho != null ? Number((p as any).ancho) : null,
+      alto: (p as any).alto != null ? Number((p as any).alto) : null,
+    })
+    panosPorItem.set((p as any).item_id, arr)
+  }
+
+  const fichaPorId = new Map(fichasRows.map((f) => [f.id, f]))
+
+  const pendientes: PedidoAMedidaPendiente[] = []
+  for (const item of itemsRows as any[]) {
+    if (yaProducidos.has(item.id)) continue
+    const ficha = fichaPorId.get(item.ficha_id)
+    if (!ficha) continue
+    const estadoPresupuesto = ficha.presupuesto_id
+      ? presupuestosPorId.get(ficha.presupuesto_id)
+      : undefined
+    if (estadoPresupuesto === 'aprobado') continue // facturado -> pedido cerrado
+
+    pendientes.push({
+      itemId: item.id,
+      fichaId: item.ficha_id,
+      productoId: item.producto_id,
+      clienteVentaId: ficha.cliente_venta_id,
+      clienteNombre: nombreClientePorId.get(ficha.cliente_venta_id) ?? '(cliente eliminado)',
+      descripcion: item.producto,
+      cantidadItem: Number(item.cantidad),
+      fechaPedido: ficha.fecha_pedido,
+      fechaEntrega: ficha.fecha_entrega ?? undefined,
+      panos: panosPorItem.get(item.id) ?? [],
+    })
+  }
+  return pendientes
 }
 
 /** Reemplaza ADD_RECEPCION -- crea la recepción en borrador (sin tocar stock
