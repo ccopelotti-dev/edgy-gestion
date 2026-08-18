@@ -14,6 +14,7 @@ import {
   Search,
   Loader2,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
@@ -404,6 +405,13 @@ interface SectionProps {
   onUpdateLine: (id: string, updates: Partial<LocalLinea>) => void
   onDeleteLine: (id: string) => void
   subtotal: number
+  /** Solo para la sección de insumos: relee el costo/unidad actual de cada
+   * insumo elegido y recalcula el costoUnitario de la línea (convertido a
+   * la unidad de la línea). El costoUnitario de una línea es una foto
+   * tomada al elegir el insumo -- si después se corrige el costo del
+   * insumo, esta es la forma de resincronizarlo sin tener que re-tocar
+   * línea por línea. */
+  onActualizarCostos?: () => void
 }
 
 function FormulaSection({
@@ -416,6 +424,7 @@ function FormulaSection({
   onUpdateLine,
   onDeleteLine,
   subtotal,
+  onActualizarCostos,
 }: SectionProps) {
   const isInsumo = tipo === 'insumo'
 
@@ -426,10 +435,23 @@ function FormulaSection({
           <Icon className="h-4 w-4 text-muted-foreground" />
           <h4 className="text-sm font-semibold">{title}</h4>
         </div>
-        <Button variant="outline" size="sm" onClick={() => onAddLine(tipo)}>
-          <Plus className="h-4 w-4 mr-1" />
-          Agregar
-        </Button>
+        <div className="flex items-center gap-2">
+          {isInsumo && onActualizarCostos && lineas.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onActualizarCostos}
+              title="Relee el costo actual de cada insumo elegido y recalcula el costo de cada línea"
+            >
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Actualizar costos
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => onAddLine(tipo)}>
+            <Plus className="h-4 w-4 mr-1" />
+            Agregar
+          </Button>
+        </div>
       </div>
 
       {lineas.length === 0 ? (
@@ -781,6 +803,41 @@ export default function FormularProducto() {
     setDirty(true)
   }
 
+  // El costoUnitario de una línea de insumo es una FOTO tomada al momento de
+  // elegir el insumo -- no una referencia viva. Si después se corrige el
+  // costo del insumo (ej: un precio mal cargado), las fórmulas que ya lo
+  // usan no se enteran solas. Este botón relee el costo actual de cada
+  // insumo y lo vuelve a convertir a la unidad en la que está cargada la
+  // línea (misma lógica de convertirCostoPorUnidad que usa el selector de
+  // unidad), para que el costeo quede al día sin tener que borrar y volver
+  // a cargar cada línea a mano.
+  function handleActualizarCostosDesdeInsumos() {
+    setFormula((prev) => {
+      if (!prev) return prev
+      const lineas = prev.lineas.map((l) => {
+        if (l.tipo !== 'insumo' || !l.insumoId) return l
+        const insumo = insumosOptions.find((i) => i.id === l.insumoId)
+        if (!insumo) return l
+        const costoConvertido = convertirCostoPorUnidad(insumo.costo, insumo.unidad, l.unidad)
+        if (costoConvertido === null) {
+          // Unidad de la línea incompatible con la del insumo (no debería
+          // pasar dado que el selector ya restringe las opciones, pero por
+          // las dudas no se asume nada silenciosamente: se realinea a la
+          // unidad nativa del insumo).
+          return {
+            ...l,
+            unidad: insumo.unidad,
+            costoUnitario: insumo.costo,
+            costoUnitarioTexto: decimalATexto(insumo.costo),
+          }
+        }
+        return { ...l, costoUnitario: costoConvertido, costoUnitarioTexto: decimalATexto(costoConvertido) }
+      })
+      return { ...prev, lineas }
+    })
+    setDirty(true)
+  }
+
   // Cost calculations
   const costos = useMemo(() => {
     if (!formula) return { insumos: 0, manoDeObra: 0, operativos: 0, total: 0, unitario: 0 }
@@ -1064,6 +1121,7 @@ export default function FormularProducto() {
               onUpdateLine={updateLine}
               onDeleteLine={deleteLine}
               subtotal={costos.insumos}
+              onActualizarCostos={handleActualizarCostosDesdeInsumos}
             />
           </div>
 
