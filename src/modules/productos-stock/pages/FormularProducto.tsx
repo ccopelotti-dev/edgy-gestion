@@ -485,8 +485,24 @@ function FormulaSection({
                 const insumoLinea = isInsumo
                   ? insumosOptions?.find((i) => i.id === l.insumoId)
                   : undefined
+                // OJO: si el insumo cambió de unidad nativa DESPUÉS de que esta
+                // línea ya lo tenía elegido (ej. un insumo que estaba en
+                // "Unidad" se pasó a "Metro" en Insumos), la línea sigue
+                // guardada en la unidad vieja hasta que alguien la actualice
+                // -- ver "Actualizar costos". Si acá solo ofreciéramos las
+                // unidades compatibles con la unidad ACTUAL del insumo, un
+                // insumo con una sola unidad compatible (m2, metro, unidad --
+                // ninguna tiene "familia") dejaría un desplegable con una
+                // única opción: el navegador la muestra seleccionada aunque
+                // el valor real (l.unidad, la vieja) no coincida con ninguna
+                // opción -- la línea queda mal por dentro sin que se note en
+                // pantalla (fallo silencioso real, visto en vivo 18/08).
+                // Siempre incluir l.unidad en la lista evita ese disimulo: si
+                // está desactualizada, se ve tal cual está, y el desplegable
+                // vuelve a tener más de una opción para poder corregirla a
+                // mano igual que antes.
                 const opcionesUnidad = insumoLinea
-                  ? unidadesCompatibles(insumoLinea.unidad)
+                  ? Array.from(new Set([...unidadesCompatibles(insumoLinea.unidad), l.unidad]))
                   : UNIDADES.map((u) => u.value)
 
                 return (

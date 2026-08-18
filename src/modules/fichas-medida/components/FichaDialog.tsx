@@ -11,7 +11,8 @@
 // ClienteDialog de Ventas) y queda linkeado por id, así no hay fichas
 // duplicadas con el mismo cliente escrito distinto cada vez.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, Search, Plus, Trash2, UserPlus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -113,6 +114,137 @@ function parseDecimal(texto: string): number {
 
 function sanitizarDecimal(valor: string): string {
   return valor.replace(/[^0-9.,]/g, '');
+}
+
+// ─── Buscador de producto del catálogo (combobox) ────────────────────────────
+// A pedido de Carlos (18/08): el <select> nativo de "Vincular a producto del
+// catálogo" se vuelve una lista larguísima para recorrer a ciegas con un
+// catálogo grande (mismo problema ya resuelto en Formular Producto con
+// ProductoCombobox -- portal + position:fixed, filtra a medida que se
+// escribe, Enter selecciona el primer resultado). Réplica del mismo patrón
+// acá, adaptada a la lista simple {id, nombre} que ya trae este diálogo.
+
+interface ProductoCatalogoOpcion {
+  id: string;
+  nombre: string;
+}
+
+function ProductoCatalogoCombobox({
+  value,
+  options,
+  onSelect,
+}: {
+  value: string;
+  options: ProductoCatalogoOpcion[];
+  onSelect: (id: string) => void;
+}) {
+  const seleccionado = options.find((o) => o.id === value);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const actualizarPosicion = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setRect({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 240) });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    actualizarPosicion();
+    window.addEventListener('scroll', actualizarPosicion, true);
+    window.addEventListener('resize', actualizarPosicion);
+    return () => {
+      window.removeEventListener('scroll', actualizarPosicion, true);
+      window.removeEventListener('resize', actualizarPosicion);
+    };
+  }, [open, actualizarPosicion]);
+
+  useEffect(() => {
+    function handleClickFuera(e: MouseEvent) {
+      const target = e.target as Node;
+      const dentroInput = inputRef.current?.contains(target);
+      const dentroDropdown = dropdownRef.current?.contains(target);
+      if (!dentroInput && !dentroDropdown) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickFuera);
+    return () => document.removeEventListener('mousedown', handleClickFuera);
+  }, []);
+
+  const filtradas = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const base = q ? options.filter((o) => o.nombre.toLowerCase().includes(q)) : options;
+    return base.slice(0, 40);
+  }, [query, options]);
+
+  function seleccionar(id: string) {
+    onSelect(id);
+    setOpen(false);
+    setQuery('');
+  }
+
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+      <input
+        ref={inputRef}
+        className={inputClass + ' pl-7'}
+        value={open ? query : seleccionado?.nombre ?? ''}
+        placeholder="Vincular a producto del catálogo (opcional)"
+        onFocus={() => {
+          setQuery('');
+          setOpen(true);
+        }}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            if (filtradas.length > 0) seleccionar(filtradas[0].id);
+          } else if (e.key === 'Escape') {
+            setOpen(false);
+          }
+        }}
+      />
+      {open &&
+        rect &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed z-[60] max-h-56 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg"
+            style={{ top: rect.top, left: rect.left, width: rect.width }}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center px-3 py-1.5 text-left text-sm text-gray-400 hover:bg-gray-50"
+              onClick={() => seleccionar('')}
+            >
+              Sin vincular (solo texto libre)
+            </button>
+            {filtradas.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-gray-400">Sin resultados</p>
+            ) : (
+              filtradas.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-gray-50"
+                  onClick={() => seleccionar(o.id)}
+                >
+                  <span className="truncate">{o.nombre}</span>
+                </button>
+              ))
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
 }
 
 interface Props {
@@ -581,19 +713,13 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                           className={inputClass}
                         />
                         {productosCatalogo.length > 0 && (
-                          <select
-                            className={inputClass + ' mt-1'}
-                            value={it.productoId}
-                            onChange={(e) => actualizarItem(it.key, { productoId: e.target.value })}
-                            title="Opcional: vincular a un Producto real del catálogo (con Fórmula) para que Producción pueda fabricarlo a medida calculando las cantidades desde estas medidas"
-                          >
-                            <option value="">Vincular a producto del catálogo (opcional)</option>
-                            {productosCatalogo.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.nombre}
-                              </option>
-                            ))}
-                          </select>
+                          <div className="mt-1">
+                            <ProductoCatalogoCombobox
+                              value={it.productoId}
+                              options={productosCatalogo}
+                              onSelect={(id) => actualizarItem(it.key, { productoId: id })}
+                            />
+                          </div>
                         )}
                       </div>
                       <div>
