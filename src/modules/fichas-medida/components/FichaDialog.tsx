@@ -705,26 +705,75 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
               <div className="space-y-3">
                 {items.map((it) => (
                   <div key={it.key} className="rounded-lg border border-gray-200 p-3">
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <div className="col-span-2 sm:col-span-2">
-                        <label className="mb-1 block text-xs text-gray-500">Producto</label>
-                        <input
-                          type="text"
-                          value={it.producto}
-                          onChange={(e) => actualizarItem(it.key, { producto: e.target.value })}
-                          placeholder="Ej. Cortina living"
-                          className={inputClass}
-                        />
-                        {productosCatalogo.length > 0 && (
-                          <div className="mt-1">
-                            <ProductoCatalogoCombobox
-                              value={it.productoId}
-                              options={productosCatalogo}
-                              onSelect={(id) => actualizarItem(it.key, { productoId: id })}
-                            />
-                          </div>
-                        )}
+                    {/* A pedido de Carlos (18/08): orden de campos calcado al orden real
+                        de la entrevista con el cliente -- primero Producto, después
+                        Medidas (lo primero que dice el cliente: "quiero una cortina de
+                        0.80 x 1 metro para la cocina"), recién después los datos
+                        secundarios (Tela, Cantidad, Barral, Tipo de cortina). */}
+                    <div>
+                      <label className="mb-1 block text-xs text-gray-500">Producto</label>
+                      <input
+                        type="text"
+                        value={it.producto}
+                        onChange={(e) => actualizarItem(it.key, { producto: e.target.value })}
+                        placeholder="Ej. Cortina living"
+                        className={inputClass}
+                      />
+                      {productosCatalogo.length > 0 && (
+                        <div className="mt-1">
+                          <ProductoCatalogoCombobox
+                            value={it.productoId}
+                            options={productosCatalogo}
+                            onSelect={(id) => actualizarItem(it.key, { productoId: id })}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {tipo === 'cortinas' && (
+                      <div className="mt-3 border-t border-gray-100 pt-3">
+                        <div className="mb-1 flex items-center justify-between">
+                          <label className="text-sm font-medium text-gray-700">Medidas (Ancho × Alto por paño)</label>
+                          <button
+                            onClick={() => agregarPano(it.key)}
+                            className="flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 hover:bg-teal-100"
+                          >
+                            <Plus className="h-3 w-3" /> Agregar paño
+                          </button>
+                        </div>
+                        <div className="space-y-1.5">
+                          {it.panos.map((p, idx) => (
+                            <div key={p.key} className="flex items-center gap-2">
+                              <span className="w-4 text-xs text-gray-400">{idx + 1}</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="Ancho"
+                                value={p.textoAncho}
+                                onChange={(e) => actualizarPano(it.key, p.key, { textoAncho: sanitizarDecimal(e.target.value) })}
+                                className={inputClass}
+                              />
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="Alto"
+                                value={p.textoAlto}
+                                onChange={(e) => actualizarPano(it.key, p.key, { textoAlto: sanitizarDecimal(e.target.value) })}
+                                className={inputClass}
+                              />
+                              <button onClick={() => eliminarPano(it.key, p.key)} className="text-gray-400 hover:text-red-600">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                          {it.panos.length === 0 && (
+                            <p className="text-xs text-gray-400">Sin medidas cargadas todavía.</p>
+                          )}
+                        </div>
                       </div>
+                    )}
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 border-t border-gray-100 pt-3">
                       <div>
                         <label className="mb-1 block text-xs text-gray-500">Tela</label>
                         <input
@@ -771,52 +820,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
 
                     {tipo === 'cortinas' && (
                       <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
-                        {/* A pedido de Carlos (18/08): Medidas es el dato central de la
-                            visita a domicilio -- va primero y con más protagonismo.
-                            Barral/Tipo de cortina son detalles de fabricación,
-                            secundarios, así que bajan al final. */}
                         <div>
-                          <div className="mb-1 flex items-center justify-between">
-                            <label className="text-sm font-medium text-gray-700">Medidas (Ancho × Alto por paño)</label>
-                            <button
-                              onClick={() => agregarPano(it.key)}
-                              className="flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 hover:bg-teal-100"
-                            >
-                              <Plus className="h-3 w-3" /> Agregar paño
-                            </button>
-                          </div>
-                          <div className="space-y-1.5">
-                            {it.panos.map((p, idx) => (
-                              <div key={p.key} className="flex items-center gap-2">
-                                <span className="w-4 text-xs text-gray-400">{idx + 1}</span>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  placeholder="Ancho"
-                                  value={p.textoAncho}
-                                  onChange={(e) => actualizarPano(it.key, p.key, { textoAncho: sanitizarDecimal(e.target.value) })}
-                                  className={inputClass}
-                                />
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  placeholder="Alto"
-                                  value={p.textoAlto}
-                                  onChange={(e) => actualizarPano(it.key, p.key, { textoAlto: sanitizarDecimal(e.target.value) })}
-                                  className={inputClass}
-                                />
-                                <button onClick={() => eliminarPano(it.key, p.key)} className="text-gray-400 hover:text-red-600">
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            ))}
-                            {it.panos.length === 0 && (
-                              <p className="text-xs text-gray-400">Sin medidas cargadas todavía.</p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="border-t border-gray-100 pt-3">
                           <label className="mb-1 flex items-center gap-2 text-xs text-gray-500">
                             <input
                               type="checkbox"
