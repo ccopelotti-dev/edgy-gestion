@@ -11,8 +11,7 @@
 // ClienteDialog de Ventas) y queda linkeado por id, así no hay fichas
 // duplicadas con el mismo cliente escrito distinto cada vez.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X, Search, Plus, Trash2, UserPlus, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -120,9 +119,16 @@ function sanitizarDecimal(valor: string): string {
 // A pedido de Carlos (18/08): el <select> nativo de "Vincular a producto del
 // catálogo" se vuelve una lista larguísima para recorrer a ciegas con un
 // catálogo grande (mismo problema ya resuelto en Formular Producto con
-// ProductoCombobox -- portal + position:fixed, filtra a medida que se
-// escribe, Enter selecciona el primer resultado). Réplica del mismo patrón
-// acá, adaptada a la lista simple {id, nombre} que ya trae este diálogo.
+// ProductoCombobox). Acá NO se puede portar ese mismo patrón tal cual: ese
+// combobox vive en una página normal, mientras que este vive DENTRO de un
+// Dialog.Content de Radix -- Radix cierra el diálogo ante cualquier
+// pointerdown que caiga fuera del DOM de su propio Content, y un dropdown
+// portado a document.body (como hacía la versión anterior) queda FUERA de
+// ese árbol, así que un click en una opción se leía como "click afuera" y
+// cerraba la ficha antes de que la selección llegara a guardarse -- el bug
+// real detrás de "no me deja linkear". Fix: dropdown inline (position:
+// absolute dentro del mismo wrapper relative), sin portal, para que Radix
+// lo vea como parte del diálogo.
 
 interface ProductoCatalogoOpcion {
   id: string;
@@ -141,34 +147,11 @@ function ProductoCatalogoCombobox({
   const seleccionado = options.find((o) => o.id === value);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  const actualizarPosicion = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setRect({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 240) });
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    actualizarPosicion();
-    window.addEventListener('scroll', actualizarPosicion, true);
-    window.addEventListener('resize', actualizarPosicion);
-    return () => {
-      window.removeEventListener('scroll', actualizarPosicion, true);
-      window.removeEventListener('resize', actualizarPosicion);
-    };
-  }, [open, actualizarPosicion]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickFuera(e: MouseEvent) {
-      const target = e.target as Node;
-      const dentroInput = inputRef.current?.contains(target);
-      const dentroDropdown = dropdownRef.current?.contains(target);
-      if (!dentroInput && !dentroDropdown) setOpen(false);
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener('mousedown', handleClickFuera);
     return () => document.removeEventListener('mousedown', handleClickFuera);
@@ -187,10 +170,9 @@ function ProductoCatalogoCombobox({
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={wrapperRef}>
       <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
       <input
-        ref={inputRef}
         className={inputClass + ' pl-7'}
         value={open ? query : seleccionado?.nombre ?? ''}
         placeholder="Vincular a producto del catálogo (opcional)"
@@ -211,38 +193,31 @@ function ProductoCatalogoCombobox({
           }
         }}
       />
-      {open &&
-        rect &&
-        createPortal(
-          <div
-            ref={dropdownRef}
-            className="fixed z-[60] max-h-56 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg"
-            style={{ top: rect.top, left: rect.left, width: rect.width }}
+      {open && (
+        <div className="absolute left-0 top-full z-[60] mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+          <button
+            type="button"
+            className="flex w-full items-center px-3 py-1.5 text-left text-sm text-gray-400 hover:bg-gray-50"
+            onClick={() => seleccionar('')}
           >
-            <button
-              type="button"
-              className="flex w-full items-center px-3 py-1.5 text-left text-sm text-gray-400 hover:bg-gray-50"
-              onClick={() => seleccionar('')}
-            >
-              Sin vincular (solo texto libre)
-            </button>
-            {filtradas.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-gray-400">Sin resultados</p>
-            ) : (
-              filtradas.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-gray-50"
-                  onClick={() => seleccionar(o.id)}
-                >
-                  <span className="truncate">{o.nombre}</span>
-                </button>
-              ))
-            )}
-          </div>,
-          document.body,
-        )}
+            Sin vincular (solo texto libre)
+          </button>
+          {filtradas.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-gray-400">Sin resultados</p>
+          ) : (
+            filtradas.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-gray-50"
+                onClick={() => seleccionar(o.id)}
+              >
+                <span className="truncate">{o.nombre}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
