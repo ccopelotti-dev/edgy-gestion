@@ -356,6 +356,13 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
   // Fetch único al abrir el diálogo -- catálogo de un comercio a medida,
   // no miles de filas, no hace falta debounce ni paginar (mismo criterio
   // que el resto de este archivo, ver comentario de SELECT_FICHA).
+  //
+  // A pedido de Carlos (18/08): filtra por modalidad_stock = 'a_medida' --
+  // vincular acá solo tiene sentido para productos que Producción va a
+  // fabricar por pedido (ver Producto.modalidadStock). Mostrar TODO el
+  // catálogo (productos de depósito incluidos) era la fricción real: una
+  // lista larga para buscar a mano un producto que ni siquiera aplica a
+  // este flujo.
   const [productosCatalogo, setProductosCatalogo] = useState<{ id: string; nombre: string }[]>([]);
   useEffect(() => {
     if (!open || !clienteTenantId) return;
@@ -365,6 +372,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       .select('id, nombre')
       .eq('cliente_id', clienteTenantId)
       .eq('disponible', true)
+      .eq('modalidad_stock', 'a_medida')
       .order('nombre')
       .then(({ data }) => {
         if (activo) setProductosCatalogo((data ?? []) as { id: string; nombre: string }[]);
