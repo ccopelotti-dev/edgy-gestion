@@ -3,7 +3,8 @@
 // Edgy Gestión · Listado, detalle y gestión de presupuestos
 // ============================================================
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Search,
   Plus,
@@ -99,6 +100,32 @@ export default function Presupuestos() {
   // acá se precarga desde el Presupuesto en vez de la Orden.
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
   const [presupuestoParaFacturar, setPresupuestoParaFacturar] = useState<Presupuesto | null>(null);
+
+  // Atajo "Ir a Presupuesto" desde Fichas de medida (Fase 41.1): llega acá
+  // con ?presupuesto=<id>, limpia cualquier filtro que lo pudiera estar
+  // ocultando, lo expande y hace scroll -- mismo criterio que el deep link
+  // ?itemId= de Movimientos.tsx (productos-stock).
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const presupuestoParam = searchParams.get('presupuesto');
+    if (!presupuestoParam) return;
+    if (!todosPresupuestos.some((p) => p.id === presupuestoParam)) return;
+
+    setFiltroEstado('');
+    setBusqueda('');
+    setFechaDesde('');
+    setFechaHasta('');
+    setExpandedId(presupuestoParam);
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('presupuesto');
+    setSearchParams(next, { replace: true });
+
+    requestAnimationFrame(() => {
+      document.getElementById(`presupuesto-row-${presupuestoParam}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, todosPresupuestos]);
 
   // ── Helpers ───────────────────────────────────────────────
 
@@ -578,6 +605,7 @@ function PresupuestoRow({
     <>
       {/* Fila principal */}
       <tr
+        id={`presupuesto-row-${p.id}`}
         onClick={onToggleExpand}
         className="cursor-pointer border-b border-gray-50 transition-colors hover:bg-gray-50 last:border-0"
       >

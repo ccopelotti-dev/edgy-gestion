@@ -4,14 +4,17 @@
 // de escritorio) porque esto se usa parado en la casa del cliente
 // desde el celular -- mismo criterio mobile-first que Modo Mostrador.
 
-import { useMemo, useState } from 'react';
-import { Search, Plus, Ruler, Calendar, FileCheck2, Trash2, Download, Mail, MessageCircle, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Plus, Ruler, Calendar, FileCheck2, Trash2, Download, Mail, MessageCircle, Loader2, Factory, Receipt } from 'lucide-react';
 import { useFichasMedida } from '../data/useFichasMedida';
 import { FichaDialog } from '../components/FichaDialog';
 import { generarPresupuestoDesdeFicha } from '../lib/generarPresupuesto';
 import { generarFichaMedidaPdf } from '../lib/generarFichaMedidaPdf';
+import { fetchEstadosWorkflow, type EstadoWorkflowFicha } from '../lib/estadoWorkflow';
 import { ESTADO_FICHA_LABEL, MODALIDAD_ENTREGA_LABEL, TIPO_FICHA_LABEL, type EstadoFicha, type FichaMedida } from '../types';
 import { formatARS } from '@/modules/ventas/lib/format';
+import { EstadoPresupuestoBadge } from '@/modules/ventas/components/ventas/display';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import type { EmpresaParaPdf } from '@/lib/comprobantes-pdf/pdfHelpers';
@@ -25,6 +28,7 @@ const ESTADO_BADGE: Record<EstadoFicha, string> = {
 export default function Listado() {
   const { clienteId, fichas, cargando, error, crear, actualizar, marcarConvertida, eliminar } = useFichasMedida();
   const { cliente: empresaActual } = useClienteActual();
+  const navigate = useNavigate();
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<EstadoFicha | ''>('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -32,6 +36,24 @@ export default function Listado() {
   const [generandoId, setGenerandoId] = useState<string | null>(null);
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const [estadosWorkflow, setEstadosWorkflow] = useState<Map<string, EstadoWorkflowFicha>>(new Map());
+
+  // Estado de Presupuesto/Producción por ficha -- derivado en vivo (ver
+  // estadoWorkflow.ts), se recalcula cada vez que cambia la lista de
+  // fichas (alta, edición, generar presupuesto, etc.).
+  useEffect(() => {
+    if (fichas.length === 0) {
+      setEstadosWorkflow(new Map());
+      return;
+    }
+    let cancelado = false;
+    fetchEstadosWorkflow(fichas).then((mapa) => {
+      if (!cancelado) setEstadosWorkflow(mapa);
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [fichas]);
 
   const fichasFiltradas = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -212,6 +234,22 @@ export default function Listado() {
                       {MODALIDAD_ENTREGA_LABEL.obra_instalacion}
                     </span>
                   )}
+                  {estadosWorkflow.get(f.id)?.presupuestoEstado && (
+                    <EstadoPresupuestoBadge estado={estadosWorkflow.get(f.id)!.presupuestoEstado!} />
+                  )}
+                  {(estadosWorkflow.get(f.id)?.itemsAMedidaTotal ?? 0) > 0 && (
+                    <span
+                      title="Ítems a medida producidos / total"
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        estadosWorkflow.get(f.id)!.itemsAMedidaProducidos === estadosWorkflow.get(f.id)!.itemsAMedidaTotal
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-blue-50 text-blue-700'
+                      }`}
+                    >
+                      <Factory className="h-3 w-3" />
+                      Producción {estadosWorkflow.get(f.id)!.itemsAMedidaProducidos}/{estadosWorkflow.get(f.id)!.itemsAMedidaTotal}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500">
                   <span className="flex items-center gap-1">
@@ -261,6 +299,31 @@ export default function Listado() {
                   >
                     <FileCheck2 className="h-3.5 w-3.5" />
                     {generandoId === f.id ? 'Generando...' : 'Presupuesto'}
+                  </button>
+                )}
+                {/* Fase 41.1 "vericuetos": atajos de navegación -- no
+                    duplican la lógica de Ventas/Producción acá, solo
+                    saltan a la pantalla correspondiente ya
+                    preseleccionada, sin que el operador tenga que ir a
+                    buscar el pedido/presupuesto a mano. */}
+                {f.presupuestoId && (
+                  <button
+                    onClick={() => navigate(`/m/ventas/presupuestos?presupuesto=${f.presupuestoId}`)}
+                    title="Ver presupuesto en Ventas"
+                    className="flex items-center gap-1 rounded-lg border border-indigo-200 px-2 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50"
+                  >
+                    <Receipt className="h-3.5 w-3.5" />
+                    Ver presupuesto
+                  </button>
+                )}
+                {estadosWorkflow.get(f.id)?.primerItemPendienteId && (
+                  <button
+                    onClick={() => navigate(`/m/productos-stock/produccion?pedido=${estadosWorkflow.get(f.id)!.primerItemPendienteId}`)}
+                    title="Ir a Producción a medida"
+                    className="flex items-center gap-1 rounded-lg border border-blue-200 px-2 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                  >
+                    <Factory className="h-3.5 w-3.5" />
+                    Producción
                   </button>
                 )}
                 <button onClick={() => handleEliminar(f)} className="p-1.5 text-gray-400 hover:text-red-600">

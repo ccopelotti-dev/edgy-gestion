@@ -17,7 +17,8 @@
 // acá se puede listar el historial completo, cosa que antes no existía.
 // ============================================================
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -131,6 +132,29 @@ export default function Produccion() {
   useEffect(() => {
     cargarPedidosAMedida()
   }, [cargarPedidosAMedida])
+
+  // Atajo "Ir a Producción" desde Fichas de medida (Fase 41.1): llega acá
+  // con ?pedido=<itemId>, lo preselecciona en cuanto aparece en la lista de
+  // pendientes y hace scroll a la sección -- mismo criterio de deep link
+  // que Presupuestos.tsx (?presupuesto=<id>).
+  const [searchParams, setSearchParams] = useSearchParams()
+  const seccionPedidosRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const pedidoParam = searchParams.get('pedido')
+    if (!pedidoParam) return
+    if (!pedidosAMedida.some((p) => p.itemId === pedidoParam)) return
+
+    setPedidoSeleccionadoId(pedidoParam)
+
+    const next = new URLSearchParams(searchParams)
+    next.delete('pedido')
+    setSearchParams(next, { replace: true })
+
+    requestAnimationFrame(() => {
+      seccionPedidosRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, pedidosAMedida])
 
   const pedidoSeleccionado = useMemo(
     () => pedidosAMedida.find((p) => p.itemId === pedidoSeleccionadoId) ?? null,
@@ -370,7 +394,7 @@ export default function Produccion() {
       </div>
 
       {/* Pedidos a medida (Fase 41) */}
-      <div className="rounded-lg border bg-card p-4 shadow-sm">
+      <div ref={seccionPedidosRef} className="rounded-lg border bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 mb-1">
           <Ruler className="h-4 w-4 text-muted-foreground" />
           <h4 className="text-sm font-semibold">Pedidos a medida pendientes</h4>

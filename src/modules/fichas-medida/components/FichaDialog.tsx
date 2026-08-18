@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Search, Plus, Trash2, UserPlus } from 'lucide-react';
+import { X, Search, Plus, Trash2, UserPlus, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { ClienteDialog } from '@/modules/ventas/components/ventas/dialogs';
 import type { Cliente } from '@/modules/ventas/types';
@@ -446,7 +446,10 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     );
   }
 
-  async function handleSave() {
+  // Fase 41.1 "vericuetos": handleSave acepta un estado a forzar -- lo usa
+  // el botón "Marcar como Lista y continuar" para no depender del timing
+  // de setEstado (async) antes de armar `data` en el mismo click.
+  async function handleSave(estadoForzado?: EstadoFicha) {
     if (!clienteVentaId) {
       setError('Elegí o cargá un cliente antes de guardar.');
       return;
@@ -463,7 +466,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     const data: NuevaFichaMedida = {
       clienteVentaId,
       tipo,
-      estado,
+      estado: estadoForzado ?? estado,
       fechaPedido,
       fechaReplanteo: fechaReplanteo || undefined,
       horaReplanteo: fechaReplanteo ? horaReplanteo || undefined : undefined,
@@ -888,12 +891,28 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                 Cancelar
               </button>
               <button
-                onClick={handleSave}
+                onClick={() => handleSave()}
                 disabled={guardando}
-                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60"
+                className="rounded-lg border border-teal-200 px-4 py-2 text-sm font-medium text-teal-700 hover:bg-teal-50 disabled:opacity-60"
               >
                 {guardando ? 'Guardando...' : 'Guardar ficha'}
               </button>
+              {/* Fase 41.1 "vericuetos" (pedido de Carlos): el dropdown de
+                  Estado quedaba perdido entre los otros campos del
+                  encabezado -- este botón es la acción prominente para
+                  cerrar la toma de medidas y avisar que ya está lista para
+                  presupuestar, sin que el operador tenga que acordarse de
+                  ir a cambiar el select a mano. */}
+              {estado !== 'lista' && estado !== 'convertida' && (
+                <button
+                  onClick={() => handleSave('lista')}
+                  disabled={guardando}
+                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {guardando ? 'Guardando...' : 'Marcar como Lista y continuar'}
+                </button>
+              )}
             </div>
           </div>
         </Dialog.Content>
