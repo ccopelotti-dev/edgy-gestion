@@ -22,11 +22,13 @@ import {
   Loader2,
   Mail,
   MessageCircle,
+  HandCoins,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { descargarPresupuestoPdf } from '../lib/pdfComprobantes';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
+import { buscarSenaPendiente } from '../lib/senaHelpers';
 import {
   usePresupuestos,
   useClientes,
@@ -38,7 +40,7 @@ import {
   Amount,
   EmptyState,
 } from '../components/ventas/display';
-import { PresupuestoDialog, ComprobanteDialog } from '../components/ventas/dialogs';
+import { PresupuestoDialog, ComprobanteDialog, SenaDialog } from '../components/ventas/dialogs';
 import {
   formatDate,
   formatARS,
@@ -73,7 +75,7 @@ const PREFIJO_PRESUPUESTO = 'PRE';
 export default function Presupuestos() {
   const todosPresupuestos = usePresupuestos();
   const clientes = useClientes();
-  const { ordenes, config, nextNumeroComprobante } = useVentas();
+  const { ordenes, cobros, config, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
 
   // ── Filtros ───────────────────────────────────────────────
@@ -204,6 +206,37 @@ export default function Presupuestos() {
     });
   };
 
+  // Fase 41.2: cobro de seña -- desenganchado a propósito de "Aprobar y
+  // crear orden" y de la Ficha de medida (ese campo Seña se carga en la
+  // visita a domicilio, ANTES de que exista un precio real, así que no es
+  // confiable como disparador automático). En vez de un prompt que
+  // interrumpe al aprobar, queda como una acción de a demanda -- un ícono
+  // propio en la fila del presupuesto, disponible en cualquier momento
+  // mientras el presupuesto siga vivo (el cliente puede confirmar hoy y
+  // venir a pagar la seña recién unos días después).
+  const [senaDialogPresupuesto, setSenaDialogPresupuesto] = useState<Presupuesto | null>(null);
+
+  const handleCobrarSena = (data: { monto: number; medioPago: MedioPago }) => {
+    if (!senaDialogPresupuesto) return;
+    const presupuesto = senaDialogPresupuesto;
+    const pct = presupuesto.total > 0 ? (data.monto / presupuesto.total) * 100 : 0;
+    dispatch({
+      type: 'ADD_COBRO',
+      payload: {
+        id: generarId(),
+        clienteId: presupuesto.clienteId,
+        fecha: nowISO().split('T')[0],
+        monto: data.monto,
+        medioPago: data.medioPago,
+        imputaciones: [],
+        presupuestoId: presupuesto.id,
+        notas: `Seña — Presupuesto ${formatNumero(PREFIJO_PRESUPUESTO, presupuesto.numero)} (${formatPct(pct)} del total).`,
+        createdAt: nowISO(),
+      },
+    });
+    setSenaDialogPresupuesto(null);
+  };
+
   // Confirma un presupuesto en borrador (pasa a 'enviado') sin necesidad de
   // mandarlo por email/WhatsApp -- desbloquea "Aprobar y crear orden" y
   // "Facturar directamente". Reutiliza el mismo dispatch que ya usaba el
@@ -247,11 +280,12 @@ export default function Presupuestos() {
     // así que este es el número que le va a tocar a este comprobante en
     // particular (mismo criterio que Comprobantes.tsx/PuntoDeVenta.tsx).
     const numeroAsignado = nextNumeroComprobante[data.tipo];
+    const comprobanteId = generarId();
 
     dispatch({
       type: 'ADD_COMPROBANTE',
       payload: {
-        id: generarId(),
+        id: comprobanteId,
         tipo: data.tipo,
         modoEmision: data.modoEmision,
         clienteId: data.clienteId,
@@ -270,6 +304,20 @@ export default function Presupuestos() {
         updatedAt: nowISO(),
       },
     });
+
+    // Fase 41.2: si este presupuesto ya tiene una seña cobrada (al
+    // aprobarlo) sin imputar todavía, se aplica acá contra la factura
+    // recién creada -- así el saldo pendiente del comprobante ya refleja
+    // ese descuento en vez de mostrar el total bruto.
+    if (data.tipo === 'factura' && presupuestoParaFacturar) {
+      const sena = buscarSenaPendiente(cobros, presupuestoParaFacturar.id);
+      if (sena) {
+        dispatch({
+          type: 'IMPUTAR_COBRO',
+          payload: { cobroId: sena.cobroId, comprobanteId, montoImputado: Math.min(sena.montoDisponible, total) },
+        });
+      }
+    }
 
     // Fase 22b: cierre de un gap pre-existente -- "Facturar directamente"
     // desde acá nunca había descontado stock ni activado garantía para
@@ -466,6 +514,7 @@ export default function Presupuestos() {
                     generandoPdf={generandoPdfId === pres.id}
                     onEnviarEmail={() => handleEnviarEmail(pres, cliente)}
                     onEnviarWhatsapp={() => handleEnviarWhatsapp(pres, cliente)}
+                    onCobrarSena={() => setSenaDialogPresupuesto(pres)}
                   />
                 );
               })}
@@ -558,6 +607,18 @@ export default function Presupuestos() {
           modoEmisionDefault={config.modoEmisionDefault}
         />
       )}
+
+      {/* Fase 41.2: cobro de seña -- acción de a demanda, ver ícono en Acciones */}
+      {senaDialogPresupuesto && (
+        <SenaDialog
+          open={Boolean(senaDialogPresupuesto)}
+          onOpenChange={(open) => {
+            if (!open) setSenaDialogPresupuesto(null);
+          }}
+          presupuesto={senaDialogPresupuesto}
+          onConfirmar={handleCobrarSena}
+        />
+      )}
     </div>
   );
 }
@@ -580,6 +641,7 @@ interface PresupuestoRowProps {
   generandoPdf: boolean;
   onEnviarEmail: () => void;
   onEnviarWhatsapp: () => void;
+  onCobrarSena: () => void;
 }
 
 function PresupuestoRow({
@@ -598,6 +660,7 @@ function PresupuestoRow({
   generandoPdf,
   onEnviarEmail,
   onEnviarWhatsapp,
+  onCobrarSena,
 }: PresupuestoRowProps) {
   const p = presupuesto;
 
@@ -678,6 +741,14 @@ function PresupuestoRow({
                   <XCircle className="h-3.5 w-3.5" />
                 </button>
               </>
+            )}
+            {/* Fase 41.2: cobro de seña -- disponible en enviado/aprobado
+                (el cliente puede confirmar y venir a pagar más adelante),
+                no solo en el momento de aprobar. */}
+            {(p.estado === 'enviado' || p.estado === 'aprobado') && (
+              <button onClick={onCobrarSena} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cobrar seña">
+                <HandCoins className="h-3.5 w-3.5" />
+              </button>
             )}
             {p.estado === 'aprobado' && ordenNumero && (
               <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full whitespace-nowrap">

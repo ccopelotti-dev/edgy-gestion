@@ -30,6 +30,7 @@ import {
   useVentasDispatch,
 } from '../data/store';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
+import { buscarSenaPendiente } from '../lib/senaHelpers';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -76,7 +77,7 @@ import {
 export default function Ordenes() {
   const todasOrdenes = useOrdenes();
   const clientes = useClientes();
-  const { comprobantes, config, nextNumeroComprobante } = useVentas();
+  const { comprobantes, cobros, config, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
 
   // Fase 8e (cierre de 8d): el motor de ordenes_venta es el mismo para
@@ -458,6 +459,21 @@ export default function Ordenes() {
           createdAt: nowISO(),
         },
       });
+    }
+
+    // Fase 41.2: si la orden viene de un presupuesto que ya tiene una seña
+    // cobrada (al aprobarlo, ver Presupuestos.tsx handleAprobar/SenaDialog)
+    // sin imputar todavía, se aplica acá contra la factura recién creada --
+    // mismo mecanismo que el bloque de Mercado Pago de arriba, pero para un
+    // cobro que ya existía de antes en vez de crearse ahora.
+    if (data.tipo === 'factura') {
+      const sena = buscarSenaPendiente(cobros, ordenParaFacturar?.presupuestoId);
+      if (sena) {
+        dispatch({
+          type: 'IMPUTAR_COBRO',
+          payload: { cobroId: sena.cobroId, comprobanteId, montoImputado: Math.min(sena.montoDisponible, total) },
+        });
+      }
     }
 
     setComprobanteDialogOpen(false);

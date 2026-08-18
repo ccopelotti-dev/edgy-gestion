@@ -99,6 +99,12 @@ type VentasAction =
   | { type: 'SET_AFIP_COMPROBANTE'; payload: { id: string; afip: DatosAfip } }
   | { type: 'ACTUALIZAR_COBRO_COMPROBANTE'; payload: { comprobanteId: string; montoCobrado: number } }
   | { type: 'ADD_COBRO'; payload: Omit<Cobro, 'numero'> }
+  // Fase 41.2: imputa un Cobro YA EXISTENTE (ej. una seña cobrada al
+  // aprobar el presupuesto, antes de que hubiera factura) contra un
+  // Comprobante recién emitido. A diferencia de ADD_COBRO, acá NO entra
+  // dinero nuevo (ya se contabilizó al cobrar la seña) -- es pura
+  // reasignación contable, así que NO toca Cliente.saldoCuentaCorriente.
+  | { type: 'IMPUTAR_COBRO'; payload: { cobroId: string; comprobanteId: string; montoImputado: number } }
   | { type: 'UPDATE_CONFIG'; payload: Partial<VentasConfig> }
   | { type: 'SET_STATE'; payload: VentasState };
 
@@ -421,6 +427,32 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
       return { ...state, cobros: [...state.cobros, cobro], nextNumeroCobro: numero + 1, comprobantes, clientes };
     }
 
+    case 'IMPUTAR_COBRO': {
+      const { cobroId, comprobanteId, montoImputado } = action.payload;
+      const cobros = state.cobros.map((c) =>
+        c.id === cobroId ? { ...c, imputaciones: [...c.imputaciones, { comprobanteId, montoImputado }] } : c,
+      );
+
+      const comprobantes = state.comprobantes.map((c) => {
+        if (c.id !== comprobanteId) return c;
+        const nuevoMontoCobrado = c.montoCobrado + montoImputado;
+        const nuevoSaldoPendiente = c.total - nuevoMontoCobrado;
+        let estado: EstadoComprobante = c.estado;
+        if (c.estado !== 'anulado') {
+          // Misma tolerancia de 1 centavo que ADD_COBRO -- ver comentario ahí.
+          if (nuevoSaldoPendiente <= 0.01) estado = 'cobrado';
+          else if (nuevoMontoCobrado > 0) estado = 'cobrado_parcial';
+        }
+        return { ...c, montoCobrado: nuevoMontoCobrado, saldoPendiente: Math.max(0, nuevoSaldoPendiente), estado, updatedAt: now };
+      });
+
+      // A propósito NO se toca Cliente.saldoCuentaCorriente acá: el dinero
+      // de la seña ya se descontó de ese saldo cuando se creó el Cobro
+      // (ADD_COBRO). Esto solo reasigna ese cobro ya contabilizado contra
+      // el comprobante nuevo.
+      return { ...state, cobros, comprobantes };
+    }
+
     case 'UPDATE_CONFIG':
       return { ...state, config: { ...state.config, ...action.payload } };
 
@@ -597,6 +629,7 @@ function cobroToRow(c: Cobro, clienteId: string) {
     fecha: c.fecha,
     monto: c.monto,
     medio_pago: c.medioPago,
+    presupuesto_id: c.presupuestoId ?? null,
     notas: c.notas ?? null,
   };
 }
@@ -872,6 +905,24 @@ function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId:
       return;
     }
 
+    case 'IMPUTAR_COBRO': {
+      const { cobroId, comprobanteId, montoImputado } = action.payload;
+      supabase
+        .from('cobro_imputaciones')
+        .insert({ id: generarId(), cobro_id: cobroId, comprobante_id: comprobanteId, monto_imputado: montoImputado })
+        .then(logErr('imputación de cobro (seña facturada)'));
+
+      const c = nextState.comprobantes.find((x) => x.id === comprobanteId);
+      if (c) {
+        supabase
+          .from('comprobantes_venta')
+          .update({ monto_cobrado: c.montoCobrado, saldo_pendiente: c.saldoPendiente, estado: c.estado })
+          .eq('id', c.id)
+          .then(logErr('comprobante actualizado por imputación de seña'));
+      }
+      return;
+    }
+
     default:
       return;
   }
@@ -1127,6 +1178,7 @@ async function fetchVentasState(): Promise<VentasState> {
     monto: Number(r.monto),
     medioPago: r.medio_pago,
     imputaciones: impByCobro.get(r.id) ?? [],
+    presupuestoId: r.presupuesto_id ?? undefined,
     notas: r.notas ?? undefined,
     createdAt: r.created_at,
   }));

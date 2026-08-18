@@ -37,7 +37,7 @@ import {
   clienteConsumidorFinal,
 } from '../../types';
 
-import { formatARS, todayISO } from '../../lib/format';
+import { formatARS, formatPct, todayISO } from '../../lib/format';
 import { esCuitValido } from '@/lib/validarCuit';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -1624,6 +1624,95 @@ export function CobroDialog({
             <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
             <button className={btnPrimary} onClick={handleSave}>
               Guardar
+            </button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── 3b. SenaDialog ──────────────────────────────────────────
+// Fase 41.2: cobro de seña de un presupuesto -- acción de a demanda desde
+// el ícono "$" en Presupuestos.tsx (Acciones), NO un paso obligado de
+// "Aprobar y crear orden": el cliente puede confirmar el presupuesto hoy y
+// venir a pagar la seña recién más adelante, así que queda disponible en
+// cualquier momento mientras el presupuesto siga vivo. A propósito NO
+// reutiliza CobroDialog: acá todavía no existe ningún comprobante contra el
+// cual imputar (la venta ni se facturó), así que la tabla de imputación de
+// CobroDialog no aplica -- este es un cobro "suelto", que se imputa recién
+// más adelante al facturar (ver IMPUTAR_COBRO en data/store.tsx). El monto
+// cobrado ahora sí impacta la cuenta corriente del cliente y Tesorería, vía
+// el mismo ADD_COBRO de siempre.
+
+interface SenaDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  presupuesto: Presupuesto;
+  onConfirmar: (data: { monto: number; medioPago: MedioPago }) => void;
+}
+
+export function SenaDialog({ open, onOpenChange, presupuesto, onConfirmar }: SenaDialogProps) {
+  const [monto, setMonto] = useState(0);
+  const [medioPago, setMedioPago] = useState<MedioPago>('efectivo');
+
+  useEffect(() => {
+    if (open) {
+      setMonto(0);
+      setMedioPago('efectivo');
+    }
+  }, [open]);
+
+  const pct = presupuesto.total > 0 && monto > 0 ? (monto / presupuesto.total) * 100 : 0;
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-4">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">
+              Cobrar seña — Presupuesto #{presupuesto.numero}
+            </Dialog.Title>
+            <Dialog.Close className={btnIcon}>
+              <X className="w-5 h-5" />
+            </Dialog.Close>
+          </div>
+
+          <p className="text-sm text-gray-600 mb-5">
+            Total del presupuesto: <span className="font-medium text-gray-900">{formatARS(presupuesto.total)}</span>.
+            Cargá el monto que el cliente vino a pagar como seña{monto > 0 ? ` (${formatPct(pct)} del total)` : ''}.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <div>
+              <label className={labelClass}>Monto a cobrar</label>
+              <input
+                className={inputClass}
+                type="number"
+                min={0}
+                step={0.01}
+                value={monto}
+                onChange={(e) => setMonto(Number(e.target.value))}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Medio de pago</label>
+              <select className={selectClass} value={medioPago} onChange={(e) => setMedioPago(e.target.value as MedioPago)}>
+                {(Object.entries(MEDIO_PAGO_LABEL) as [MedioPago, string][])
+                  .filter(([val]) => val !== 'cuenta_corriente')
+                  .map(([val, label]) => (
+                    <option key={val} value={val}>{label}</option>
+                  ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={() => onConfirmar({ monto, medioPago })} disabled={monto <= 0}>
+              Registrar cobro de seña
             </button>
           </div>
         </Dialog.Content>

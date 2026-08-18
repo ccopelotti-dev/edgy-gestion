@@ -407,6 +407,12 @@ export interface Cobro {
   monto: number;
   medioPago: MedioPago;
   imputaciones: ImputacionCobro[];
+  /** Fase 41.2: vínculo opcional a un Presupuesto -- usado por el cobro de
+   * seña (ver Presupuestos.tsx handleAprobar/SenaDialog). El cobro nace acá
+   * SIN imputar a ningún comprobante (todavía no existe factura); cuando
+   * ese presupuesto/orden se factura más adelante, se busca por este campo
+   * y se imputa recién ahí (ver IMPUTAR_COBRO en data/store.tsx). */
+  presupuestoId?: string;
   notas?: string;
   createdAt: string;
 }
