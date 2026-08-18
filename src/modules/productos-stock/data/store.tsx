@@ -94,6 +94,7 @@ import type {
   UnidadMedida,
   MotivoAjuste,
 } from '../types'
+import { convertirCantidad, unidadLabel } from '../types'
 import { seedState } from './seed'
 import { supabase } from '@/lib/supabase'
 import { resolverPuntoVentaId, ajustarStockPuntoVenta, ajustarStockPlano } from '@/lib/puntoVenta'
@@ -2850,9 +2851,42 @@ export async function registrarProduccionConfirmada(
   const insumoIdsAfectados = new Set<string>()
   let puntoVentaId: string | null = null
 
+  // La unidad de cada línea de fórmula es independiente de la unidad nativa
+  // del insumo (ej. una receta puede cargarse "en gramos" para precisión
+  // aunque el insumo se compre y stockee "por kg"). Sin convertir acá, se
+  // descontaría del stock real la cantidad cruda de la línea en la unidad
+  // equivocada (bug real: 800 "gramo" descontando 800 kg de stock). Se
+  // traen las unidades nativas de los insumos de la fórmula en un solo
+  // batch antes del loop.
+  const insumoIdsFormula = formula.lineas
+    .filter((l) => l.tipo === 'insumo' && l.insumoId)
+    .map((l) => l.insumoId as string)
+  const unidadesNativas = new Map<string, UnidadMedida>()
+  if (insumoIdsFormula.length > 0) {
+    const { data: insumosRows, error: errInsumos } = await supabase
+      .from('insumos')
+      .select('id, unidad')
+      .in('id', insumoIdsFormula)
+    if (errInsumos) {
+      return { ok: false, error: `No se pudieron verificar las unidades de los insumos: ${errInsumos.message}` }
+    }
+    for (const r of insumosRows ?? []) unidadesNativas.set(r.id, r.unidad as UnidadMedida)
+  }
+
   for (const linea of formula.lineas) {
     if (linea.tipo !== 'insumo' || !linea.insumoId) continue
-    const cantidadConsumida = linea.cantidad * factor
+
+    const unidadNativa = unidadesNativas.get(linea.insumoId)
+    const cantidadConvertida = unidadNativa
+      ? convertirCantidad(linea.cantidad, linea.unidad, unidadNativa)
+      : linea.cantidad
+    if (cantidadConvertida === null) {
+      return {
+        ok: false,
+        error: `La línea "${linea.descripcion}" está cargada en ${unidadLabel(linea.unidad)}, una unidad incompatible con la del insumo (${unidadLabel(unidadNativa!)}). Corregí la unidad de esa línea en la fórmula antes de producir.`,
+      }
+    }
+    const cantidadConsumida = cantidadConvertida * factor
 
     const ajuste = await aplicarAjusteAtomico({
       itemTipo: 'insumo',

@@ -57,6 +57,82 @@ export function unidadAbrev(u: UnidadMedida): string {
   return map[u] ?? u
 }
 
+// ─── Conversión de unidades (masa/volumen) ───────────────────────────────────
+//
+// Insumo.unidad (la unidad nativa de compra/stock) y LineaFormula.unidad (la
+// unidad en la que se carga esa línea puntual, ej. gramos por precisión en
+// una receta aunque el insumo se compre y stockee en kg) son campos
+// independientes -- eso es intencional (permite cargar "800 g" de un insumo
+// que se compra "por kg"), pero exige convertir cantidad y costo entre
+// ambas unidades en cada punto donde se usan juntas. Sin esto, "800 g" se
+// multiplicaba por el costo por kg tal cual (bug real: $7.760.000 en vez de
+// $7.760) y, peor, Producción descontaba 800 "kg" de stock real en vez de
+// 0.8. Solo se admite conversión dentro de la misma familia (masa o
+// volumen) -- el resto de las unidades (caja, pack, docena, etc.) no tiene
+// una conversión bien definida sin un dato adicional (ej. unidades por
+// caja), así que se tratan como no convertibles a propósito, en vez de
+// asumir 1:1 en silencio.
+
+type FamiliaUnidad = 'masa' | 'volumen'
+
+const FAMILIA_UNIDAD: Partial<Record<UnidadMedida, FamiliaUnidad>> = {
+  gramo: 'masa',
+  kg: 'masa',
+  ml: 'volumen',
+  litro: 'volumen',
+}
+
+// Factor de conversión a la unidad base de la familia (gramo para masa, ml
+// para volumen).
+const FACTOR_A_BASE: Partial<Record<UnidadMedida, number>> = {
+  gramo: 1,
+  kg: 1000,
+  ml: 1,
+  litro: 1000,
+}
+
+export function familiaUnidad(u: UnidadMedida): FamiliaUnidad | null {
+  return FAMILIA_UNIDAD[u] ?? null
+}
+
+/** Unidades a las que `u` se puede convertir (incluye a `u` misma). Si `u`
+ * no pertenece a ninguna familia convertible, devuelve solo `[u]`. */
+export function unidadesCompatibles(u: UnidadMedida): UnidadMedida[] {
+  const fam = FAMILIA_UNIDAD[u]
+  if (!fam) return [u]
+  return (Object.keys(FAMILIA_UNIDAD) as UnidadMedida[]).filter((x) => FAMILIA_UNIDAD[x] === fam)
+}
+
+/** Convierte una cantidad expresada en `desde` a la unidad `hacia`.
+ * Devuelve null si no son de la misma familia -- el llamador debe tratar
+ * null como "conversión inválida", nunca asumir 1:1. */
+export function convertirCantidad(
+  cantidad: number,
+  desde: UnidadMedida,
+  hacia: UnidadMedida,
+): number | null {
+  if (desde === hacia) return cantidad
+  const factorDesde = FACTOR_A_BASE[desde]
+  const factorHacia = FACTOR_A_BASE[hacia]
+  if (factorDesde === undefined || factorHacia === undefined) return null
+  if (FAMILIA_UNIDAD[desde] !== FAMILIA_UNIDAD[hacia]) return null
+  return (cantidad * factorDesde) / factorHacia
+}
+
+/** Convierte un costo expresado en $/`desde` a $/`hacia` (misma familia). */
+export function convertirCostoPorUnidad(
+  costo: number,
+  desde: UnidadMedida,
+  hacia: UnidadMedida,
+): number | null {
+  if (desde === hacia) return costo
+  const factorDesde = FACTOR_A_BASE[desde]
+  const factorHacia = FACTOR_A_BASE[hacia]
+  if (factorDesde === undefined || factorHacia === undefined) return null
+  if (FAMILIA_UNIDAD[desde] !== FAMILIA_UNIDAD[hacia]) return null
+  return (costo / factorDesde) * factorHacia
+}
+
 // ─── IVA ────────────────────────────────────────────────────────────────────────
 
 export type AlicuotaIVA = 0 | 10.5 | 21 | 27

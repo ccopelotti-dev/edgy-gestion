@@ -34,6 +34,8 @@ import {
   UNIDADES,
   unidadAbrev,
   unidadLabel,
+  unidadesCompatibles,
+  convertirCostoPorUnidad,
   type UnidadMedida,
   type TipoLineaFormula,
   type LineaFormula,
@@ -450,7 +452,19 @@ function FormulaSection({
               </tr>
             </thead>
             <tbody>
-              {lineas.map((l) => (
+              {lineas.map((l) => {
+                // Insumo elegido para esta línea (si la hay) -- define de qué
+                // unidad "nativa" partimos para filtrar el desplegable y
+                // recalcular el costo al cambiar de unidad (ver conversión
+                // en types/index.ts).
+                const insumoLinea = isInsumo
+                  ? insumosOptions?.find((i) => i.id === l.insumoId)
+                  : undefined
+                const opcionesUnidad = insumoLinea
+                  ? unidadesCompatibles(insumoLinea.unidad)
+                  : UNIDADES.map((u) => u.value)
+
+                return (
                 <tr key={l.id} className="border-b last:border-0">
                   <td className="px-3 py-2">
                     {isInsumo ? (
@@ -498,15 +512,32 @@ function FormulaSection({
                     <select
                       className={cn(inputClass, 'text-xs')}
                       value={l.unidad}
-                      onChange={(e) =>
-                        onUpdateLine(l.id, {
-                          unidad: e.target.value as UnidadMedida,
-                        })
-                      }
+                      onChange={(e) => {
+                        const nuevaUnidad = e.target.value as UnidadMedida
+                        if (insumoLinea) {
+                          // Recalcula el costo unitario al convertir de la
+                          // unidad nativa del insumo a la elegida para la
+                          // línea (ej. $/kg -> $/g), en vez de dejar el
+                          // costo viejo multiplicado por una cantidad en
+                          // otra unidad (ver bug de "800 gramo x $9700/kg").
+                          const costoConvertido = convertirCostoPorUnidad(
+                            insumoLinea.costo,
+                            insumoLinea.unidad,
+                            nuevaUnidad,
+                          )
+                          onUpdateLine(l.id, {
+                            unidad: nuevaUnidad,
+                            costoUnitario: costoConvertido ?? l.costoUnitario,
+                            costoUnitarioTexto: decimalATexto(costoConvertido ?? l.costoUnitario),
+                          })
+                        } else {
+                          onUpdateLine(l.id, { unidad: nuevaUnidad })
+                        }
+                      }}
                     >
-                      {UNIDADES.map((u) => (
-                        <option key={u.value} value={u.value}>
-                          {u.label}
+                      {opcionesUnidad.map((v) => (
+                        <option key={v} value={v}>
+                          {unidadLabel(v)}
                         </option>
                       ))}
                     </select>
@@ -537,7 +568,8 @@ function FormulaSection({
                     </Button>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
