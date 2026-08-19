@@ -728,7 +728,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                     {tipo === 'cortinas' && (
                       <div className="mt-3 border-t border-gray-100 pt-3">
                         <div className="mb-1 flex items-center justify-between">
-                          <label className="text-sm font-medium text-gray-700">Medidas (Ancho × Alto por paño)</label>
+                          <label className="text-sm font-medium text-gray-700">Medidas (Ancho × Alto por paño, en metros)</label>
                           <button
                             onClick={() => agregarPano(it.key)}
                             className="flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 hover:bg-teal-100"

@@ -1339,7 +1339,7 @@ export function InsumoDialog({
                   ) : (
                     'un producto'
                   )}
-                  . Nombre, rubro, sub-rubro, unidad, stock mínimo y costo se
+                  . Nombre, rubro, sub-rubro, unidad, ancho de rollo, stock mínimo y costo se
                   sincronizan solos desde ahí -- se bloquean acá para que un
                   cambio manual no se pise en silencio la próxima vez que se
                   guarde el producto.
