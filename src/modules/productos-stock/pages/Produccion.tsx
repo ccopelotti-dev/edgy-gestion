@@ -195,7 +195,11 @@ export default function Produccion() {
         cantidadRealProducida: formulaAMedida.cantidadProducida,
         fecha: fechaAMedida,
         notas: notasAMedida || undefined,
-        fichaItem: { id: pedidoSeleccionado.itemId, panos: pedidoSeleccionado.panos },
+        fichaItem: {
+          id: pedidoSeleccionado.itemId,
+          panos: pedidoSeleccionado.panos,
+          cantidadItem: pedidoSeleccionado.cantidadItem,
+        },
       },
       formulaAMedida,
       cliente.id,

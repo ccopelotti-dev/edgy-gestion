@@ -36,6 +36,7 @@ const VALIDEZ_DIAS_DEFAULT = 15;
 function descripcionItem(it: ItemFichaMedida): string {
   const partes: string[] = [it.producto];
   if (it.tela) partes.push(`Tela: ${it.tela}`);
+  if (it.color) partes.push(`Color: ${it.color}`);
 
   if (it.medida) partes.push(`Medida: ${it.medida}`);
   if (it.peso) partes.push(`Peso: ${it.peso}`);

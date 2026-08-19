@@ -53,6 +53,7 @@ interface ItemFormRow {
    * del catálogo -- ver comentario en types/index.ts. */
   productoId: string;
   tela: string;
+  color: string;
   textoCantidad: string;
   medida: string;
   peso: string;
@@ -69,6 +70,7 @@ function nuevaFilaItem(): ItemFormRow {
     producto: '',
     productoId: '',
     tela: '',
+    color: '',
     textoCantidad: '1',
     medida: '',
     peso: '',
@@ -90,6 +92,7 @@ function itemFormAFila(it: ItemFichaMedida): ItemFormRow {
     producto: it.producto,
     productoId: it.productoId ?? '',
     tela: it.tela ?? '',
+    color: it.color ?? '',
     textoCantidad: String(it.cantidad ?? 1),
     medida: it.medida ?? '',
     peso: it.peso ?? '',
@@ -476,6 +479,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
         producto: it.producto.trim(),
         productoId: it.productoId || undefined,
         tela: it.tela.trim() || undefined,
+        color: it.color.trim() || undefined,
         cantidad: parseDecimal(it.textoCantidad) || 1,
         medida: tipo === 'generica' ? it.medida.trim() || undefined : undefined,
         peso: tipo === 'generica' ? it.peso.trim() || undefined : undefined,
@@ -775,6 +779,15 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                         />
                       </div>
                       <div>
+                        <label className="mb-1 block text-xs text-gray-500">Color</label>
+                        <input
+                          type="text"
+                          value={it.color}
+                          onChange={(e) => actualizarItem(it.key, { color: e.target.value })}
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
                         <label className="mb-1 block text-xs text-gray-500">Cantidad</label>
                         <input
                           type="text"
@@ -861,6 +874,19 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                         </div>
                       </div>
                     )}
+
+                    {/* Fase 41.6: it.notas ya existía en el modelo de datos y
+                        en el PDF (ver generarFichaMedidaPdf.ts), pero nunca
+                        tuvo un input real acá -- quedaba un campo muerto. */}
+                    <div className="mt-3 border-t border-gray-100 pt-3">
+                      <label className="mb-1 block text-xs text-gray-500">Notas del ítem</label>
+                      <textarea
+                        value={it.notas}
+                        onChange={(e) => actualizarItem(it.key, { notas: e.target.value })}
+                        rows={2}
+                        className={inputClass}
+                      />
+                    </div>
 
                     <div className="mt-2 flex justify-end">
                       <button

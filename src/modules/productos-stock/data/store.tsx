@@ -2829,8 +2829,14 @@ export async function registrarProduccionConfirmada(
      * un ítem puntual de Ficha de medida. Las cantidades de cada línea
      * salen de sus paños (m2/ml/unidad, ver calcularCantidadesAMedida) en
      * vez de `factor`, y el lote NO suma stock genérico del producto
-     * terminado (ver Producto.modalidadStock en types/index.ts). */
-    fichaItem?: { id: string; panos: PanoParaCalculo[] }
+     * terminado (ver Producto.modalidadStock en types/index.ts).
+     *
+     * `cantidadItem` (Fase 41.6, cierre de gap pedido por Carlos): el
+     * campo Cantidad del ítem de la ficha -- ej. "2" si son dos cortinas
+     * idénticas con estos mismos paños. Antes se ignoraba acá (solo
+     * multiplicaba el precio en el Presupuesto, nunca el consumo real de
+     * insumos), lo que dejaba el stock corto si se cargaba más de 1. */
+    fichaItem?: { id: string; panos: PanoParaCalculo[]; cantidadItem?: number }
   },
   formula: Formula,
   clienteId: string,
@@ -2852,6 +2858,10 @@ export async function registrarProduccionConfirmada(
   // Modo a medida: no existe "el doble de este pedido" -- el factor de
   // lote solo tiene sentido para fabricación a stock genérico.
   const factorEfectivo = esAMedida ? 1 : factor
+  // Fase 41.6: multiplicador real de "cuántas veces se repite este mismo
+  // paño" en modo a medida (Cantidad del ítem de la ficha). 1 en modo
+  // depósito -- ahí el escalado ya lo cubre `factor`.
+  const multiplicadorCantidadItem = esAMedida ? fichaItem?.cantidadItem || 1 : 1
 
   const loteId = uid()
   const nuevaProduccion: Produccion = {
@@ -2920,7 +2930,7 @@ export async function registrarProduccionConfirmada(
         error: `La línea "${linea.descripcion}" está cargada en ${unidadLabel(linea.unidad)}, una unidad incompatible con la del insumo (${unidadLabel(unidadNativa!)}). Corregí la unidad de esa línea en la fórmula antes de producir.`,
       }
     }
-    const cantidadConsumida = cantidadConvertida * factorEfectivo
+    const cantidadConsumida = cantidadConvertida * factorEfectivo * multiplicadorCantidadItem
 
     const ajuste = await aplicarAjusteAtomico({
       itemTipo: 'insumo',

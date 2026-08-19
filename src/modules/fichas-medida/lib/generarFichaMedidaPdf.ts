@@ -28,19 +28,38 @@ function formatFechaCorta(iso?: string): string {
   return `${d}/${m}/${y}`
 }
 
+/** Paños con ambas medidas cargadas -- son los únicos que se pueden
+ * dibujar en el esquema (ver dibujarEsquemaCortina). Un paño con solo
+ * ancho o solo alto no alcanza para un rectángulo proporcional. */
+function panosDibujables(item: ItemFichaMedida): { ancho: number; alto: number }[] {
+  return item.panos.filter((p): p is { id: string; ancho: number; alto: number } => Boolean(p.ancho && p.alto))
+}
+
 /** Arma las líneas de texto de un ítem -- la primera es el título
  * (producto + cantidad), el resto son detalles indentados. Cubre los dos
  * tipos de ficha (Genérica y Cortinas) leyendo solo los campos que cada
- * una carga. */
-function descripcionItem(item: ItemFichaMedida): string[] {
+ * una carga.
+ *
+ * `conEsquema`: si el ítem va a llevar el dibujo técnico al lado (ver
+ * dibujarEsquemaCortina), el detalle de cada paño ya queda representado
+ * ahí -- acá alcanza con la cuenta ("Paños: 2"), no hace falta repetir
+ * ancho/alto de cada uno en texto. Si NO hay dibujo (ítem genérico, o
+ * paños sin medidas completas), se listan igual que antes para no perder
+ * el dato. */
+function descripcionItem(item: ItemFichaMedida, conEsquema: boolean): string[] {
   const lineas: string[] = []
   lineas.push(`${item.producto}${item.cantidad && item.cantidad !== 1 ? ` · cant. ${item.cantidad}` : ''}`)
   if (item.tela) lineas.push(`Tela: ${item.tela}`)
-  for (const pano of item.panos) {
-    const medida = [pano.ancho ? `Ancho ${pano.ancho}` : null, pano.alto ? `Alto ${pano.alto}` : null]
-      .filter(Boolean)
-      .join(' x ')
-    if (medida) lineas.push(`Paño: ${medida}`)
+  if (item.color) lineas.push(`Color: ${item.color}`)
+  if (conEsquema) {
+    if (item.panos.length > 0) lineas.push(`Paños: ${item.panos.length}`)
+  } else {
+    for (const pano of item.panos) {
+      const medida = [pano.ancho ? `Ancho ${pano.ancho}` : null, pano.alto ? `Alto ${pano.alto}` : null]
+        .filter(Boolean)
+        .join(' x ')
+      if (medida) lineas.push(`Paño: ${medida}`)
+    }
   }
   if (item.tipoBarral) lineas.push(`Barral: ${item.tipoBarral}${item.incluyeBarral ? '' : ' (no incluido)'}`)
   if (item.tipoCortina) lineas.push(`Tipo de cortina: ${item.tipoCortina}`)
@@ -48,6 +67,76 @@ function descripcionItem(item: ItemFichaMedida): string[] {
   if (item.peso) lineas.push(`Peso: ${item.peso}`)
   if (item.notas) lineas.push(`Notas: ${item.notas}`)
   return lineas
+}
+
+function formatMedidaCm(metros: number): string {
+  return String(Math.round(metros * 100))
+}
+
+// Fase 41.6 (pedido de Carlos, 19-20/08): esquema técnico del ítem de
+// cortina -- reemplaza la idea original de "dibujo artístico" (que
+// hubiera necesitado arte por cada terminación) por algo que se arma
+// solo con datos reales: un rectángulo por paño, proporcional a sus
+// medidas, con ancho y alto escritos en cada lado. El título del
+// recuadro es el Tipo de cortina elegido (Presilla alta, Pellizco
+// doble, etc.) en vez de un dibujo distinto por variante -- un solo
+// esquema genérico sirve para todas, el título aclara cuál es.
+const ESQUEMA_ANCHO = 42
+const ESQUEMA_ALTO_CANVAS = 28
+const ESQUEMA_TITULO_ALTO = 5
+const ESQUEMA_PADDING = 3
+const ESQUEMA_COTA_ANCHO_ALTO = 5
+/** Alto total que ocupa el recuadro (fijo, no depende de los datos --
+ * así el llamador puede reservar el espacio antes de dibujar). */
+const ESQUEMA_ALTO_TOTAL = ESQUEMA_TITULO_ALTO + ESQUEMA_PADDING + ESQUEMA_ALTO_CANVAS + ESQUEMA_COTA_ANCHO_ALTO + 3
+
+function dibujarEsquemaCortina(
+  doc: jsPDF,
+  x: number,
+  yTop: number,
+  titulo: string,
+  panos: { ancho: number; alto: number }[],
+  color: string,
+): void {
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(8)
+  doc.setTextColor(color)
+  doc.text(titulo, x + ESQUEMA_ANCHO / 2, yTop + ESQUEMA_TITULO_ALTO - 1, { align: 'center' })
+
+  const canvasTop = yTop + ESQUEMA_TITULO_ALTO + ESQUEMA_PADDING
+  const canvasLeft = x + ESQUEMA_PADDING
+  const canvasWidth = ESQUEMA_ANCHO - ESQUEMA_PADDING * 2
+  const gap = 2
+
+  const sumaAnchos = panos.reduce((s, p) => s + p.ancho, 0)
+  const maxAlto = Math.max(...panos.map((p) => p.alto))
+  const escala = Math.min((canvasWidth - gap * (panos.length - 1)) / sumaAnchos, ESQUEMA_ALTO_CANVAS / maxAlto)
+
+  let cursorX = canvasLeft
+  doc.setDrawColor(140, 140, 140)
+  doc.setLineWidth(0.25)
+  for (const p of panos) {
+    const w = p.ancho * escala
+    const h = p.alto * escala
+    doc.rect(cursorX, canvasTop, w, h)
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(6)
+    doc.setTextColor('#666666')
+    // Cota de alto: texto vertical pegado al borde izquierdo del paño.
+    doc.text(`${formatMedidaCm(p.alto)} cm`, cursorX + 2.2, canvasTop + h / 2, { angle: 90 })
+    // Cota de ancho: centrada debajo del paño, todas a la misma altura
+    // (base del canvas) aunque los paños tengan distinto alto.
+    doc.text(`${formatMedidaCm(p.ancho)} cm`, cursorX + w / 2, canvasTop + ESQUEMA_ALTO_CANVAS + ESQUEMA_COTA_ANCHO_ALTO, {
+      align: 'center',
+    })
+
+    cursorX += w + gap
+  }
+
+  doc.setDrawColor(225, 225, 225)
+  doc.setLineWidth(0.2)
+  doc.roundedRect(x, yTop - 2, ESQUEMA_ANCHO, ESQUEMA_ALTO_TOTAL, 1.5, 1.5)
 }
 
 export async function generarFichaMedidaPdf(
@@ -139,29 +228,43 @@ export async function generarFichaMedidaPdf(
   y += 6
 
   for (const item of ficha.items) {
-    const lineas = descripcionItem(item)
+    const panosDibujo = ficha.tipo === 'cortinas' ? panosDibujables(item) : []
+    const conEsquema = panosDibujo.length > 0
+    const lineas = descripcionItem(item, conEsquema)
     if (lineas.length === 0) continue
-    if (y > alturaMaxima) {
+
+    // Alto del bloque: si hay esquema, es fijo (ESQUEMA_ALTO_TOTAL) salvo
+    // que el texto sea más largo (ítem con muchos detalles); si no hay
+    // esquema, es el texto solo -- mismo criterio que antes.
+    const alturaTexto = 5 + (lineas.length - 1) * 4.5 + 3
+    const alturaBloque = conEsquema ? Math.max(ESQUEMA_ALTO_TOTAL + 3, alturaTexto) : alturaTexto
+
+    if (y + alturaBloque > alturaMaxima) {
       doc.addPage()
       y = 20
     }
+
+    const textoX = conEsquema ? marginX + ESQUEMA_ANCHO + 6 : marginX
+    const yInicioBloque = y
+
+    if (conEsquema) {
+      dibujarEsquemaCortina(doc, marginX, y, item.tipoCortina || 'Cortina', panosDibujo, color)
+    }
+
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(9.5)
     doc.setTextColor('#222222')
-    doc.text(lineas[0], marginX, y)
+    doc.text(lineas[0], textoX, y)
     y += 5
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8.5)
     doc.setTextColor('#666666')
     for (const linea of lineas.slice(1)) {
-      if (y > alturaMaxima) {
-        doc.addPage()
-        y = 20
-      }
-      doc.text(linea, marginX + 4, y)
+      doc.text(linea, textoX + 4, y)
       y += 4.5
     }
-    y += 3
+
+    y = yInicioBloque + alturaBloque
   }
   y += 4
 

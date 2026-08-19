@@ -65,6 +65,10 @@ export interface ItemFichaMedida {
    * cargado, el ítem sigue siendo solo texto libre, como hasta ahora. */
   productoId?: string
   tela?: string
+  /** Fase 41.6: color de la tela, separado de `tela` (que hoy es
+   * material/tipo de tela, ej. "Lanilla") -- a pedido de Carlos, para
+   * que ambos datos queden distinguibles en el detalle relevado. */
+  color?: string
   cantidad: number
   // Genérica
   medida?: string
