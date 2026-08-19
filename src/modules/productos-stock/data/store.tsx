@@ -3009,7 +3009,93 @@ export async function registrarProduccionConfirmada(
     fetchInsumosPorId([...insumoIdsAfectados]),
   ])
 
+  // Fase 41.3: si este lote cierra el último ítem a medida pendiente de una
+  // Orden compuesta 100% por ítems a medida (sin mezcla con stock
+  // genérico), avanza el estado de esa Orden a 'terminado' -- así el
+  // vendedor no tiene que ir a Órdenes a mano después de producir. Ver
+  // intentarCerrarOrdenAMedida más abajo para el criterio exacto.
+  if (fichaItem) {
+    await intentarCerrarOrdenAMedida(fichaItem.id, clienteId)
+  }
+
   return { ok: true, data: { produccion: nuevaProduccion, productos, insumos, movimientos } }
+}
+
+/**
+ * Fase 41.3 (pedido de Carlos, "unificar el proceso"): auto-avanza el
+ * estado de una Orden a 'terminado' cuando termina de producirse su
+ * último ítem a medida pendiente -- pero SOLO si la Orden está compuesta
+ * enteramente por ítems a medida (todos sus orden_venta_items vienen de
+ * la misma Ficha). Si mezcla con productos de catálogo genérico, no se
+ * toca nada y sigue el control manual de siempre en Órdenes: producir la
+ * cortina no significa que el resto de la orden esté listo para entregar.
+ *
+ * Este código solo se ejecuta desde el flujo de "producción a medida"
+ * (fichaItem presente), que a su vez solo existe si el tenant tiene
+ * Fichas de medida activo -- no es una regla de Punto Tex hardcodeada,
+ * es una regla del patrón "a medida" en general, y no toca la lógica de
+ * "Facturar" (sigue siendo estado === 'terminado' || 'entregado_parcial'
+ * para todos los rubros).
+ *
+ * Best-effort: no aborta la producción ya confirmada si algo acá falla
+ * (el lote y el descuento de stock ya quedaron guardados) -- solo se
+ * pierde el auto-avance y queda el camino manual de siempre.
+ */
+async function intentarCerrarOrdenAMedida(fichaItemId: string, clienteId: string): Promise<void> {
+  try {
+    const { data: itemRow } = await supabase
+      .from('ficha_medida_items')
+      .select('id, ficha_id')
+      .eq('id', fichaItemId)
+      .single()
+    if (!itemRow) return
+
+    const { data: fichaRow } = await supabase
+      .from('fichas_medida')
+      .select('id, presupuesto_id')
+      .eq('id', itemRow.ficha_id)
+      .single()
+    if (!fichaRow?.presupuesto_id) return
+
+    const { data: itemsFicha } = await supabase
+      .from('ficha_medida_items')
+      .select('id, producto_id')
+      .eq('ficha_id', fichaRow.id)
+      .not('producto_id', 'is', null)
+    if (!itemsFicha || itemsFicha.length === 0) return
+
+    const itemIds = itemsFicha.map((i: any) => i.id as string)
+    const { data: producidosRows } = await supabase
+      .from('producciones')
+      .select('ficha_item_id')
+      .in('ficha_item_id', itemIds)
+    const producidos = new Set((producidosRows ?? []).map((p: any) => p.ficha_item_id as string))
+    const todosProducidos = itemsFicha.every((i: any) => producidos.has(i.id))
+    if (!todosProducidos) return
+
+    const { data: ordenRow } = await supabase
+      .from('ordenes_venta')
+      .select('id, estado')
+      .eq('presupuesto_id', fichaRow.presupuesto_id)
+      .eq('cliente_id', clienteId)
+      .maybeSingle()
+    if (!ordenRow) return
+    if (['terminado', 'entregado_parcial', 'entregado', 'cancelado'].includes(ordenRow.estado)) return
+
+    const { data: ordenItemsRows } = await supabase
+      .from('orden_venta_items')
+      .select('producto_id')
+      .eq('orden_id', ordenRow.id)
+    const productoIdsFicha = new Set(itemsFicha.map((i: any) => i.producto_id as string))
+    const ordenEsPuraAMedida =
+      (ordenItemsRows ?? []).length > 0 &&
+      (ordenItemsRows ?? []).every((oi: any) => oi.producto_id && productoIdsFicha.has(oi.producto_id))
+    if (!ordenEsPuraAMedida) return
+
+    await supabase.from('ordenes_venta').update({ estado: 'terminado' }).eq('id', ordenRow.id)
+  } catch {
+    // best-effort -- ver comentario de la función
+  }
 }
 
 // ─── Producción a medida (Fase 41) ───────────────────────────────────────────
