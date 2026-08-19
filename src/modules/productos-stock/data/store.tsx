@@ -3098,7 +3098,14 @@ export async function fetchPedidosAMedidaPendientes(
     const estadoPresupuesto = ficha.presupuesto_id
       ? presupuestosPorId.get(ficha.presupuesto_id)
       : undefined
-    if (estadoPresupuesto === 'aprobado') continue // facturado -> pedido cerrado
+    // Solo se produce después de aprobado (mismo criterio que la seña,
+    // Fase 41.2: primero se aprueba, después se puede avanzar). Esta
+    // condición estaba invertida -- excluía justo el caso 'aprobado', que
+    // es el único momento en que el pedido debería aparecer acá para
+    // producir. Presupuesto no tiene un estado "facturado" propio (eso
+    // vive en Comprobantes/Orden); "cerrado" en la práctica ya lo cubre
+    // yaProducidos.has(item.id) de la línea de arriba.
+    if (estadoPresupuesto !== 'aprobado') continue
 
     pendientes.push({
       itemId: item.id,

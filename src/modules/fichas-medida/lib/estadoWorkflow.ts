@@ -60,11 +60,20 @@ export async function fetchEstadosWorkflow(
 
   for (const f of fichas) {
     const itemsDeEstaFicha = itemsAMedida.filter((i) => i.fichaId === f.id)
+    const presupuestoEstado = f.presupuestoId ? estadoPorPresupuesto.get(f.presupuestoId) : undefined
     resultado.set(f.id, {
-      presupuestoEstado: f.presupuestoId ? estadoPorPresupuesto.get(f.presupuestoId) : undefined,
+      presupuestoEstado,
       itemsAMedidaTotal: itemsDeEstaFicha.length,
       itemsAMedidaProducidos: itemsDeEstaFicha.filter((i) => producidos.has(i.itemId)).length,
-      primerItemPendienteId: itemsDeEstaFicha.find((i) => !producidos.has(i.itemId))?.itemId,
+      // El atajo "Ir a Producción" solo tiene sentido una vez aprobado el
+      // presupuesto -- fetchPedidosAMedidaPendientes (productos-stock/
+      // data/store.tsx) exige el mismo estado para que el pedido aparezca
+      // ahí, así que antes de aprobar este deep link llevaría a una lista
+      // vacía.
+      primerItemPendienteId:
+        presupuestoEstado === 'aprobado'
+          ? itemsDeEstaFicha.find((i) => !producidos.has(i.itemId))?.itemId
+          : undefined,
     })
   }
 
