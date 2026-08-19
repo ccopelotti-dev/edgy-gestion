@@ -95,42 +95,80 @@ export function familiaUnidad(u: UnidadMedida): FamiliaUnidad | null {
   return FAMILIA_UNIDAD[u] ?? null
 }
 
+// ─── Conversión metro ↔ m² por ancho de rollo (Fase 41.7) ────────────────────
+//
+// "metro" y "m2" no son la misma familia (una es longitud, la otra área) --
+// no existe un factor universal entre ambas, a diferencia de kg/gramo. Pero
+// para telas y materiales que se compran/stockean por metro LINEAL de un
+// rollo de ancho fijo, y se consumen por ÁREA en una fórmula (una cortina
+// necesita m² de tela, no metros lineales), sí hay un factor: el ancho del
+// rollo, propio de cada insumo/producto (Insumo.anchoRollo /
+// Producto.anchoRollo). 1 metro lineal de un rollo de X m de ancho = X m².
+// Sin ese dato cargado, metro y m2 siguen sin relación definida -- nunca se
+// asume 1:1 en silencio (mismo criterio que las familias de masa/volumen).
+function convertirPorAnchoRollo(desde: UnidadMedida, hacia: UnidadMedida, anchoRollo?: number): number | null {
+  if (!anchoRollo || anchoRollo <= 0) return null
+  if (desde === 'metro' && hacia === 'm2') return anchoRollo
+  if (desde === 'm2' && hacia === 'metro') return 1 / anchoRollo
+  return null
+}
+
 /** Unidades a las que `u` se puede convertir (incluye a `u` misma). Si `u`
- * no pertenece a ninguna familia convertible, devuelve solo `[u]`. */
-export function unidadesCompatibles(u: UnidadMedida): UnidadMedida[] {
+ * no pertenece a ninguna familia convertible, devuelve solo `[u]` -- salvo
+ * que se pase `anchoRollo`, en cuyo caso metro/m2 también se habilitan
+ * entre sí (ver convertirPorAnchoRollo). */
+export function unidadesCompatibles(u: UnidadMedida, anchoRollo?: number): UnidadMedida[] {
   const fam = FAMILIA_UNIDAD[u]
-  if (!fam) return [u]
-  return (Object.keys(FAMILIA_UNIDAD) as UnidadMedida[]).filter((x) => FAMILIA_UNIDAD[x] === fam)
+  const base = fam
+    ? (Object.keys(FAMILIA_UNIDAD) as UnidadMedida[]).filter((x) => FAMILIA_UNIDAD[x] === fam)
+    : [u]
+  if (anchoRollo && anchoRollo > 0 && (u === 'metro' || u === 'm2')) {
+    const par: UnidadMedida = u === 'metro' ? 'm2' : 'metro'
+    return Array.from(new Set([...base, par]))
+  }
+  return base
 }
 
 /** Convierte una cantidad expresada en `desde` a la unidad `hacia`.
- * Devuelve null si no son de la misma familia -- el llamador debe tratar
- * null como "conversión inválida", nunca asumir 1:1. */
+ * Devuelve null si no son convertibles -- el llamador debe tratar null
+ * como "conversión inválida", nunca asumir 1:1. `anchoRollo` habilita el
+ * caso especial metro↔m2 (ver comentario arriba). */
 export function convertirCantidad(
   cantidad: number,
   desde: UnidadMedida,
   hacia: UnidadMedida,
+  anchoRollo?: number,
 ): number | null {
   if (desde === hacia) return cantidad
   const factorDesde = FACTOR_A_BASE[desde]
   const factorHacia = FACTOR_A_BASE[hacia]
-  if (factorDesde === undefined || factorHacia === undefined) return null
-  if (FAMILIA_UNIDAD[desde] !== FAMILIA_UNIDAD[hacia]) return null
-  return (cantidad * factorDesde) / factorHacia
+  if (factorDesde !== undefined && factorHacia !== undefined && FAMILIA_UNIDAD[desde] === FAMILIA_UNIDAD[hacia]) {
+    return (cantidad * factorDesde) / factorHacia
+  }
+  const factorRollo = convertirPorAnchoRollo(desde, hacia, anchoRollo)
+  if (factorRollo !== null) return cantidad * factorRollo
+  return null
 }
 
-/** Convierte un costo expresado en $/`desde` a $/`hacia` (misma familia). */
+/** Convierte un costo expresado en $/`desde` a $/`hacia` (misma familia, o
+ * metro↔m2 con `anchoRollo`). */
 export function convertirCostoPorUnidad(
   costo: number,
   desde: UnidadMedida,
   hacia: UnidadMedida,
+  anchoRollo?: number,
 ): number | null {
   if (desde === hacia) return costo
   const factorDesde = FACTOR_A_BASE[desde]
   const factorHacia = FACTOR_A_BASE[hacia]
-  if (factorDesde === undefined || factorHacia === undefined) return null
-  if (FAMILIA_UNIDAD[desde] !== FAMILIA_UNIDAD[hacia]) return null
-  return (costo / factorDesde) * factorHacia
+  if (factorDesde !== undefined && factorHacia !== undefined && FAMILIA_UNIDAD[desde] === FAMILIA_UNIDAD[hacia]) {
+    return (costo / factorDesde) * factorHacia
+  }
+  // $/metro -> $/m2: si 1 metro (que tiene `anchoRollo` m2) cuesta $C,
+  // 1 m2 cuesta $C / anchoRollo. $/m2 -> $/metro: al revés.
+  const factorRollo = convertirPorAnchoRollo(desde, hacia, anchoRollo)
+  if (factorRollo !== null) return costo / factorRollo
+  return null
 }
 
 // ─── Producción a medida (Fase 41) ───────────────────────────────────────────────
@@ -515,6 +553,17 @@ export interface Producto {
    * Costo) y se recalcula solo la próxima vez que se guarde la fórmula.
    */
   margenGanancia?: number
+  /**
+   * Fase 41.7: ancho del rollo (en metros) para artículos que se compran/
+   * venden por metro lineal pero, usados como insumo de una fórmula,
+   * necesitan consumirse por m2 (ej. una tela: se vende "por metro" pero
+   * una cortina la gasta por área -- ver comentario de convertirCantidad/
+   * convertirCostoPorUnidad en este mismo archivo). undefined = no
+   * aplica (producto que no es un rollo, o metro/m2 no se van a mezclar
+   * para él). Si `esInsumo`, se espeja al insumo vinculado igual que
+   * costo/stock/unidad -- ver sincronizarInsumoDeProducto en data/store.tsx.
+   */
+  anchoRollo?: number
   createdAt: string
 }
 
@@ -551,6 +600,9 @@ export interface Insumo {
   esComercializable: boolean
   /** ID del producto vinculado (solo si esComercializable = true) */
   productoVinculadoId?: string
+  /** Fase 41.7: ver comentario en Producto.anchoRollo -- mismo campo,
+   * espejado si viene de un producto vinculado. */
+  anchoRollo?: number
   createdAt: string
 }
 

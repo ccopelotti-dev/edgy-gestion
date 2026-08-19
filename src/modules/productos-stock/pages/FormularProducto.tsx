@@ -403,7 +403,7 @@ interface SectionProps {
   icon: React.ElementType
   tipo: TipoLineaFormula
   lineas: LocalLinea[]
-  insumosOptions?: { id: string; nombre: string; costo: number; unidad: UnidadMedida }[]
+  insumosOptions?: { id: string; nombre: string; costo: number; unidad: UnidadMedida; anchoRollo?: number }[]
   onAddLine: (tipo: TipoLineaFormula) => void
   onUpdateLine: (id: string, updates: Partial<LocalLinea>) => void
   onDeleteLine: (id: string) => void
@@ -502,7 +502,7 @@ function FormulaSection({
                 // vuelve a tener más de una opción para poder corregirla a
                 // mano igual que antes.
                 const opcionesUnidad = insumoLinea
-                  ? Array.from(new Set([...unidadesCompatibles(insumoLinea.unidad), l.unidad]))
+                  ? Array.from(new Set([...unidadesCompatibles(insumoLinea.unidad, insumoLinea.anchoRollo), l.unidad]))
                   : UNIDADES.map((u) => u.value)
 
                 return (
@@ -565,6 +565,7 @@ function FormulaSection({
                             insumoLinea.costo,
                             insumoLinea.unidad,
                             nuevaUnidad,
+                            insumoLinea.anchoRollo,
                           )
                           onUpdateLine(l.id, {
                             unidad: nuevaUnidad,
@@ -716,6 +717,7 @@ export default function FormularProducto() {
         nombre: i.nombre,
         costo: i.costo,
         unidad: i.unidad,
+        anchoRollo: i.anchoRollo,
       })),
     [state.insumos],
   )
@@ -852,7 +854,7 @@ export default function FormularProducto() {
         if (l.tipo !== 'insumo' || !l.insumoId) return l
         const insumo = insumosOptions.find((i) => i.id === l.insumoId)
         if (!insumo) return l
-        const costoConvertido = convertirCostoPorUnidad(insumo.costo, insumo.unidad, l.unidad)
+        const costoConvertido = convertirCostoPorUnidad(insumo.costo, insumo.unidad, l.unidad, insumo.anchoRollo)
         if (costoConvertido === null) {
           // Unidad de la línea incompatible con la del insumo (no debería
           // pasar dado que el selector ya restringe las opciones, pero por

@@ -1052,6 +1052,8 @@ function productoToRow(p: Producto, clienteId: string) {
     margen_ganancia: p.margenGanancia ?? null,
     // Fase 41: ver comentario en types/index.ts (Producto.modalidadStock).
     modalidad_stock: p.modalidadStock ?? 'deposito',
+    // Fase 41.7: ver comentario en types/index.ts (Producto.anchoRollo).
+    ancho_rollo: p.anchoRollo ?? null,
   }
 }
 
@@ -1188,6 +1190,7 @@ function insumoToRow(i: Insumo, clienteId: string) {
     costo: i.costo,
     es_comercializable: i.esComercializable,
     producto_vinculado_id: i.productoVinculadoId || null,
+    ancho_rollo: i.anchoRollo ?? null,
   }
 }
 
@@ -1259,6 +1262,7 @@ function sincronizarInsumoDeProducto(producto: Producto, insumos: Insumo[]): Ins
               stockMinimo: producto.stockMinimo,
               costo: producto.costo,
               stock: producto.stock,
+              anchoRollo: producto.anchoRollo,
             }
           : i,
       )
@@ -1274,6 +1278,7 @@ function sincronizarInsumoDeProducto(producto: Producto, insumos: Insumo[]): Ins
       costo: producto.costo,
       esComercializable: true,
       productoVinculadoId: producto.id,
+      anchoRollo: producto.anchoRollo,
       createdAt: todayISO(),
     }
     return [...insumos, nuevo]
@@ -1304,6 +1309,7 @@ function sincronizarInsumoDeProducto(producto: Producto, insumos: Insumo[]): Ins
             stockMinimo: producto.stockMinimo,
             costo: producto.costo,
             stock: producto.stock,
+            anchoRollo: producto.anchoRollo,
           }
         : i,
     )
@@ -2100,6 +2106,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     servicioAsociadoObligatorio: r.servicio_asociado_obligatorio ?? false,
     margenGanancia: r.margen_ganancia ?? undefined,
     modalidadStock: (r.modalidad_stock as Producto['modalidadStock']) ?? 'deposito',
+    anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -2114,6 +2121,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     costo: Number(r.costo),
     esComercializable: r.es_comercializable,
     productoVinculadoId: r.producto_vinculado_id ?? undefined,
+    anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -2588,6 +2596,7 @@ async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
     servicioAsociadoObligatorio: r.servicio_asociado_obligatorio ?? false,
     margenGanancia: r.margen_ganancia ?? undefined,
     modalidadStock: (r.modalidad_stock as Producto['modalidadStock']) ?? 'deposito',
+    anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 }
@@ -2607,6 +2616,7 @@ async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
     costo: Number(r.costo),
     esComercializable: r.es_comercializable,
     productoVinculadoId: r.producto_vinculado_id ?? undefined,
+    anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 }
@@ -2900,15 +2910,21 @@ export async function registrarProduccionConfirmada(
     .filter((l) => l.tipo === 'insumo' && l.insumoId)
     .map((l) => l.insumoId as string)
   const unidadesNativas = new Map<string, UnidadMedida>()
+  // Fase 41.7: ancho de rollo por insumo -- habilita convertir metro↔m2
+  // para telas (ver comentario de convertirCantidad en types/index.ts).
+  const anchosRollo = new Map<string, number | undefined>()
   if (insumoIdsFormula.length > 0) {
     const { data: insumosRows, error: errInsumos } = await supabase
       .from('insumos')
-      .select('id, unidad')
+      .select('id, unidad, ancho_rollo')
       .in('id', insumoIdsFormula)
     if (errInsumos) {
       return { ok: false, error: `No se pudieron verificar las unidades de los insumos: ${errInsumos.message}` }
     }
-    for (const r of insumosRows ?? []) unidadesNativas.set(r.id, r.unidad as UnidadMedida)
+    for (const r of insumosRows ?? []) {
+      unidadesNativas.set(r.id, r.unidad as UnidadMedida)
+      anchosRollo.set(r.id, r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined)
+    }
   }
 
   for (const linea of formula.lineas) {
@@ -2922,7 +2938,7 @@ export async function registrarProduccionConfirmada(
 
     const unidadNativa = unidadesNativas.get(linea.insumoId)
     const cantidadConvertida = unidadNativa
-      ? convertirCantidad(cantidadBase, linea.unidad, unidadNativa)
+      ? convertirCantidad(cantidadBase, linea.unidad, unidadNativa, anchosRollo.get(linea.insumoId))
       : cantidadBase
     if (cantidadConvertida === null) {
       return {

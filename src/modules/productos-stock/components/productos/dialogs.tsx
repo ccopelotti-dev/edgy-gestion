@@ -160,6 +160,8 @@ export function ProductoDialog({
   const [precioVentaTexto, setPrecioVentaTexto] = useState('')
   const [costoTexto, setCostoTexto] = useState('')
   const [stockMinimoTexto, setStockMinimoTexto] = useState('')
+  // Fase 41.7: ver comentario de Producto.anchoRollo en types/index.ts.
+  const [anchoRolloTexto, setAnchoRolloTexto] = useState('')
   const [subiendo, setSubiendo] = useState(false)
   const [errorImagen, setErrorImagen] = useState('')
   const [errorCodigoBarras, setErrorCodigoBarras] = useState('')
@@ -272,11 +274,13 @@ export function ProductoDialog({
         setPrecioVentaTexto(decimalATexto(rest.precioVenta))
         setCostoTexto(decimalATexto(rest.costo))
         setStockMinimoTexto(decimalATexto(rest.stockMinimo))
+        setAnchoRolloTexto(rest.anchoRollo != null ? decimalATexto(rest.anchoRollo) : '')
       } else {
         setForm({ ...emptyProducto, diasDisponibles: DIAS_SEMANA_ORDEN.slice() })
         setPrecioVentaTexto('')
         setCostoTexto('')
         setStockMinimoTexto('')
+        setAnchoRolloTexto('')
       }
     }
   }, [open, editData])
@@ -931,6 +935,33 @@ export function ProductoDialog({
             </div>
           </div>
 
+          {/* Fase 41.7: ancho de rollo -- solo tiene sentido si la unidad
+              de venta es Metro o m² (ver Producto.anchoRollo en types/
+              index.ts). Habilita convertir metro<->m2 en Formular
+              Producto para telas/materiales que se venden por metro
+              lineal pero se consumen por área en una fórmula. */}
+          {(form.unidadVenta === 'metro' || form.unidadVenta === 'm2') && (
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Ancho de rollo (m)</label>
+              <input
+                className={inputClass}
+                type="text"
+                inputMode="decimal"
+                placeholder="Ej. 2,80"
+                value={anchoRolloTexto}
+                onChange={(e) => {
+                  const texto = sanitizarDecimal(e.target.value)
+                  setAnchoRolloTexto(texto)
+                  update('anchoRollo', texto.trim() ? parsearDecimal(texto) : undefined)
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Completalo si este artículo también se consume por m² en alguna fórmula (ej. una tela
+                que se vende por metro pero se gasta por área en una cortina). Dejalo vacío si no aplica.
+              </p>
+            </div>
+          )}
+
           {/* Stock minimo */}
           <div className="grid gap-1.5">
             <label className="text-sm font-medium">Stock minimo</label>
@@ -1229,6 +1260,8 @@ export function InsumoDialog({
   const [form, setForm] = useState<InsumoFormData>(emptyInsumo)
   const [stockMinimoTexto, setStockMinimoTexto] = useState('')
   const [costoTexto, setCostoTexto] = useState('')
+  // Fase 41.7: ver comentario de Insumo.anchoRollo en types/index.ts.
+  const [anchoRolloTexto, setAnchoRolloTexto] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
 
@@ -1251,10 +1284,12 @@ export function InsumoDialog({
         setForm(rest)
         setStockMinimoTexto(decimalATexto(rest.stockMinimo))
         setCostoTexto(decimalATexto(rest.costo))
+        setAnchoRolloTexto(rest.anchoRollo != null ? decimalATexto(rest.anchoRollo) : '')
       } else {
         setForm(emptyInsumo)
         setStockMinimoTexto('')
         setCostoTexto('')
+        setAnchoRolloTexto('')
       }
     }
   }, [open, editData])
@@ -1391,6 +1426,30 @@ export function InsumoDialog({
               ))}
             </select>
           </div>
+
+          {/* Fase 41.7: ancho de rollo -- ver mismo campo en ProductoDialog. */}
+          {(form.unidad === 'metro' || form.unidad === 'm2') && (
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Ancho de rollo (m)</label>
+              <input
+                className={inputClass}
+                type="text"
+                inputMode="decimal"
+                placeholder="Ej. 2,80"
+                value={anchoRolloTexto}
+                onChange={(e) => {
+                  const texto = sanitizarDecimal(e.target.value)
+                  setAnchoRolloTexto(texto)
+                  update('anchoRollo', texto.trim() ? parsearDecimal(texto) : undefined)
+                }}
+                disabled={vinculado}
+              />
+              <p className="text-xs text-muted-foreground">
+                Completalo si este insumo se compra/stockea por metro lineal pero se consume por m² en
+                alguna fórmula (ej. una tela). Dejalo vacío si no aplica.
+              </p>
+            </div>
+          )}
 
           {/* Stock minimo y Costo */}
           <div className="grid grid-cols-2 gap-4">
