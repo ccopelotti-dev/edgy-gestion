@@ -184,36 +184,11 @@ export async function generarFichaMedidaPdf(
     y += 6 * (Array.isArray(lineas) ? lineas.length : 1)
   }
 
-  // ─── Seña / Total (solo si ya se cargó un importe) ──────────────
-  if (ficha.total > 0) {
-    y += 2
-    if (y > pageHeight - 40) {
-      doc.addPage()
-      y = 20
-    }
-    const [r2, g2, b2] = aclarar(color, 0.88)
-    doc.setFillColor(r2, g2, b2)
-    doc.roundedRect(marginX, y - 7, pageWidth - marginX * 2, ficha.sena > 0 ? 24 : 18, 2, 2, 'F')
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9.5)
-    doc.setTextColor('#555555')
-    doc.text('Total estimado', marginX + 6, y)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(15)
-    doc.setTextColor(color)
-    doc.text(`$ ${formatARS(ficha.total)}`, pageWidth - marginX - 6, y + 1, { align: 'right' })
-    if (ficha.sena > 0) {
-      y += 8
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(9)
-      doc.setTextColor('#555555')
-      doc.text('Seña', marginX + 6, y)
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(10.5)
-      doc.setTextColor('#222222')
-      doc.text(`$ ${formatARS(ficha.sena)}`, pageWidth - marginX - 6, y, { align: 'right' })
-    }
-  }
+  // Fase 41.4: el recuadro de Seña/Total que iba acá se quitó -- esos
+  // campos salieron del formulario de FichaDialog (sin uso real desde
+  // que el cobro de seña se desacopló de la Ficha, Fase 41.2) y de acá
+  // en más siempre van a guardarse en 0, así que el recuadro condicional
+  // `ficha.total > 0` nunca se hubiera vuelto a mostrar.
 
   dibujarPie(doc, empresa)
   await imprimirOGuardarPdf(doc, nombreArchivo)

@@ -246,14 +246,21 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
   const [tipo, setTipo] = useState<TipoFicha>('generica');
   const [estado, setEstado] = useState<EstadoFicha>('borrador');
   const [fechaPedido, setFechaPedido] = useState('');
+  // Fase 41.4 (rediseño de Carlos, 19/08): antes se inferí­a "hay
+  // replanteo" de si fechaReplanteo tenía algo tipeado -- poco claro en
+  // mobile (había que escribir una fecha para que aparecieran más
+  // campos). Ahora es un tilde explícito, en su propia línea.
+  const [replanteoActivo, setReplanteoActivo] = useState(false);
   const [fechaReplanteo, setFechaReplanteo] = useState('');
   const [horaReplanteo, setHoraReplanteo] = useState('');
   const [fechaEntrega, setFechaEntrega] = useState('');
   const [modalidadEntrega, setModalidadEntrega] = useState<ModalidadEntrega>('retiro_local');
-  const [domicilioDistinto, setDomicilioDistinto] = useState(false);
+  // Fase 41.4: antes había un tilde "Usar domicilio distinto al del
+  // cliente" con dos modos (texto fijo de solo lectura vs. campo vacío
+  // para reescribir todo). Ahora es un único campo siempre editable,
+  // precargado con la dirección del cliente (ver elegirCliente /
+  // handleSaveClienteNuevo) -- el agente lo edita in place si hace falta.
   const [domicilioTrabajo, setDomicilioTrabajo] = useState('');
-  const [textoSena, setTextoSena] = useState('0');
-  const [textoTotal, setTextoTotal] = useState('0');
   const [notas, setNotas] = useState('');
   const [items, setItems] = useState<ItemFormRow[]>([nuevaFilaItem()]);
   const [error, setError] = useState<string | null>(null);
@@ -268,14 +275,12 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       setTipo(ficha.tipo);
       setEstado(ficha.estado);
       setFechaPedido(ficha.fechaPedido);
+      setReplanteoActivo(Boolean(ficha.fechaReplanteo));
       setFechaReplanteo(ficha.fechaReplanteo ?? '');
       setHoraReplanteo(ficha.horaReplanteo ?? '');
       setFechaEntrega(ficha.fechaEntrega ?? '');
       setModalidadEntrega(ficha.modalidadEntrega ?? 'retiro_local');
-      setDomicilioDistinto(Boolean(ficha.domicilioTrabajo));
-      setDomicilioTrabajo(ficha.domicilioTrabajo ?? '');
-      setTextoSena(String(ficha.sena ?? 0));
-      setTextoTotal(String(ficha.total ?? 0));
+      setDomicilioTrabajo(ficha.domicilioTrabajo ?? ficha.clienteDireccion ?? '');
       setNotas(ficha.notas ?? '');
       setItems(ficha.items.length > 0 ? ficha.items.map(itemFormAFila) : [nuevaFilaItem()]);
     } else {
@@ -285,14 +290,12 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       setTipo('generica');
       setEstado('borrador');
       setFechaPedido(new Date().toISOString().split('T')[0]);
+      setReplanteoActivo(false);
       setFechaReplanteo('');
       setHoraReplanteo('');
       setFechaEntrega('');
       setModalidadEntrega('retiro_local');
-      setDomicilioDistinto(false);
       setDomicilioTrabajo('');
-      setTextoSena('0');
-      setTextoTotal('0');
       setNotas('');
       setItems([nuevaFilaItem()]);
     }
@@ -361,6 +364,11 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     setClienteVentaId(c.id);
     setClienteNombre(c.nombre);
     setClienteDireccion(c.direccion ?? '');
+    // Fase 41.4: precarga el domicilio de trabajo con el del cliente
+    // recién elegido -- default editable, no pisa nada que el agente ya
+    // haya tipeado a mano en una ficha existente si solo está cambiando
+    // de cliente por error, así que se resetea a propósito acá.
+    setDomicilioTrabajo(c.direccion ?? '');
     setBusquedaCliente('');
     setCandidatosCliente([]);
   }
@@ -394,6 +402,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     setClienteVentaId(nuevoId);
     setClienteNombre(data.nombre);
     setClienteDireccion(data.direccion ?? '');
+    setDomicilioTrabajo(data.direccion ?? '');
     setClienteDialogOpen(false);
   }
 
@@ -451,13 +460,17 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
       tipo,
       estado: estadoForzado ?? estado,
       fechaPedido,
-      fechaReplanteo: fechaReplanteo || undefined,
-      horaReplanteo: fechaReplanteo ? horaReplanteo || undefined : undefined,
+      fechaReplanteo: replanteoActivo ? fechaReplanteo || undefined : undefined,
+      horaReplanteo: replanteoActivo && fechaReplanteo ? horaReplanteo || undefined : undefined,
       fechaEntrega: fechaEntrega || undefined,
-      domicilioTrabajo: domicilioDistinto ? domicilioTrabajo.trim() || undefined : undefined,
+      domicilioTrabajo: domicilioTrabajo.trim() || undefined,
       modalidadEntrega,
-      sena: parseDecimal(textoSena),
-      total: parseDecimal(textoTotal),
+      // Fase 41.4: Seña y Total salieron del formulario -- sin uso real
+      // desde que el cobro de seña se desacopló de la Ficha (ahora vive
+      // en Presupuesto, Fase 41.2). Quedan en 0 acá para no tocar el
+      // contrato de NuevaFichaMedida/la columna en Supabase.
+      sena: 0,
+      total: 0,
       notas: notas.trim() || undefined,
       items: itemsValidos.map((it) => ({
         producto: it.producto.trim(),
@@ -511,7 +524,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
             <div>
               <label className={labelClass}>Cliente *</label>
               {clienteVentaId ? (
-                <div className="flex items-center justify-between rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm">
+                <div className="flex items-center justify-between rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm">
                   <div>
                     <span className="font-medium text-gray-900">{clienteNombre}</span>
                     {fichasPrevias > 0 && (
@@ -567,7 +580,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
             </div>
 
             {/* ── Encabezado de pedido ── */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <div>
                 <label className={labelClass}>Tipo</label>
                 <select value={tipo} onChange={(e) => setTipo(e.target.value as TipoFicha)} className={inputClass}>
@@ -585,25 +598,6 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
               <div>
                 <label className={labelClass}>Fecha de pedido</label>
                 <input type="date" value={fechaPedido} onChange={(e) => setFechaPedido(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Fecha de replanteo</label>
-                <div className="flex flex-col gap-1.5">
-                  <input
-                    type="date"
-                    value={fechaReplanteo}
-                    onChange={(e) => setFechaReplanteo(e.target.value)}
-                    className={inputClass}
-                  />
-                  <input
-                    type="time"
-                    value={horaReplanteo}
-                    onChange={(e) => setHoraReplanteo(e.target.value)}
-                    disabled={!fechaReplanteo}
-                    className={`${inputClass} disabled:opacity-50`}
-                  />
-                </div>
-                <p className="mt-1 text-[11px] text-gray-400">Crea una tarea en Agenda automáticamente.</p>
               </div>
               <div>
                 <label className={labelClass}>Fecha de entrega</label>
@@ -624,52 +618,66 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                   <p className="mt-1 text-[11px] text-gray-400">Agrega una línea de instalación al presupuesto.</p>
                 )}
               </div>
-              <div>
-                <label className={labelClass}>Seña</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={textoSena}
-                  onChange={(e) => setTextoSena(sanitizarDecimal(e.target.value))}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Total</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={textoTotal}
-                  onChange={(e) => setTextoTotal(sanitizarDecimal(e.target.value))}
-                  className={inputClass}
-                />
-              </div>
             </div>
 
-            {/* ── Domicilio de trabajo (Replanteo / Instalación) ── */}
-            {(fechaReplanteo || modalidadEntrega === 'obra_instalacion') && (
+            {/* ── Replanteo (Fase 41.4: tilde explícito, en su propia línea) ── */}
+            <div>
+              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={replanteoActivo}
+                  onChange={(e) => {
+                    const activo = e.target.checked;
+                    setReplanteoActivo(activo);
+                    if (!activo) {
+                      setFechaReplanteo('');
+                      setHoraReplanteo('');
+                    }
+                  }}
+                />
+                Replanteo
+              </label>
+              {replanteoActivo && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelClass}>Fecha</label>
+                    <input
+                      type="date"
+                      value={fechaReplanteo}
+                      onChange={(e) => setFechaReplanteo(e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Hora</label>
+                    <input
+                      type="time"
+                      value={horaReplanteo}
+                      onChange={(e) => setHoraReplanteo(e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <p className="col-span-2 -mt-1 text-[11px] text-gray-400">Crea una tarea en Agenda automáticamente.</p>
+                </div>
+              )}
+            </div>
+
+            {/* ── Domicilio de trabajo (Replanteo / Instalación) ──
+                Fase 41.4: campo siempre editable, precargado con la
+                dirección del cliente (ver elegirCliente /
+                handleSaveClienteNuevo) -- el agente lo corrige in place
+                si el trabajo es en otro domicilio, o lo completa de cero
+                si el cliente no tiene uno cargado. */}
+            {(replanteoActivo || modalidadEntrega === 'obra_instalacion') && (
               <div>
-                <label className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={domicilioDistinto}
-                    onChange={(e) => setDomicilioDistinto(e.target.checked)}
-                  />
-                  Usar un domicilio distinto al del cliente
-                </label>
-                {domicilioDistinto ? (
-                  <input
-                    type="text"
-                    value={domicilioTrabajo}
-                    onChange={(e) => setDomicilioTrabajo(e.target.value)}
-                    placeholder="Domicilio donde se hace el replanteo / la instalación"
-                    className={inputClass}
-                  />
-                ) : (
-                  <p className="text-xs text-gray-500">
-                    Se usa el domicilio del cliente{clienteDireccion ? `: ${clienteDireccion}` : ' (sin cargar)'}.
-                  </p>
-                )}
+                <label className={labelClass}>Domicilio {replanteoActivo ? 'a replantear' : 'de instalación'}</label>
+                <input
+                  type="text"
+                  value={domicilioTrabajo}
+                  onChange={(e) => setDomicilioTrabajo(e.target.value)}
+                  placeholder="Domicilio donde se hace el replanteo / la instalación"
+                  className={inputClass}
+                />
               </div>
             )}
 
@@ -679,7 +687,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                 <label className={labelClass + ' mb-0'}>Ítems</label>
                 <button
                   onClick={agregarItem}
-                  className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800"
+                  className="flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 hover:bg-teal-100"
                 >
                   <Plus className="h-3.5 w-3.5" /> Agregar ítem
                 </button>
