@@ -3057,20 +3057,27 @@ async function intentarCerrarOrdenAMedida(fichaItemId: string, clienteId: string
       .single()
     if (!fichaRow?.presupuesto_id) return
 
-    const { data: itemsFicha } = await supabase
+    // Todos los ítems de la ficha (no solo los vinculados a producto) --
+    // hace falta el total para confirmar que NINGUNO quedó como texto
+    // libre (sin producto_id), que es justo el caso mixto que no se debe
+    // auto-cerrar.
+    const { data: todosItemsFicha } = await supabase
       .from('ficha_medida_items')
       .select('id, producto_id')
       .eq('ficha_id', fichaRow.id)
-      .not('producto_id', 'is', null)
-    if (!itemsFicha || itemsFicha.length === 0) return
+    if (!todosItemsFicha || todosItemsFicha.length === 0) return
 
-    const itemIds = itemsFicha.map((i: any) => i.id as string)
+    const itemsAMedida = todosItemsFicha.filter((i: any) => i.producto_id)
+    if (itemsAMedida.length === 0) return
+    if (itemsAMedida.length !== todosItemsFicha.length) return // hay ítems de texto libre mezclados -> no autocerrar
+
+    const itemIds = itemsAMedida.map((i: any) => i.id as string)
     const { data: producidosRows } = await supabase
       .from('producciones')
       .select('ficha_item_id')
       .in('ficha_item_id', itemIds)
     const producidos = new Set((producidosRows ?? []).map((p: any) => p.ficha_item_id as string))
-    const todosProducidos = itemsFicha.every((i: any) => producidos.has(i.id))
+    const todosProducidos = itemsAMedida.every((i: any) => producidos.has(i.id))
     if (!todosProducidos) return
 
     const { data: ordenRow } = await supabase
@@ -3082,15 +3089,20 @@ async function intentarCerrarOrdenAMedida(fichaItemId: string, clienteId: string
     if (!ordenRow) return
     if (['terminado', 'entregado_parcial', 'entregado', 'cancelado'].includes(ordenRow.estado)) return
 
-    const { data: ordenItemsRows } = await supabase
+    // presupuesto_items/orden_venta_items NO llevan producto_id en los
+    // ítems a medida (a propósito, ver comentario al tope de
+    // generarPresupuesto.ts -- si lo llevaran, "Facturar directamente"
+    // intentaría descontar stock genérico que en modo 'a_medida' nunca se
+    // tocó). Por eso acá se compara por CANTIDAD de líneas en vez de por
+    // id: ficha.items -> presupuesto.items -> orden.items se mapean
+    // siempre 1 a 1 (generarPresupuesto.ts / CONVERTIR_PRESUPUESTO_A_ORDEN),
+    // así que si el conteo de la orden coincide con el conteo de la ficha
+    // (que ya se confirmó arriba que es 100% a medida), es la misma orden.
+    const { count: cantidadItemsOrden } = await supabase
       .from('orden_venta_items')
-      .select('producto_id')
+      .select('id', { count: 'exact', head: true })
       .eq('orden_id', ordenRow.id)
-    const productoIdsFicha = new Set(itemsFicha.map((i: any) => i.producto_id as string))
-    const ordenEsPuraAMedida =
-      (ordenItemsRows ?? []).length > 0 &&
-      (ordenItemsRows ?? []).every((oi: any) => oi.producto_id && productoIdsFicha.has(oi.producto_id))
-    if (!ordenEsPuraAMedida) return
+    if (cantidadItemsOrden !== todosItemsFicha.length) return
 
     await supabase.from('ordenes_venta').update({ estado: 'terminado' }).eq('id', ordenRow.id)
   } catch {
