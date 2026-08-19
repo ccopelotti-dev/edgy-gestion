@@ -103,7 +103,7 @@ function dibujarEsquemaCortina(
   doc.setTextColor(color)
   doc.text(titulo, x + ESQUEMA_ANCHO / 2, yTop + ESQUEMA_TITULO_ALTO - 1, { align: 'center' })
 
-  const canvasTop = yTop + ESQUEMA_TITULO_ALTO + ESQUEMA_PADDING
+  const canvasTopBase = yTop + ESQUEMA_TITULO_ALTO + ESQUEMA_PADDING
   const canvasLeft = x + ESQUEMA_PADDING
   const canvasWidth = ESQUEMA_ANCHO - ESQUEMA_PADDING * 2
   const gap = 2
@@ -111,6 +111,16 @@ function dibujarEsquemaCortina(
   const sumaAnchos = panos.reduce((s, p) => s + p.ancho, 0)
   const maxAlto = Math.max(...panos.map((p) => p.alto))
   const escala = Math.min((canvasWidth - gap * (panos.length - 1)) / sumaAnchos, ESQUEMA_ALTO_CANVAS / maxAlto)
+
+  // Alto real (mm) que ocupa el paño más alto ya escalado -- cuando los
+  // paños son más anchos que altos, el ancho es el que manda la escala
+  // (ver Math.min arriba) y el dibujo termina ocupando mucho menos que
+  // ESQUEMA_ALTO_CANVAS. Antes la cota de ancho se apoyaba siempre en el
+  // piso fijo del canvas, dejando un hueco enorme entre el rectángulo y
+  // su cota. Ahora se centra el dibujo verticalmente en el canvas y la
+  // cota de ancho se apoya justo debajo de los rectángulos reales.
+  const altoRealMax = maxAlto * escala
+  const canvasTop = canvasTopBase + (ESQUEMA_ALTO_CANVAS - altoRealMax) / 2
 
   let cursorX = canvasLeft
   doc.setDrawColor(140, 140, 140)
@@ -126,8 +136,8 @@ function dibujarEsquemaCortina(
     // Cota de alto: texto vertical pegado al borde izquierdo del paño.
     doc.text(`${formatMedidaCm(p.alto)} cm`, cursorX + 2.2, canvasTop + h / 2, { angle: 90 })
     // Cota de ancho: centrada debajo del paño, todas a la misma altura
-    // (base del canvas) aunque los paños tengan distinto alto.
-    doc.text(`${formatMedidaCm(p.ancho)} cm`, cursorX + w / 2, canvasTop + ESQUEMA_ALTO_CANVAS + ESQUEMA_COTA_ANCHO_ALTO, {
+    // (la base real del dibujo) aunque los paños tengan distinto alto.
+    doc.text(`${formatMedidaCm(p.ancho)} cm`, cursorX + w / 2, canvasTop + altoRealMax + ESQUEMA_COTA_ANCHO_ALTO, {
       align: 'center',
     })
 
