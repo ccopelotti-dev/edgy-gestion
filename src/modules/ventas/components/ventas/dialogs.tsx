@@ -38,6 +38,7 @@ import {
 } from '../../types';
 
 import { formatARS, formatPct, todayISO } from '../../lib/format';
+import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal';
 import { esCuitValido } from '@/lib/validarCuit';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -1653,16 +1654,21 @@ interface SenaDialogProps {
 }
 
 export function SenaDialog({ open, onOpenChange, presupuesto, onConfirmar }: SenaDialogProps) {
-  const [monto, setMonto] = useState(0);
+  // Mismo patrón que el resto de la app (ver comentario de sanitizarDecimal
+  // en @/lib/decimal): input de texto en vez de type="number" -- el nativo
+  // no dejaba borrar el cero inicial con comodidad y rechazaba la coma
+  // decimal en teclado en español.
+  const [montoTexto, setMontoTexto] = useState('');
   const [medioPago, setMedioPago] = useState<MedioPago>('efectivo');
 
   useEffect(() => {
     if (open) {
-      setMonto(0);
+      setMontoTexto('');
       setMedioPago('efectivo');
     }
   }, [open]);
 
+  const monto = parsearDecimal(montoTexto);
   const pct = presupuesto.total > 0 && monto > 0 ? (monto / presupuesto.total) * 100 : 0;
 
   return (
@@ -1689,11 +1695,11 @@ export function SenaDialog({ open, onOpenChange, presupuesto, onConfirmar }: Sen
               <label className={labelClass}>Monto a cobrar</label>
               <input
                 className={inputClass}
-                type="number"
-                min={0}
-                step={0.01}
-                value={monto}
-                onChange={(e) => setMonto(Number(e.target.value))}
+                type="text"
+                inputMode="decimal"
+                placeholder="0,00"
+                value={montoTexto}
+                onChange={(e) => setMontoTexto(sanitizarDecimal(e.target.value))}
                 autoFocus
               />
             </div>
