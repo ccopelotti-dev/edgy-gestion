@@ -149,6 +149,81 @@ function dibujarEsquemaCortina(
   doc.roundedRect(x, yTop - 2, ESQUEMA_ANCHO, ESQUEMA_ALTO_TOTAL, 1.5, 1.5)
 }
 
+/** Título "Detalle relevado" + un bloque por ítem (esquema técnico +
+ * texto). Extraído de `generarFichaMedidaPdf` (Fase 41.7, 20/08) para
+ * poder reusarlo también desde el PDF de Presupuesto -- Carlos pidió
+ * la posibilidad de incluir este mismo detalle ahí, opcional, cuando el
+ * presupuesto viene de una Ficha de medida. Devuelve la Y final para
+ * que el llamador siga dibujando debajo (Notas, totales, etc.) sin
+ * pisarlo. `doc` puede ya traer páginas agregadas -- esta función solo
+ * agrega más si el contenido no entra en `alturaMaxima`. */
+export function dibujarDetalleRelevado(
+  doc: jsPDF,
+  yInicial: number,
+  pageWidth: number,
+  marginX: number,
+  alturaMaxima: number,
+  color: string,
+  ficha: Pick<FichaMedida, 'tipo' | 'items'>,
+): number {
+  let y = yInicial
+
+  doc.setDrawColor(color)
+  doc.setLineWidth(0.3)
+  doc.line(marginX, y, pageWidth - marginX, y)
+  y += 5
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  doc.setTextColor('#6b6b6b')
+  doc.text('Detalle relevado', marginX, y)
+  y += 2
+  doc.setDrawColor(230, 230, 230)
+  doc.line(marginX, y, pageWidth - marginX, y)
+  y += 6
+
+  for (const item of ficha.items) {
+    const panosDibujo = ficha.tipo === 'cortinas' ? panosDibujables(item) : []
+    const conEsquema = panosDibujo.length > 0
+    const lineas = descripcionItem(item, conEsquema)
+    if (lineas.length === 0) continue
+
+    // Alto del bloque: si hay esquema, es fijo (ESQUEMA_ALTO_TOTAL) salvo
+    // que el texto sea más largo (ítem con muchos detalles); si no hay
+    // esquema, es el texto solo -- mismo criterio que antes.
+    const alturaTexto = 5 + (lineas.length - 1) * 4.5 + 3
+    const alturaBloque = conEsquema ? Math.max(ESQUEMA_ALTO_TOTAL + 3, alturaTexto) : alturaTexto
+
+    if (y + alturaBloque > alturaMaxima) {
+      doc.addPage()
+      y = 20
+    }
+
+    const textoX = conEsquema ? marginX + ESQUEMA_ANCHO + 6 : marginX
+    const yInicioBloque = y
+
+    if (conEsquema) {
+      dibujarEsquemaCortina(doc, marginX, y, item.tipoCortina || 'Cortina', panosDibujo, color)
+    }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9.5)
+    doc.setTextColor('#222222')
+    doc.text(lineas[0], textoX, y)
+    y += 5
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.setTextColor('#666666')
+    for (const linea of lineas.slice(1)) {
+      doc.text(linea, textoX + 4, y)
+      y += 4.5
+    }
+
+    y = yInicioBloque + alturaBloque
+  }
+
+  return y + 4
+}
+
 export async function generarFichaMedidaPdf(
   empresa: EmpresaParaPdf,
   ficha: FichaMedida,
@@ -224,59 +299,7 @@ export async function generarFichaMedidaPdf(
   y += 10
 
   // ─── Detalle relevado (ítems) ───────────────────────────────────
-  doc.setDrawColor(color)
-  doc.setLineWidth(0.3)
-  doc.line(marginX, y, pageWidth - marginX, y)
-  y += 5
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.setTextColor('#6b6b6b')
-  doc.text('Detalle relevado', marginX, y)
-  y += 2
-  doc.setDrawColor(230, 230, 230)
-  doc.line(marginX, y, pageWidth - marginX, y)
-  y += 6
-
-  for (const item of ficha.items) {
-    const panosDibujo = ficha.tipo === 'cortinas' ? panosDibujables(item) : []
-    const conEsquema = panosDibujo.length > 0
-    const lineas = descripcionItem(item, conEsquema)
-    if (lineas.length === 0) continue
-
-    // Alto del bloque: si hay esquema, es fijo (ESQUEMA_ALTO_TOTAL) salvo
-    // que el texto sea más largo (ítem con muchos detalles); si no hay
-    // esquema, es el texto solo -- mismo criterio que antes.
-    const alturaTexto = 5 + (lineas.length - 1) * 4.5 + 3
-    const alturaBloque = conEsquema ? Math.max(ESQUEMA_ALTO_TOTAL + 3, alturaTexto) : alturaTexto
-
-    if (y + alturaBloque > alturaMaxima) {
-      doc.addPage()
-      y = 20
-    }
-
-    const textoX = conEsquema ? marginX + ESQUEMA_ANCHO + 6 : marginX
-    const yInicioBloque = y
-
-    if (conEsquema) {
-      dibujarEsquemaCortina(doc, marginX, y, item.tipoCortina || 'Cortina', panosDibujo, color)
-    }
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9.5)
-    doc.setTextColor('#222222')
-    doc.text(lineas[0], textoX, y)
-    y += 5
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8.5)
-    doc.setTextColor('#666666')
-    for (const linea of lineas.slice(1)) {
-      doc.text(linea, textoX + 4, y)
-      y += 4.5
-    }
-
-    y = yInicioBloque + alturaBloque
-  }
-  y += 4
+  y = dibujarDetalleRelevado(doc, y, pageWidth, marginX, alturaMaxima, color, ficha)
 
   // ─── Notas generales ────────────────────────────────────────────
   if (ficha.notas) {

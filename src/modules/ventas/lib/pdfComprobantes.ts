@@ -22,6 +22,8 @@ import {
   type MovimientoResumenCuenta,
 } from '@/lib/comprobantes-pdf/generarResumenCuentaPdf';
 import { generarReciboPdf } from '@/lib/comprobantes-pdf/generarReciboPdf';
+import { fetchFichaPorPresupuestoId } from '@/modules/fichas-medida/data/useFichasMedida';
+import { dibujarDetalleRelevado } from '@/modules/fichas-medida/lib/generarFichaMedidaPdf';
 import type { Cliente as ClienteEmpresa } from '@/types';
 import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE } from './format';
 import type { Cliente, Cobro, Comprobante, Presupuesto } from '../types';
@@ -198,14 +200,35 @@ export async function descargarComprobantePdf(
 
 /** Descarga el PDF de un Presupuesto -- mismo motor, sin IVA
  * discriminado por línea (los presupuestos de Edgy no lo calculan) ni
- * datos de ARCA (nunca tiene CAE). */
+ * datos de ARCA (nunca tiene CAE).
+ *
+ * `incluirDetalleRelevado` (Fase 41.7, 20/08, a pedido de Carlos): si el
+ * presupuesto viene de una Ficha de medida de cortinas, agrega al final
+ * el mismo bloque "Detalle relevado" (esquema técnico por paño) que ya
+ * imprime el PDF de la Ficha -- opcional, a elección de quien lo
+ * descarga (ver el segundo ícono en Presupuestos.tsx, solo visible
+ * cuando existe esa ficha vinculada). Si no hay ficha vinculada, o no es
+ * de tipo cortinas, el flag no tiene efecto -- el PDF sale igual que
+ * siempre. */
 export async function descargarPresupuestoPdf(
   empresaActual: ClienteEmpresa,
   cliente: Cliente | undefined,
   presupuesto: Presupuesto,
   clienteNombreFallback: string,
+  incluirDetalleRelevado = false,
 ): Promise<void> {
   const numero = `PRE-${String(presupuesto.numero).padStart(5, '0')}`;
+
+  let bloqueAdicional: Parameters<typeof generarComprobantePdf>[1]['bloqueAdicional'];
+  if (incluirDetalleRelevado) {
+    const ficha = await fetchFichaPorPresupuestoId(presupuesto.id);
+    if (ficha) {
+      const color = empresaActual.color_marca || '#0F6E56';
+      bloqueAdicional = (doc, y, pageWidth, marginX) =>
+        dibujarDetalleRelevado(doc, y, pageWidth, marginX, doc.internal.pageSize.getHeight() - 20, color, ficha);
+    }
+  }
+
   await generarComprobantePdf(
     empresaParaPdf(empresaActual),
     {
@@ -225,6 +248,7 @@ export async function descargarPresupuestoPdf(
       descuentoGeneral: presupuesto.descuentoGeneral,
       total: presupuesto.total,
       notas: presupuesto.notas ?? presupuesto.condiciones ?? null,
+      bloqueAdicional,
     },
     numero,
   );

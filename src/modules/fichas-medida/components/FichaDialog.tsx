@@ -136,6 +136,11 @@ function sanitizarDecimal(valor: string): string {
 interface ProductoCatalogoOpcion {
   id: string;
   nombre: string;
+  /** Fase 41.7 (20/08, a pedido de Carlos): "el artículo esclavo que
+   * muestre la imagen del real de catálogo" -- primera foto del
+   * producto vinculado (Producto.imagenes[0]), si tiene alguna
+   * cargada. Mismo criterio que Productos.tsx/Catalogo.tsx. */
+  imagenUrl?: string;
 }
 
 function ProductoCatalogoCombobox({
@@ -174,7 +179,19 @@ function ProductoCatalogoCombobox({
 
   return (
     <div className="relative" ref={wrapperRef}>
-      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+      {/* Fase 41.7: si el ítem ya está vinculado, la miniatura del
+          producto real reemplaza al ícono de lupa -- confirmación visual
+          rápida de qué artículo del catálogo es (mismo criterio que
+          Productos.tsx/Catalogo.tsx, que ya muestran esta imagen). */}
+      {seleccionado?.imagenUrl ? (
+        <img
+          src={seleccionado.imagenUrl}
+          alt=""
+          className="absolute left-1.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded object-cover"
+        />
+      ) : (
+        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+      )}
       <input
         className={inputClass + ' pl-7'}
         value={open ? query : seleccionado?.nombre ?? ''}
@@ -212,9 +229,14 @@ function ProductoCatalogoCombobox({
               <button
                 key={o.id}
                 type="button"
-                className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-gray-50"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-gray-50"
                 onClick={() => seleccionar(o.id)}
               >
+                {o.imagenUrl ? (
+                  <img src={o.imagenUrl} alt="" className="h-5 w-5 shrink-0 rounded object-cover" />
+                ) : (
+                  <span className="h-5 w-5 shrink-0" />
+                )}
                 <span className="truncate">{o.nombre}</span>
               </button>
             ))
@@ -344,19 +366,26 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
   // catálogo (productos de depósito incluidos) era la fricción real: una
   // lista larga para buscar a mano un producto que ni siquiera aplica a
   // este flujo.
-  const [productosCatalogo, setProductosCatalogo] = useState<{ id: string; nombre: string }[]>([]);
+  const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoOpcion[]>([]);
   useEffect(() => {
     if (!open || !clienteTenantId) return;
     let activo = true;
     supabase
       .from('productos')
-      .select('id, nombre')
+      // Fase 41.7 (20/08, a pedido de Carlos): "el artículo esclavo que
+      // tome la imagen real del catálogo" -- se trae `imagenes` acá para
+      // mostrar la miniatura en el combobox de abajo.
+      .select('id, nombre, imagenes')
       .eq('cliente_id', clienteTenantId)
       .eq('disponible', true)
       .eq('modalidad_stock', 'a_medida')
       .order('nombre')
       .then(({ data }) => {
-        if (activo) setProductosCatalogo((data ?? []) as { id: string; nombre: string }[]);
+        if (!activo) return;
+        const filas = (data ?? []) as { id: string; nombre: string; imagenes: string[] | null }[];
+        setProductosCatalogo(
+          filas.map((f) => ({ id: f.id, nombre: f.nombre, imagenUrl: f.imagenes?.[0] })),
+        );
       });
     return () => {
       activo = false;

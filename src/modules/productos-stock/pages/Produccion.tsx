@@ -441,6 +441,21 @@ export default function Produccion() {
               </select>
             </div>
 
+            {/* Fase 41.7 (20/08, a pedido de Carlos): "el artículo esclavo
+                que muestre la imagen real del catálogo" -- mismo criterio
+                que Productos.tsx/Catalogo.tsx, acá ayuda a confirmar de
+                un vistazo qué pedido está por producirse. */}
+            {pedidoSeleccionado && productoAMedida?.imagenes?.[0] && (
+              <div className="mb-3 flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
+                <img
+                  src={productoAMedida.imagenes[0]}
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded object-cover"
+                />
+                <span className="text-sm text-muted-foreground">{productoAMedida.nombre}</span>
+              </div>
+            )}
+
             {pedidoSeleccionado && !formulaAMedida && (
               <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 px-3 py-2 text-sm text-amber-700 dark:text-amber-400 mb-3 flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />

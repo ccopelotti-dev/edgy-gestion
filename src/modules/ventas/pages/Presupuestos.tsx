@@ -24,8 +24,10 @@ import {
   MessageCircle,
   HandCoins,
   FileDown,
+  Ruler,
 } from 'lucide-react';
 
+import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { descargarPresupuestoPdf, descargarReciboPdf } from '../lib/pdfComprobantes';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
@@ -96,6 +98,32 @@ export default function Presupuestos() {
   // "Presupuesto" en vez de Factura/Recibo.
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+
+  // Fase 41.7 (20/08, a pedido de Carlos): "Detalle relevado" opcional en
+  // el PDF de Presupuesto -- el segundo ícono de descarga (con el
+  // esquema técnico de la Ficha) solo tiene sentido mostrarlo cuando el
+  // presupuesto realmente viene de una Ficha de medida de cortinas. Un
+  // solo fetch liviano acá (ids de presupuesto, no el detalle completo)
+  // para saber en qué filas mostrarlo -- el detalle real recién se trae
+  // al momento de descargar (ver descargarPresupuestoPdf).
+  const [presupuestosConFichaCortinas, setPresupuestosConFichaCortinas] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = todosPresupuestos.map((p) => p.id);
+    if (ids.length === 0) return;
+    let activo = true;
+    supabase
+      .from('fichas_medida')
+      .select('presupuesto_id')
+      .eq('tipo', 'cortinas')
+      .in('presupuesto_id', ids)
+      .then(({ data }) => {
+        if (activo) setPresupuestosConFichaCortinas(new Set((data ?? []).map((r) => r.presupuesto_id as string)));
+      });
+    return () => {
+      activo = false;
+    };
+  }, [todosPresupuestos]);
+  const [generandoPdfDetalleId, setGenerandoPdfDetalleId] = useState<string | null>(null);
 
   // "Facturar directamente": convierte un presupuesto confirmado ('enviado')
   // en un comprobante sin pasar por una Orden en el medio -- mismo criterio
@@ -365,6 +393,20 @@ export default function Presupuestos() {
     }
   };
 
+  // Fase 41.7: mismo PDF, con el "Detalle relevado" (esquema técnico de
+  // la Ficha) agregado al final -- ver comentario en
+  // presupuestosConFichaCortinas más arriba.
+  const handleDescargarPdfConDetalle = async (pres: Presupuesto) => {
+    if (!empresaActual) return;
+    setGenerandoPdfDetalleId(pres.id);
+    try {
+      const cliente = clientes.find((c) => c.id === pres.clienteId);
+      await descargarPresupuestoPdf(empresaActual, cliente, pres, clienteNombre(pres.clienteId), true);
+    } finally {
+      setGenerandoPdfDetalleId(null);
+    }
+  };
+
   // Fase 41.2: descarga del recibo de la seña ya cobrada -- reusa el mismo
   // motor de Recibo que Cobranzas.tsx (ver descargarReciboPdf), buscando el
   // Cobro vinculado a este presupuesto por presupuestoId. Si en el futuro
@@ -535,6 +577,9 @@ export default function Presupuestos() {
                     onFacturar={() => handleFacturar(pres)}
                     onDescargarPdf={() => handleDescargarPdf(pres)}
                     generandoPdf={generandoPdfId === pres.id}
+                    tieneFichaCortinas={presupuestosConFichaCortinas.has(pres.id)}
+                    onDescargarPdfConDetalle={() => handleDescargarPdfConDetalle(pres)}
+                    generandoPdfDetalle={generandoPdfDetalleId === pres.id}
                     onEnviarEmail={() => handleEnviarEmail(pres, cliente)}
                     onEnviarWhatsapp={() => handleEnviarWhatsapp(pres, cliente)}
                     onCobrarSena={() => setSenaDialogPresupuesto(pres)}
@@ -665,6 +710,12 @@ interface PresupuestoRowProps {
   onFacturar: () => void;
   onDescargarPdf: () => void;
   generandoPdf: boolean;
+  /** Fase 41.7: solo true cuando el presupuesto viene de una Ficha de
+   * medida de cortinas -- habilita el segundo ícono de descarga (con
+   * el esquema técnico incluido). */
+  tieneFichaCortinas: boolean;
+  onDescargarPdfConDetalle: () => void;
+  generandoPdfDetalle: boolean;
   onEnviarEmail: () => void;
   onEnviarWhatsapp: () => void;
   onCobrarSena: () => void;
@@ -687,6 +738,9 @@ function PresupuestoRow({
   onFacturar,
   onDescargarPdf,
   generandoPdf,
+  tieneFichaCortinas,
+  onDescargarPdfConDetalle,
+  generandoPdfDetalle,
   onEnviarEmail,
   onEnviarWhatsapp,
   onCobrarSena,
@@ -732,6 +786,20 @@ function PresupuestoRow({
                 <Download className="h-3.5 w-3.5" />
               )}
             </button>
+            {tieneFichaCortinas && (
+              <button
+                onClick={onDescargarPdfConDetalle}
+                disabled={generandoPdfDetalle}
+                title="Descargar PDF con Detalle relevado (esquema técnico de la Ficha)"
+                className="p-1.5 text-gray-400 hover:text-teal-700 hover:bg-teal-50 rounded-lg disabled:opacity-50"
+              >
+                {generandoPdfDetalle ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Ruler className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
             <button
               onClick={onEnviarEmail}
               disabled={!cliente?.email}

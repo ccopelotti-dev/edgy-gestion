@@ -7,13 +7,13 @@ import { useClienteId } from './useClienteId'
 // items + paños en una sola consulta. Volumen chico por diseño (fichas de
 // un negocio a medida, no miles de filas), así que no hace falta paginar
 // ni separar el detalle en una consulta aparte.
-const SELECT_FICHA = `
+export const SELECT_FICHA = `
   *,
   clientes_venta(nombre, telefono, email, direccion),
   ficha_medida_items(*, ficha_medida_panos(*))
 `
 
-function filaAFicha(row: any): FichaMedida {
+export function filaAFicha(row: any): FichaMedida {
   const cv = row.clientes_venta ?? {}
   const items: ItemFichaMedida[] = (row.ficha_medida_items ?? [])
     .slice()
@@ -64,6 +64,28 @@ function filaAFicha(row: any): FichaMedida {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+/** Fase 41.7 (20/08, a pedido de Carlos): "Detalle relevado" opcional en
+ * el PDF de Presupuesto -- Ventas no tiene VentasProvider propio para
+ * Fichas (son módulos separados, sin Context compartido, ver comentario
+ * en lib/generarPresupuesto.ts), así que esto es una función standalone
+ * (no un hook) para usarla desde `pdfComprobantes.ts` en el momento de
+ * descargar, sin depender de useFichasMedida() ni de estar dentro de un
+ * componente. `presupuesto_id` es la única FK que existe entre ambos
+ * módulos (ficha -> presupuesto); acá se resuelve al revés. Solo trae
+ * fichas de tipo 'cortinas' -- es el único tipo con esquema técnico
+ * dibujable (ver panosDibujables en generarFichaMedidaPdf.ts); para
+ * 'genérica' no hay nada que agregar sobre lo que ya muestra el
+ * Presupuesto. */
+export async function fetchFichaPorPresupuestoId(presupuestoId: string): Promise<FichaMedida | null> {
+  const { data } = await supabase
+    .from('fichas_medida')
+    .select(SELECT_FICHA)
+    .eq('presupuesto_id', presupuestoId)
+    .eq('tipo', 'cortinas')
+    .maybeSingle()
+  return data ? filaAFicha(data) : null
 }
 
 export interface NuevaFichaMedida {

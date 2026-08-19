@@ -221,6 +221,18 @@ export interface ComprobanteParaPdf {
    * obtenido). Dispara el bloque de CAE + QR fiscal obligatorio al
    * pie del PDF y la numeración fiscal en el recuadro superior. */
   afip?: DatosAfipParaPdf
+  /** Fase 41.7 (20/08, a pedido de Carlos): bloque libre, dibujado
+   * después de Notas y antes del pie de página -- hoy solo lo usa
+   * Presupuesto (Detalle relevado de Ficha de medida, opcional a
+   * elección del agente), pero queda genérico por si otro documento lo
+   * necesita más adelante. Ningún llamador de Factura/Nota/Recibo lo
+   * completa, así que el motor fiscal queda intacto. Recibe el jsPDF
+   * activo + la Y actual (ya con salto de página resuelto si hacía
+   * falta) + el ancho de página y el margen -- debe devolver la Y final
+   * para que el pie de página no le pise el contenido. Puede agregar
+   * más páginas si lo necesita (mismo `doc`, se sigue escribiendo
+   * encima del mismo documento). */
+  bloqueAdicional?: (doc: jsPDF, y: number, pageWidth: number, marginX: number) => number
 }
 
 function formatARS(n: number): string {
@@ -913,6 +925,15 @@ export async function generarComprobantePdf(
     doc.setFontSize(6.5)
     doc.text('Documento interno / sin autorización de ARCA', pageWidth / 2, y + 10.5, { align: 'center' })
     y += altoBloque + 4
+  }
+
+  // ─── Bloque adicional (Fase 41.7 -- ver comentario en ComprobanteParaPdf) ──
+  if (comprobante.bloqueAdicional) {
+    if (y > pageHeight - 40) {
+      doc.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+      y = 15
+    }
+    y = comprobante.bloqueAdicional(doc, y, pageWidth, marginX)
   }
 
   // ─── Pie de página ────────────────────────────────────────────

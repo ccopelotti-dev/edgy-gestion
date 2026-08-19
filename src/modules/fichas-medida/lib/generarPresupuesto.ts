@@ -27,6 +27,7 @@
 
 import { supabase } from '@/lib/supabase';
 import type { FichaMedida, ItemFichaMedida } from '../types';
+import { calcularCantidadesAMedida, type LineaFormula } from '@/modules/productos-stock/types';
 
 // Mismo default que ventas/data/seed.ts (config.validezPresupuestoDias)
 // -- no hay tabla de configuración real para leerlo desde acá sin
@@ -114,16 +115,79 @@ export async function generarPresupuestoDesdeFicha(
     new Set(ficha.items.map((it) => it.productoId).filter((id): id is string => Boolean(id))),
   );
   const precioPorProducto = new Map<string, number>();
+  const margenPorProducto = new Map<string, number>();
   if (productoIds.length > 0) {
     const { data: productosRows } = await supabase
       .from('productos')
-      .select('id, precio_venta')
+      .select('id, precio_venta, margen_ganancia')
       .in('id', productoIds);
-    for (const p of productosRows ?? []) precioPorProducto.set(p.id, Number(p.precio_venta));
+    for (const p of productosRows ?? []) {
+      precioPorProducto.set(p.id, Number(p.precio_venta));
+      if (p.margen_ganancia != null) margenPorProducto.set(p.id, Number(p.margen_ganancia));
+    }
+  }
+
+  // Precio por medida real (20/08, a pedido de Carlos -- "revisá que el
+  // cálculo de material haya sido correcto"): antes el precio de cada
+  // ítem era siempre el precio_venta FIJO del producto vinculado, así
+  // que dos cortinas de tamaños distintos (misma tela/tipo) salían
+  // idénticas en el Presupuesto. La Fórmula ya sabe escalar cada línea
+  // por las medidas reales del paño (calcularCantidadesAMedida, Fase
+  // 41 -- mismo cálculo que usa Producción para descontar stock real);
+  // acá se reusa esa misma cuenta para recalcular el COSTO real del
+  // ítem y aplicarle el margen que el producto tiene guardado
+  // (Producto.margenGanancia, "modo margen" de Formular Producto). Si
+  // el producto está en "modo manual" (sin margen guardado) o falta
+  // algún dato (fórmula, medidas), se cae al precio_venta fijo de
+  // siempre -- nunca se inventa un margen que Carlos no cargó.
+  const lineasPorProducto = new Map<string, LineaFormula[]>();
+  if (productoIds.length > 0 && margenPorProducto.size > 0) {
+    const productoIdsConMargen = productoIds.filter((id) => margenPorProducto.has(id));
+    if (productoIdsConMargen.length > 0) {
+      const { data: formulasRows } = await supabase
+        .from('formulas')
+        .select('id, producto_id')
+        .in('producto_id', productoIdsConMargen);
+      const formulaIdPorProducto = new Map<string, string>();
+      for (const f of formulasRows ?? []) formulaIdPorProducto.set(f.producto_id, f.id);
+      const formulaIds = Array.from(formulaIdPorProducto.values());
+      if (formulaIds.length > 0) {
+        const { data: lineasRows } = await supabase
+          .from('formula_lineas')
+          .select('id, formula_id, cantidad, unidad, costo_unitario, fuente_dimension')
+          .in('formula_id', formulaIds);
+        for (const [productoId, formulaId] of formulaIdPorProducto) {
+          const lineas: LineaFormula[] = (lineasRows ?? [])
+            .filter((l) => l.formula_id === formulaId)
+            .map((l) => ({
+              id: l.id,
+              tipo: 'insumo', // no se distingue acá -- el cálculo suma todas las líneas por igual
+              descripcion: '',
+              cantidad: Number(l.cantidad),
+              unidad: l.unidad,
+              costoUnitario: Number(l.costo_unitario),
+              fuenteDimension: (l.fuente_dimension as LineaFormula['fuenteDimension']) ?? undefined,
+            }));
+          lineasPorProducto.set(productoId, lineas);
+        }
+      }
+    }
+  }
+
+  function precioReal(it: ItemFichaMedida): number | null {
+    if (!it.productoId) return null;
+    const margen = margenPorProducto.get(it.productoId);
+    const lineas = lineasPorProducto.get(it.productoId);
+    if (margen == null || !lineas || lineas.length === 0) return null;
+    if (it.panos.length === 0) return null;
+    const resultado = calcularCantidadesAMedida(lineas, it.panos);
+    if (!resultado.ok) return null;
+    const costoReal = lineas.reduce((acc, l) => acc + (resultado.cantidades.get(l.id) ?? 0) * l.costoUnitario, 0);
+    return Math.round(costoReal * (1 + margen / 100) * 100) / 100;
   }
 
   const filasItems = ficha.items.map((it) => {
-    const precio = it.productoId ? precioPorProducto.get(it.productoId) ?? 0 : 0;
+    const precio = precioReal(it) ?? (it.productoId ? precioPorProducto.get(it.productoId) ?? 0 : 0);
     return {
       id: crypto.randomUUID(),
       presupuesto_id: presupuestoId,
