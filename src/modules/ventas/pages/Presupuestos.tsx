@@ -23,10 +23,11 @@ import {
   Mail,
   MessageCircle,
   HandCoins,
+  FileDown,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { descargarPresupuestoPdf } from '../lib/pdfComprobantes';
+import { descargarPresupuestoPdf, descargarReciboPdf } from '../lib/pdfComprobantes';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import { buscarSenaPendiente } from '../lib/senaHelpers';
 import {
@@ -75,7 +76,7 @@ const PREFIJO_PRESUPUESTO = 'PRE';
 export default function Presupuestos() {
   const todosPresupuestos = usePresupuestos();
   const clientes = useClientes();
-  const { ordenes, cobros, config, nextNumeroComprobante } = useVentas();
+  const { ordenes, cobros, comprobantes, config, nextNumeroComprobante } = useVentas();
   const dispatch = useVentasDispatch();
 
   // ── Filtros ───────────────────────────────────────────────
@@ -364,6 +365,25 @@ export default function Presupuestos() {
     }
   };
 
+  // Fase 41.2: descarga del recibo de la seña ya cobrada -- reusa el mismo
+  // motor de Recibo que Cobranzas.tsx (ver descargarReciboPdf), buscando el
+  // Cobro vinculado a este presupuesto por presupuestoId. Si en el futuro
+  // se cobra en más de una tanda, esto baja el recibo de la primera --
+  // alcanza para el caso de uso de hoy (una seña por presupuesto).
+  const [generandoReciboId, setGenerandoReciboId] = useState<string | null>(null);
+  const handleDescargarRecibo = async (pres: Presupuesto) => {
+    if (!empresaActual) return;
+    const cobro = cobros.find((c) => c.presupuestoId === pres.id);
+    if (!cobro) return;
+    setGenerandoReciboId(pres.id);
+    try {
+      const cliente = clientes.find((c) => c.id === pres.clienteId);
+      await descargarReciboPdf(empresaActual, cliente, cobro, comprobantes, clienteNombre(pres.clienteId));
+    } finally {
+      setGenerandoReciboId(null);
+    }
+  };
+
   // Envío por email / WhatsApp al cliente -- mismo criterio que Cotizaciones
   // (Compras): todavía no hay un motor de envío real, así que se arma un
   // link mailto:/wa.me con asunto y texto ya redactados a partir de los
@@ -496,6 +516,9 @@ export default function Presupuestos() {
             <tbody>
               {presupuestosFiltrados.map((pres) => {
                 const cliente = clientes.find((c) => c.id === pres.clienteId);
+                const senaMonto = cobros
+                  .filter((c) => c.presupuestoId === pres.id)
+                  .reduce((sum, c) => sum + c.monto, 0);
                 return (
                   <PresupuestoRow
                     key={pres.id}
@@ -515,6 +538,9 @@ export default function Presupuestos() {
                     onEnviarEmail={() => handleEnviarEmail(pres, cliente)}
                     onEnviarWhatsapp={() => handleEnviarWhatsapp(pres, cliente)}
                     onCobrarSena={() => setSenaDialogPresupuesto(pres)}
+                    senaMonto={senaMonto}
+                    onDescargarRecibo={() => handleDescargarRecibo(pres)}
+                    generandoRecibo={generandoReciboId === pres.id}
                   />
                 );
               })}
@@ -642,6 +668,9 @@ interface PresupuestoRowProps {
   onEnviarEmail: () => void;
   onEnviarWhatsapp: () => void;
   onCobrarSena: () => void;
+  senaMonto: number;
+  onDescargarRecibo: () => void;
+  generandoRecibo: boolean;
 }
 
 function PresupuestoRow({
@@ -661,6 +690,9 @@ function PresupuestoRow({
   onEnviarEmail,
   onEnviarWhatsapp,
   onCobrarSena,
+  senaMonto,
+  onDescargarRecibo,
+  generandoRecibo,
 }: PresupuestoRowProps) {
   const p = presupuesto;
 
@@ -742,18 +774,37 @@ function PresupuestoRow({
                 </button>
               </>
             )}
-            {/* Fase 41.2: cobro de seña -- disponible en enviado/aprobado
-                (el cliente puede confirmar y venir a pagar más adelante),
-                no solo en el momento de aprobar. */}
-            {(p.estado === 'enviado' || p.estado === 'aprobado') && (
-              <button onClick={onCobrarSena} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cobrar seña">
-                <HandCoins className="h-3.5 w-3.5" />
-              </button>
-            )}
-            {p.estado === 'aprobado' && ordenNumero && (
-              <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full whitespace-nowrap">
-                <Link2 className="h-3 w-3 inline mr-1" />{ordenNumero}
-              </span>
+            {p.estado === 'aprobado' && (
+              <>
+                {/* Fase 41.2: cobro de seña -- a propósito solo disponible
+                    DESPUÉS de aprobar (pedido explícito de Carlos: primero
+                    se aprueba, después se puede cobrar, nunca antes). El
+                    cliente puede aprobar hoy y venir a pagar la seña
+                    recién más adelante, por eso queda disponible acá de
+                    forma permanente y no solo en el momento de aprobar. */}
+                <button onClick={onCobrarSena} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cobrar seña">
+                  <HandCoins className="h-3.5 w-3.5" />
+                </button>
+                {senaMonto > 0 && (
+                  <button
+                    onClick={onDescargarRecibo}
+                    disabled={generandoRecibo}
+                    className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg disabled:opacity-50"
+                    title="Descargar recibo de seña"
+                  >
+                    {generandoRecibo ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <FileDown className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                )}
+                {ordenNumero && (
+                  <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full whitespace-nowrap">
+                    <Link2 className="h-3 w-3 inline mr-1" />{ordenNumero}
+                  </span>
+                )}
+              </>
             )}
           </div>
         </td>
@@ -866,6 +917,11 @@ function PresupuestoRow({
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <Calendar className="h-4 w-4" />
                 Vence: {formatDate(p.fechaVencimiento)}
+                {senaMonto > 0 && (
+                  <span className="text-amber-700">
+                    · Anticipo recibido de {formatARS(senaMonto)}
+                  </span>
+                )}
               </div>
 
               {/* Orden vinculada (si aprobado) */}
