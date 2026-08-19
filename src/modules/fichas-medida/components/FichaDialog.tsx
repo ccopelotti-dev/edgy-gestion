@@ -605,7 +605,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                 <p className="mt-1 text-[11px] text-gray-400">También impacta en Agenda.</p>
               </div>
               <div>
-                <label className={labelClass}>Modalidad de entrega</label>
+                <label className={labelClass}>Mod. de entrega</label>
                 <select
                   value={modalidadEntrega}
                   onChange={(e) => setModalidadEntrega(e.target.value as ModalidadEntrega)}
