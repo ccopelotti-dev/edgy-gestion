@@ -41,6 +41,10 @@ function descripcionItem(it: ItemFichaMedida): string {
   if (it.peso) partes.push(`Peso: ${it.peso}`);
 
   if (it.panos && it.panos.length > 0) {
+    // A pedido de Carlos (19/08): informar la cantidad de paños en el
+    // detalle del Presupuesto -- sin agregar un campo nuevo, se deriva
+    // del mismo array que ya se carga con "+ Agregar paño" en la Ficha.
+    partes.push(`Paños: ${it.panos.length}`);
     const medidas = it.panos
       .map((p, i) => `${i + 1}) ${p.ancho ?? '?'}×${p.alto ?? '?'}`)
       .join(', ');
