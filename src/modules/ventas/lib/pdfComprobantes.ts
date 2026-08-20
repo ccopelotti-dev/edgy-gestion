@@ -25,7 +25,7 @@ import { generarReciboPdf } from '@/lib/comprobantes-pdf/generarReciboPdf';
 import { fetchFichaPorPresupuestoId } from '@/modules/fichas-medida/data/useFichasMedida';
 import { dibujarDetalleRelevado } from '@/modules/fichas-medida/lib/generarFichaMedidaPdf';
 import type { Cliente as ClienteEmpresa } from '@/types';
-import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE } from './format';
+import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE, conIvaIncluido } from './format';
 import type { Cliente, Cobro, Comprobante, Presupuesto } from '../types';
 import {
   CONDICION_IVA_LABEL,
@@ -198,9 +198,21 @@ export async function descargarComprobantePdf(
   );
 }
 
-/** Descarga el PDF de un Presupuesto -- mismo motor, sin IVA
- * discriminado por línea (los presupuestos de Edgy no lo calculan) ni
- * datos de ARCA (nunca tiene CAE).
+/** Descarga el PDF de un Presupuesto -- mismo motor genérico que
+ * Factura/Recibo, sin datos de ARCA (nunca tiene CAE).
+ *
+ * `ivaDefault` (Fase 42, 20/08, a pedido de Carlos): los montos que
+ * guarda `Presupuesto` en la base son NETOS (misma cadena limpia que
+ * Compras -> Insumo/Producto -> Fórmula, que a propósito no se toca).
+ * Pero lo que el cliente tiene que VER, desde el primer presupuesto que
+ * recibe, es el precio final -- el mismo número que después va a pagar
+ * en la Factura, sin que le cambie por el IVA "apareciendo" recién ahí.
+ * Por eso acá, al armar el PDF, cada monto se multiplica por
+ * `conIvaIncluido` antes de mandarlo al motor -- nunca se discrimina el
+ * IVA como línea aparte (a diferencia de Factura, que si lo hace: ese
+ * es, a propósito, el ÚNICO lugar de todo el sistema donde el IVA se
+ * separa del precio). El neto real sigue viviendo en la base tal cual
+ * se guardó; esto es pura transformación de visualización al imprimir.
  *
  * `incluirDetalleRelevado` (Fase 41.7, 20/08, a pedido de Carlos): si el
  * presupuesto viene de una Ficha de medida de cortinas, agrega al final
@@ -215,6 +227,7 @@ export async function descargarPresupuestoPdf(
   cliente: Cliente | undefined,
   presupuesto: Presupuesto,
   clienteNombreFallback: string,
+  ivaDefault: number,
   incluirDetalleRelevado = false,
 ): Promise<void> {
   const numero = `PRE-${String(presupuesto.numero).padStart(5, '0')}`;
@@ -241,12 +254,12 @@ export async function descargarPresupuestoPdf(
       items: presupuesto.items.map((i) => ({
         descripcion: i.descripcion,
         cantidad: i.cantidad,
-        precioUnitario: i.precioUnitario,
-        subtotal: i.subtotal,
+        precioUnitario: conIvaIncluido(i.precioUnitario, ivaDefault),
+        subtotal: conIvaIncluido(i.subtotal, ivaDefault),
       })),
-      subtotal: presupuesto.subtotal,
+      subtotal: conIvaIncluido(presupuesto.subtotal, ivaDefault),
       descuentoGeneral: presupuesto.descuentoGeneral,
-      total: presupuesto.total,
+      total: conIvaIncluido(presupuesto.total, ivaDefault),
       notas: presupuesto.notas ?? presupuesto.condiciones ?? null,
       bloqueAdicional,
     },

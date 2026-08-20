@@ -51,6 +51,7 @@ import {
   formatPct,
   nowISO,
   PREFIJO_ORDEN,
+  conIvaIncluido,
 } from '../lib/format';
 import type {
   Presupuesto,
@@ -387,7 +388,7 @@ export default function Presupuestos() {
     setGenerandoPdfId(pres.id);
     try {
       const cliente = clientes.find((c) => c.id === pres.clienteId);
-      await descargarPresupuestoPdf(empresaActual, cliente, pres, clienteNombre(pres.clienteId));
+      await descargarPresupuestoPdf(empresaActual, cliente, pres, clienteNombre(pres.clienteId), config.ivaDefault);
     } finally {
       setGenerandoPdfId(null);
     }
@@ -401,7 +402,7 @@ export default function Presupuestos() {
     setGenerandoPdfDetalleId(pres.id);
     try {
       const cliente = clientes.find((c) => c.id === pres.clienteId);
-      await descargarPresupuestoPdf(empresaActual, cliente, pres, clienteNombre(pres.clienteId), true);
+      await descargarPresupuestoPdf(empresaActual, cliente, pres, clienteNombre(pres.clienteId), config.ivaDefault, true);
     } finally {
       setGenerandoPdfDetalleId(null);
     }
@@ -549,7 +550,7 @@ export default function Presupuestos() {
                 <th className="px-4 py-3 font-medium">Cliente</th>
                 <th className="px-4 py-3 font-medium">Fecha</th>
                 <th className="px-4 py-3 font-medium">Validez</th>
-                <th className="px-4 py-3 text-right font-medium">Total</th>
+                <th className="px-4 py-3 text-right font-medium">Total (IVA incl.)</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap">Acciones</th>
                 <th className="px-4 py-3 w-10" />
@@ -577,6 +578,7 @@ export default function Presupuestos() {
                     onFacturar={() => handleFacturar(pres)}
                     onDescargarPdf={() => handleDescargarPdf(pres)}
                     generandoPdf={generandoPdfId === pres.id}
+                    ivaDefault={config.ivaDefault}
                     tieneFichaCortinas={presupuestosConFichaCortinas.has(pres.id)}
                     onDescargarPdfConDetalle={() => handleDescargarPdfConDetalle(pres)}
                     generandoPdfDetalle={generandoPdfDetalleId === pres.id}
@@ -710,6 +712,10 @@ interface PresupuestoRowProps {
   onFacturar: () => void;
   onDescargarPdf: () => void;
   generandoPdf: boolean;
+  /** Fase 42: alícuota de IVA a mostrar sobre los montos netos guardados
+   * (ver conIvaIncluido en lib/format.ts) -- viene de config.ivaDefault,
+   * no de un campo propio del Presupuesto. */
+  ivaDefault: number;
   /** Fase 41.7: solo true cuando el presupuesto viene de una Ficha de
    * medida de cortinas -- habilita el segundo ícono de descarga (con
    * el esquema técnico incluido). */
@@ -738,6 +744,7 @@ function PresupuestoRow({
   onFacturar,
   onDescargarPdf,
   generandoPdf,
+  ivaDefault,
   tieneFichaCortinas,
   onDescargarPdfConDetalle,
   generandoPdfDetalle,
@@ -767,7 +774,7 @@ function PresupuestoRow({
           {p.validezDias} {p.validezDias === 1 ? 'día' : 'días'}
         </td>
         <td className="px-4 py-3 text-right">
-          <Amount value={p.total} />
+          <Amount value={conIvaIncluido(p.total, ivaDefault)} />
         </td>
         <td className="px-4 py-3">
           <EstadoPresupuestoBadge estado={p.estado} />
@@ -902,7 +909,7 @@ function PresupuestoRow({
                       <tr className="border-b border-gray-100 text-left text-gray-500">
                         <th className="px-3 py-2 font-medium">Descripción</th>
                         <th className="px-3 py-2 text-right font-medium">Cantidad</th>
-                        <th className="px-3 py-2 text-right font-medium">Precio Unit.</th>
+                        <th className="px-3 py-2 text-right font-medium">Precio Unit. (IVA incl.)</th>
                         <th className="px-3 py-2 text-right font-medium">Dto.</th>
                         <th className="px-3 py-2 text-right font-medium">Subtotal</th>
                       </tr>
@@ -920,13 +927,13 @@ function PresupuestoRow({
                             {item.cantidad}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            <Amount value={item.precioUnitario} />
+                            <Amount value={conIvaIncluido(item.precioUnitario, ivaDefault)} />
                           </td>
                           <td className="px-3 py-2 text-right text-gray-600">
                             {item.descuento > 0 ? formatPct(item.descuento) : '—'}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            <Amount value={item.subtotal} />
+                            <Amount value={conIvaIncluido(item.subtotal, ivaDefault)} />
                           </td>
                         </tr>
                       ))}
@@ -938,16 +945,16 @@ function PresupuestoRow({
                             Descuento general ({formatPct(p.descuentoGeneral)})
                           </td>
                           <td className="px-3 py-2 text-right text-sm text-red-600">
-                            -{formatARS(p.subtotal * (p.descuentoGeneral / 100))}
+                            -{formatARS(conIvaIncluido(p.subtotal * (p.descuentoGeneral / 100), ivaDefault))}
                           </td>
                         </tr>
                       )}
                       <tr className="border-t border-gray-200">
                         <td colSpan={4} className="px-3 py-2 text-right font-semibold text-gray-900">
-                          Total
+                          Total (IVA incluido)
                         </td>
                         <td className="px-3 py-2 text-right font-semibold text-gray-900">
-                          {formatARS(p.total)}
+                          {formatARS(conIvaIncluido(p.total, ivaDefault))}
                         </td>
                       </tr>
                     </tfoot>

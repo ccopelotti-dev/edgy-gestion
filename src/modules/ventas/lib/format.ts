@@ -125,6 +125,22 @@ export function formatCuit(cuit: string): string {
 }
 
 /**
+ * Fase 42 (20/08, a pedido de Carlos): "mostrar siempre precios con IVA
+ * incluido, sin discriminar" en todo lo que el cliente ve ANTES de
+ * facturar (Presupuesto). La cadena de costeo interna (Compras, Fórmula,
+ * Producto.precioVenta) sigue siendo neta a propósito -- no se toca --,
+ * así que esto es puramente una transformación de visualización: se le
+ * aplica acá, en el momento de mostrar/imprimir, no se guarda en la
+ * base. Al facturar, el motor de Comprobantes usa el mismo neto + la
+ * misma alícuota, así que el número que ve el cliente en el Presupuesto
+ * y el que termina pagando en la Factura son EXACTAMENTE el mismo --
+ * ninguno de los dos lo vuelve a recalcular con otra lógica.
+ */
+export function conIvaIncluido(montoNeto: number, alicuotaIva: number): number {
+  return montoNeto * (1 + alicuotaIva / 100);
+}
+
+/**
  * Formatea cantidad con unidad
  */
 export function formatQty(qty: number, unit?: string): string {
