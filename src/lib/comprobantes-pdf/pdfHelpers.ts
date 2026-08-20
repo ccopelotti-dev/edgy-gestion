@@ -332,6 +332,23 @@ export function colorLegibleSobreBlanco(hex: string): string {
     .join('')}`
 }
 
+/** Fase 43j (20/08, a pedido de Carlos -- previo a migrar el motor
+ * compartido de comprobantes a este mismo header): datos que solo
+ * aplican a comprobantes FISCALES (Factura/Nota de crédito/Nota de
+ * débito) -- ninguno de los dos es obligatorio, así que Toma de
+ * Pedidos (que no manda ninguno) sigue viéndose exactamente igual. */
+export interface OpcionesEncabezadoFiscal {
+  /** Letra destacada en el bloque central -- 'A'|'B'|'C' cuando ARCA ya
+   * la resolvió, 'X' para comprobantes internos/sin CAE todavía. */
+  letraFiscal?: 'A' | 'B' | 'C' | 'X'
+  /** Código AFIP del tipo de comprobante (01, 06, 11...) -- se muestra
+   * como "COD. XX" debajo de la letra; si no está, muestra "S/N". */
+  codigoAfip?: number
+  /** Nombre y apellido (o razón social) del titular tal como figura
+   * ante ARCA -- se imprime debajo del nombre de fantasía. */
+  titular?: string | null
+}
+
 /**
  * Encabezado alternativo -- Fase 43c (20/08, a pedido de Carlos, tomado
  * como "modelo base para todo"): UN solo panel de color (no banda
@@ -340,9 +357,14 @@ export function colorLegibleSobreBlanco(hex: string): string {
  * documento) adentro -- calcado del mockup que armó a mano en
  * Inkscape. Color de texto automático según el color de marca (ver
  * luminanciaRelativa) para que funcione igual de bien con marcas
- * oscuras que con una tan clara como la de Punto Tex. Sin letra fiscal
- * ni titular (no es un comprobante fiscal). Devuelve la Y desde donde
- * seguir dibujando el cuerpo, igual que `dibujarEncabezado`.
+ * oscuras que con una tan clara como la de Punto Tex.
+ *
+ * Fase 43j: sumó un tercer bloque central OPCIONAL (letra fiscal +
+ * código AFIP) y la línea de titular, para poder usarse también como
+ * base de Factura/Nota de crédito/Nota de débito el día que se migre
+ * el motor compartido -- Toma de Pedidos, que no manda `opcionesFiscal`,
+ * sigue exactamente igual que antes. Devuelve la Y desde donde seguir
+ * dibujando el cuerpo, igual que `dibujarEncabezado`.
  */
 export async function dibujarEncabezadoConDatosFiscales(
   doc: jsPDF,
@@ -351,14 +373,27 @@ export async function dibujarEncabezadoConDatosFiscales(
   numero: string,
   fecha: string,
   condicionIvaEmisor?: string | null,
+  opcionesFiscal?: OpcionesEncabezadoFiscal,
+  // Fase 43k (motor compartido): Toma de Pedidos dibuja su cuerpo con
+  // margen de 15mm, pero el motor de comprobantes (Factura/Recibo/NC/
+  // ND/Presupuesto/etc.) usa 8mm en el resto del documento (tabla de
+  // ítems, totales, pie fiscal) -- si el header quedara fijo en 15,
+  // el panel de color no alinearía con el borde izquierdo/derecho del
+  // cuerpo. Parametrizable, con 15 de default para no tocar el único
+  // llamador que ya estaba en producción (generarFichaMedidaPdf.ts).
+  marginX = 15,
 ): Promise<{ y: number; color: string }> {
   const color = empresa.colorMarca || COLOR_DEFAULT
   const pageWidth = doc.internal.pageSize.getWidth()
-  const marginX = 15
 
   const fondoClaro = luminanciaRelativa(color) > 0.5
   const colorTitulo = fondoClaro ? '#2b2320' : '#ffffff'
   const colorTexto = fondoClaro ? '#5c5450' : '#f0ece6'
+  // Fase 43j: las líneas divisorias del bloque de letra van en un gris
+  // sutil fijo (jsPDF `setDrawColor` no acepta rgba/alpha) -- en el
+  // diseño viejo eran gris clarito sobre blanco; acá, sobre un panel de
+  // color, conviene que sean discretas en vez de competir con el texto.
+  const colorDivisor = fondoClaro ? '#c9c2b8' : '#8a8a8a'
 
   let logoInfo: { dataUrl: string; formato: 'PNG' | 'JPEG' } | null = null
   if (empresa.logoUrl) logoInfo = await logoADataUrl(empresa.logoUrl)
@@ -366,6 +401,11 @@ export async function dibujarEncabezadoConDatosFiscales(
   const logoSize = 28
   const colIzqX = logoInfo ? marginX + logoSize + 6 : marginX
   const colDerX = pageWidth / 2 + 10
+  // Fase 43j: el bloque de letra fiscal se apoya justo a la izquierda
+  // de la columna del documento -- mismo lugar relativo que ocupaba en
+  // el diseño viejo de Factura (entre emisor y datos del comprobante),
+  // con margen de sobra para no pisar ninguna de las dos columnas.
+  const xLetra = colDerX - 15
 
   const contactos: { tipo: 'whatsapp' | 'instagram' | 'web'; texto: string; iconoUrl?: string | null }[] = []
   if (empresa.whatsappComercial) {
@@ -391,6 +431,7 @@ export async function dibujarEncabezadoConDatosFiscales(
   const topPad = 9
   const bottomPad = 8
   let altoColIzq = 6 // nombre
+  if (opcionesFiscal?.titular) altoColIzq += 4.3
   if (empresa.direccion) altoColIzq += 4.3
   if (leyendaIva) altoColIzq += 4.3
   altoColIzq += contactos.length * 4.3
@@ -400,7 +441,13 @@ export async function dibujarEncabezadoConDatosFiscales(
   if (empresa.cuit) altoColDer += 4.3
   if (partesDoc.length > 0) altoColDer += 4.3
 
-  const altoContenido = Math.max(altoColIzq, altoColDer, logoInfo ? logoSize : 0)
+  // Bloque de letra: compacto, mismas proporciones que el diseño viejo
+  // (letra 16pt + "COD. XX" 6pt, con un pequeño margen) -- casi nunca es
+  // el que termina definiendo el alto total, pero se lo tiene en cuenta
+  // igual por si la empresa/documento tienen muy poco texto cargado.
+  const altoLetra = opcionesFiscal?.letraFiscal ? 15 : 0
+
+  const altoContenido = Math.max(altoColIzq, altoColDer, altoLetra, logoInfo ? logoSize : 0)
   const altoPanel = topPad + altoContenido + bottomPad
 
   doc.setFillColor(color)
@@ -415,7 +462,32 @@ export async function dibujarEncabezadoConDatosFiscales(
     }
   }
 
-  // Columna izquierda -- nombre, domicilio, condición de IVA, contactos.
+  // Bloque central -- letra fiscal + código AFIP, SOLO si el llamador
+  // la mandó (Factura/NC/ND). Toma de Pedidos no manda `opcionesFiscal`,
+  // así que este bloque entero se salta y el panel queda igual que
+  // antes de esta fase.
+  if (opcionesFiscal?.letraFiscal) {
+    const yLetra = topPad + 8
+    const yCod = yLetra + 3
+    const yLineasTop = yLetra - 4.5
+    const yLineasBottom = yCod + 1
+    doc.setDrawColor(colorDivisor)
+    doc.setLineWidth(0.25)
+    doc.line(xLetra - 5.5, yLineasTop, xLetra - 5.5, yLineasBottom)
+    doc.line(xLetra + 5.5, yLineasTop, xLetra + 5.5, yLineasBottom)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(16)
+    doc.setTextColor(colorTitulo)
+    doc.text(opcionesFiscal.letraFiscal, xLetra, yLetra, { align: 'center' })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(6)
+    doc.setTextColor(colorTexto)
+    const codTexto = opcionesFiscal.codigoAfip !== undefined ? `COD. ${String(opcionesFiscal.codigoAfip).padStart(2, '0')}` : 'S/N'
+    doc.text(codTexto, xLetra, yCod, { align: 'center' })
+  }
+
+  // Columna izquierda -- nombre, titular, domicilio, condición de IVA,
+  // contactos.
   let yA = topPad + 4
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(13)
@@ -425,6 +497,10 @@ export async function dibujarEncabezadoConDatosFiscales(
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(colorTexto)
+  if (opcionesFiscal?.titular) {
+    doc.text(opcionesFiscal.titular, colIzqX, yA)
+    yA += 4.3
+  }
   if (empresa.direccion) {
     doc.text(empresa.direccion, colIzqX, yA)
     yA += 4.3

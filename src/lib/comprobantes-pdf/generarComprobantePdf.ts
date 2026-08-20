@@ -36,7 +36,11 @@
 // ============================================================
 
 import { jsPDF } from 'jspdf'
-import { imprimirOGuardarPdf } from './pdfHelpers'
+import {
+  imprimirOGuardarPdf,
+  dibujarEncabezadoConDatosFiscales,
+  type OpcionesEncabezadoFiscal,
+} from './pdfHelpers'
 import QRCode from 'qrcode'
 import { construirUrlQrFiscal, type DatosQrFiscal } from './arcaQr'
 
@@ -102,35 +106,10 @@ export interface EmpresaParaPdf {
   whatsappIconoUrl?: string | null
 }
 
-/** Leyenda de condición de IVA del emisor -- Anexo II RG 1415, espacio
- * superior izquierdo. Los 3 valores posibles vienen de
- * clientes_arca_config.condicion_iva (ver DatosAfipParaPdf.condicionIvaEmisor). */
-function leyendaCondicionIva(condicion: string): string {
-  switch (condicion) {
-    case 'responsable_inscripto':
-      return 'IVA Responsable Inscripto'
-    case 'monotributista':
-      return 'Responsable Monotributo'
-    case 'exento':
-      return 'IVA Exento'
-    default:
-      return ''
-  }
-}
-
-/** Leyenda de Ingresos Brutos -- Anexo II RG 1415: "N.º de inscripción
- * ... o condición de NO CONTRIBUYENTE". */
-function leyendaIngresosBrutos(
-  condicion?: string | null,
-  numero?: string | null,
-  provincia?: string | null,
-): string | null {
-  if (!condicion) return null
-  if (condicion === 'exento') return 'IIBB: Exento'
-  if (condicion === 'no_contribuyente') return 'IIBB: No contribuyente'
-  const sufijo = condicion === 'inscripto_convenio_multilateral' ? ' (Conv. Multilateral)' : provincia ? ` (${provincia})` : ''
-  return numero ? `IIBB N.º ${numero}${sufijo}` : null
-}
+// Fase 43k: `leyendaCondicionIva`/`leyendaIngresosBrutos` (Anexo II RG
+// 1415) se removieron de acá -- ahora viven en pdfHelpers.ts, adentro
+// de `dibujarEncabezadoConDatosFiscales`, que es quien dibuja esas
+// líneas desde que el motor compartido migró al panel único.
 
 export interface ItemParaPdf {
   descripcion: string
@@ -282,27 +261,10 @@ function oscurecer(hex: string, factor: number): [number, number, number] {
   return [mezclar(r), mezclar(g), mezclar(b)]
 }
 
-async function logoADataUrl(
-  url: string,
-): Promise<{ dataUrl: string; formato: 'PNG' | 'JPEG' } | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const blob = await res.blob()
-    const formato: 'PNG' | 'JPEG' = blob.type.includes('png') ? 'PNG' : 'JPEG'
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.onerror = () => reject(new Error('No se pudo leer el logo'))
-      reader.readAsDataURL(blob)
-    })
-    return { dataUrl, formato }
-  } catch {
-    // El logo es un plus visual -- si falla la descarga (CORS, red,
-    // formato raro) el comprobante se genera igual, sin logo.
-    return null
-  }
-}
+// Fase 43k: `logoADataUrl` (descarga del logo a data URL) se removió de
+// acá -- el header ahora se dibuja íntegro adentro de
+// `dibujarEncabezadoConDatosFiscales` (pdfHelpers.ts), que tiene su
+// propia copia.
 
 /** Número fiscal formateado como lo exige ARCA en la representación
  * gráfica: PtoVta a 4 dígitos - CbteNro a 8 dígitos (ej "0001-00000094"). */
@@ -326,63 +288,9 @@ function formatNumeroFiscal(puntoVenta: number, numeroComprobante: number): stri
  * Instagram) -- reconocible por color y forma general, sin calcar el
  * isotipo protegido.
  */
-const COLOR_ICONO_WHATSAPP: [number, number, number] = [37, 178, 92] // verde
-const COLOR_ICONO_INSTAGRAM: [number, number, number] = [224, 108, 30] // naranja
-const COLOR_ICONO_WEB: [number, number, number] = [110, 110, 110] // gris neutro
-
-function dibujarIconoContacto(
-  doc: jsPDF,
-  tipo: 'whatsapp' | 'instagram' | 'web',
-  x: number,
-  y: number,
-  size: number,
-): void {
-  const [dr, dg, db] =
-    tipo === 'whatsapp' ? COLOR_ICONO_WHATSAPP : tipo === 'instagram' ? COLOR_ICONO_INSTAGRAM : COLOR_ICONO_WEB
-
-  // Placa de fondo -- cuadrado con esquinas redondeadas, relleno sólido.
-  doc.setFillColor(dr, dg, db)
-  doc.roundedRect(x, y, size, size, size * 0.24, size * 0.24, 'F')
-
-  // Glifo en blanco, encima de la placa.
-  doc.setDrawColor(255, 255, 255)
-  doc.setFillColor(255, 255, 255)
-  doc.setLineWidth(size * 0.07)
-  const r = size / 2
-  const cx = x + r
-  const cy = y + r
-  switch (tipo) {
-    case 'whatsapp': {
-      // Globo de diálogo genérico con colita -- NO el auricular
-      // estilizado que usa el isotipo real de WhatsApp.
-      const bw = size * 0.58
-      const bh = size * 0.48
-      const bx = x + (size - bw) / 2
-      const by = y + size * 0.24
-      doc.roundedRect(bx, by, bw, bh, bh * 0.4, bh * 0.4, 'S')
-      doc.triangle(
-        bx + bw * 0.28, by + bh * 0.95,
-        bx + bw * 0.52, by + bh * 0.95,
-        bx + bw * 0.28, by + bh * 1.3,
-        'F',
-      )
-      break
-    }
-    case 'instagram':
-      // Pictograma tipo "cámara": cuadrado redondeado + lente + punto,
-      // NO el isotipo real de Instagram.
-      doc.roundedRect(x + size * 0.2, y + size * 0.2, size * 0.6, size * 0.6, size * 0.14, size * 0.14, 'S')
-      doc.circle(cx, cy, r * 0.42, 'S')
-      doc.circle(x + size * 0.74, y + size * 0.26, size * 0.05, 'F')
-      break
-    case 'web':
-      // Globo terráqueo simplificado: círculo + meridiano + ecuador.
-      doc.circle(cx, cy, r * 0.62, 'S')
-      doc.line(x + size * 0.19, cy, x + size * 0.81, cy)
-      doc.ellipse(cx, cy, r * 0.28, r * 0.62, 'S')
-      break
-  }
-}
+// Fase 43k: los pictogramas de contacto (WhatsApp/Instagram/Web) se
+// removieron de acá -- ahora los dibuja `dibujarEncabezadoConDatosFiscales`
+// (pdfHelpers.ts), que tiene su propia copia (`dibujarIconoContactoChico`).
 
 /**
  * Genera y dispara la descarga (o impresión silenciosa, ver
@@ -412,230 +320,52 @@ export async function generarComprobantePdf(
   const marginX = 8
   const conRecuadroFiscal = !!comprobante.letraFiscal
 
-  // ─── Banda de encabezado ───────────────────────────────────
-  const anchoBanda = 18
-  doc.setFillColor(color)
-  doc.rect(0, 0, pageWidth, anchoBanda, 'F')
-
-  let logoInfo: { dataUrl: string; formato: 'PNG' | 'JPEG' } | null = null
-  if (empresa.logoUrl) {
-    logoInfo = await logoADataUrl(empresa.logoUrl)
+  // ─── Encabezado (Fase 43k, 20/08 -- motor compartido migrado) ──
+  // Antes esta zona se dibujaba a mano acá mismo (banda angosta +
+  // recuadro fiscal de 3 columnas). Ahora usa el mismo panel único de
+  // color con contraste automático que ya se probó y aprobó en Toma de
+  // Pedidos (`dibujarEncabezadoConDatosFiscales`, pdfHelpers.ts) --
+  // Carlos lo pidió explícito como "modelo base para todo" el sistema.
+  // La letra fiscal (A/B/C/X) y la línea de titular ARCA solo se arman
+  // cuando el comprobante las necesita (`conRecuadroFiscal`) --
+  // Presupuesto/OC/Cotización/Pedido siguen sin esos dos elementos,
+  // igual que antes, pero ahora también se benefician del resto del
+  // panel (domicilio del punto de venta, condición de IVA, contactos)
+  // que antes solo tenía el recuadro fiscal.
+  //
+  // La dirección que se muestra es la del PUNTO DE VENTA que emitió
+  // este comprobante (`comprobante.puntoVentaDireccion`, resuelta en
+  // pdfComprobantes.ts a partir de `Comprobante.puntoVentaId`) --
+  // NUNCA `empresa.direccion` (domicilio fiscal, dejó de publicarse,
+  // ver el comentario en `EmpresaParaPdf.direccion` más arriba). Mismo
+  // criterio que ya usa Toma de Pedidos.
+  const empresaParaHeader: EmpresaParaPdf = {
+    ...empresa,
+    direccion: comprobante.puntoVentaDireccion ?? null,
   }
-  const textoX = logoInfo ? marginX + 16 : marginX
-  if (logoInfo) {
-    try {
-      doc.addImage(logoInfo.dataUrl, logoInfo.formato, marginX, 2, 14, 14)
-    } catch {
-      // Formato de imagen no soportado por jsPDF -- seguimos sin logo
-      // en vez de romper la descarga del comprobante.
-    }
-  }
-
-  doc.setTextColor('#ffffff')
-  doc.setFont('helvetica', 'bold')
-  // Fase 38c: tamaño bajado de 13 a 11 -- Carlos pidió tipografía más
-  // conservadora/suave en toda la zona superior, no solo acá.
-  doc.setFontSize(11)
-  // Fase 38b: la banda ya NO muestra el domicilio fiscal (Carlos lo
-  // sacó explícitamente -- "esa no se publica"). Queda solo el nombre
-  // de fantasía; el resto de los datos del emisor vive en el recuadro
-  // de abajo.
-  doc.text(empresa.nombre, textoX, 11)
-
-  // Sin recuadro fiscal (Presupuesto) -- encabezado simple clásico,
-  // tipo/número/fecha arriba a la derecha de la banda.
-  if (!conRecuadroFiscal) {
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(11)
-    doc.text(comprobante.tipoLabel, pageWidth - marginX, 8, { align: 'right' })
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8.5)
-    doc.text(`N.º ${comprobante.numero}`, pageWidth - marginX, 13, { align: 'right' })
-    doc.text(comprobante.fecha, pageWidth - marginX, 17.5, { align: 'right' })
-  }
-
-  let y = anchoBanda + 3
-
-  // ─── Recuadro fiscal (Anexo II RG 1415, Apartado B) ──────────
-  // Tres columnas dentro de un mismo recuadro: (a) emisor -- nombre,
-  // domicilio, condición de IVA; letra destacada A/B/C/X; (b)
-  // comprobante -- numeración, fecha, CUIT, IIBB, inicio de
-  // actividades. Solo se dibuja para comprobantes reales (Factura,
-  // Nota de crédito/débito) -- el Presupuesto no manda `letraFiscal`.
-  if (conRecuadroFiscal) {
-    const yBox = y
-    const xColA = marginX
-    // Fase 38m: proporcional al nuevo ancho de página (210mm, antes
-    // 200mm) para que la letra fiscal mantenga la misma posición
-    // relativa dentro del recuadro (antes: 94mm sobre 184mm de área
-    // útil ≈ 51%; ahora: mismo 51% sobre 194mm de área útil).
-    const xDivisor1 = marginX + 99
-    const xDivisor2 = xDivisor1 + 22
-    const xColBFin = pageWidth - marginX
-
-    // Fase 38c: Carlos pidió sacar el recuadro con borde completo --
-    // "muy de formulario impreso viejo" -- y dejar solo dos líneas
-    // finas separando las 3 zonas (emisor / letra / comprobante), estilo
-    // minimalista. La línea horizontal de cierre (antes de "Cliente:")
-    // es la que reemplaza al borde inferior, más abajo.
-    // Fase 38f/38g/38h/38i: las líneas ya no bajan hasta el final de la
-    // caja -- acompañan solo al bloque de la letra fiscal. Se calculan
-    // acá, ANTES de dibujar nada, a partir de las mismas coordenadas
-    // que después usa el bloque de la letra (yLetra/ySN, más abajo) --
-    // antes eran dos números sueltos que había que mantener en sync a
-    // mano, y quedaban desalineados entre sí más fácil.
-    // Fase 38j: el motivo por el que seguían "viéndose abiertas" pese a
-    // acortar hLineas ronda tras ronda es que arrancaban en yBox --el
-    // techo de TODA la columna-- en vez de arrancar donde realmente
-    // empieza a verse la letra. Eso dejaba ~4mm de línea "flotando" por
-    // encima del glifo, sin nada que la justifique. Ahora arrancan justo
-    // encima del alto de mayúscula de la letra y terminan justo debajo
-    // del renglón COD./S-N, envolviéndola de verdad.
-    const xLetra = (xDivisor1 + xDivisor2) / 2
-    const yLetra = yBox + 8
-    const ySN = yLetra + 3
-    const yLineasTop = yLetra - 4.5
-    const yLineasBottom = ySN + 1
-    doc.setDrawColor(190, 190, 190)
-    doc.setLineWidth(0.25)
-    doc.line(xDivisor1, yLineasTop, xDivisor1, yLineasBottom)
-    doc.line(xDivisor2, yLineasTop, xDivisor2, yLineasBottom)
-
-    // (a) Emisor -- Fase 38b: titular como figura en ARCA (no el
-    // nombre de fantasía, que ya va en la banda), dirección del punto
-    // de venta que emitió ESTE comprobante (no el domicilio fiscal),
-    // condición de IVA, e info comercial con pictograma. Cada línea es
-    // opcional y solo suma si hay dato -- así nunca queda un renglón
-    // en blanco esperando un dato que no está cargado.
-    let yA = yBox + 6
-    doc.setFont('helvetica', 'bold')
-    // Fase 38c: 9 -> 8.3, en línea con el resto de la zona superior.
-    doc.setFontSize(8.3)
-    doc.setTextColor('#222222')
-    doc.text(empresa.titular || empresa.nombre, xColA + 3, yA)
-    yA += 4.5
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.2)
-    doc.setTextColor('#555555')
-    if (comprobante.puntoVentaDireccion) {
-      doc.text(comprobante.puntoVentaDireccion, xColA + 3, yA)
-      yA += 4.5
-    }
-    if (comprobante.afip?.condicionIvaEmisor) {
-      const leyenda = leyendaCondicionIva(comprobante.afip.condicionIvaEmisor)
-      if (leyenda) {
-        doc.text(leyenda, xColA + 3, yA)
-        yA += 4.5
+  const numeroParaHeader = comprobante.afip
+    ? formatNumeroFiscal(comprobante.afip.puntoVenta, comprobante.afip.numeroComprobante)
+    : comprobante.numero
+  const condicionIvaEmisor = comprobante.afip?.condicionIvaEmisor ?? null
+  const opcionesFiscal: OpcionesEncabezadoFiscal | undefined = conRecuadroFiscal
+    ? {
+        letraFiscal: comprobante.letraFiscal,
+        codigoAfip: comprobante.afip?.tipoComprobanteAfip,
+        titular: empresa.titular,
       }
-    }
-    // Fase 38c: la fila de contactos pasa de horizontal a vertical --
-    // WhatsApp, Instagram, Web, en ese orden fijo (Carlos lo pidió así
-    // explícitamente), un renglón por dato, cada uno con su placa de
-    // color a la izquierda.
-    // Fase 38e: si el negocio subió su propio ícono (Configuración >
-    // Empresa) se usa esa imagen tal cual en vez del pictograma
-    // genérico -- así puede mostrar el logo real de cada red sin que
-    // Edgy tenga que reproducirlo.
-    const contactos: { tipo: 'whatsapp' | 'instagram' | 'web'; texto: string; iconoUrl?: string | null }[] = []
-    if (empresa.whatsappComercial) {
-      contactos.push({ tipo: 'whatsapp', texto: empresa.whatsappComercial, iconoUrl: empresa.whatsappIconoUrl })
-    }
-    if (empresa.instagram) {
-      contactos.push({ tipo: 'instagram', texto: empresa.instagram, iconoUrl: empresa.instagramIconoUrl })
-    }
-    if (empresa.sitioWeb) {
-      contactos.push({ tipo: 'web', texto: empresa.sitioWeb, iconoUrl: empresa.sitioWebIconoUrl })
-    }
-    if (contactos.length > 0) {
-      const iconoSize = 3
-      doc.setFontSize(6.8)
-      for (const c of contactos) {
-        const yIcono = yA - iconoSize + 0.9
-        let iconoPropio: { dataUrl: string; formato: 'PNG' | 'JPEG' } | null = null
-        if (c.iconoUrl) iconoPropio = await logoADataUrl(c.iconoUrl)
-        if (iconoPropio) {
-          try {
-            doc.addImage(iconoPropio.dataUrl, iconoPropio.formato, xColA + 3, yIcono, iconoSize, iconoSize)
-          } catch {
-            // Formato no soportado por jsPDF -- cae al pictograma genérico.
-            dibujarIconoContacto(doc, c.tipo, xColA + 3, yIcono, iconoSize)
-          }
-        } else {
-          dibujarIconoContacto(doc, c.tipo, xColA + 3, yIcono, iconoSize)
-        }
-        doc.setTextColor('#555555')
-        doc.text(c.texto, xColA + 3 + iconoSize + 1.3, yA)
-        yA += iconoSize + 0.8
-      }
-    }
+    : undefined
 
-    // Letra fiscal destacada -- Fase 38f: Carlos pidió subirla a la
-    // parte superior de la caja, alineada con la primera línea de las
-    // columnas de al lado (titular / tipo de comprobante). Fase 38i:
-    // bloque todavía más compacto (18->16pt, gap 4->3mm) -- xLetra/
-    // yLetra/ySN ya se calcularon arriba, junto con hLineas, para que
-    // las líneas verticales y el texto nunca se desalineen entre sí.
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(16)
-    doc.setTextColor('#222222')
-    doc.text(comprobante.letraFiscal!, xLetra, yLetra, { align: 'center' })
-    doc.setFontSize(6)
-    doc.setFont('helvetica', 'normal')
-    doc.setTextColor('#777777')
-    const cod = comprobante.afip?.tipoComprobanteAfip
-    doc.text(cod !== undefined ? `COD. ${String(cod).padStart(2, '0')}` : 'S/N', xLetra, ySN, { align: 'center' })
-
-    // (b) Comprobante -- Fase 38c: tamaños bajados en línea con el
-    // resto de la caja superior.
-    const xColB = xDivisor2 + 3
-    let yB = yBox + 6
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(8.8)
-    doc.setTextColor('#222222')
-    doc.text(comprobante.tipoLabel.toUpperCase(), xColB, yB)
-    yB += 5
-    const numeroFiscal = comprobante.afip
-      ? formatNumeroFiscal(comprobante.afip.puntoVenta, comprobante.afip.numeroComprobante)
-      : comprobante.numero
-    doc.setFontSize(8.3)
-    doc.text(`N.º ${numeroFiscal}`, xColB, yB)
-    yB += 4.5
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.2)
-    doc.setTextColor('#555555')
-    doc.text(`Fecha: ${comprobante.fecha}`, xColB, yB)
-    yB += 4.2
-    doc.setFontSize(6.5)
-    if (empresa.cuit) {
-      doc.text(`CUIT: ${empresa.cuit}`, xColB, yB)
-      yB += 4
-    }
-    const iibbTexto = leyendaIngresosBrutos(
-      empresa.ingresosBrutosCondicion,
-      empresa.ingresosBrutosNumero,
-      empresa.provincia,
-    )
-    const partesB: string[] = []
-    if (iibbTexto) partesB.push(iibbTexto)
-    if (empresa.inicioActividades) partesB.push(`Inicio activ. ${formatFechaCorta(empresa.inicioActividades)}`)
-    if (partesB.length > 0) doc.text(partesB.join(' · '), xColB, yB)
-
-    // Fase 38c: línea fina de cierre de la zona superior -- reemplaza
-    // al borde inferior del recuadro que sacamos arriba, separa el
-    // bloque emisor/comprobante del bloque de datos del cliente.
-    // Fase 38h: antes usaba una altura fija (hBox=34, pensada para el
-    // peor caso -- titular + dirección + condición IVA + 3 contactos a
-    // la vez). Carlos pidió subir esta línea para no regalarle espacio
-    // de más a la tabla de ítems cuando el negocio no tiene tantos
-    // datos cargados -- ahora se calcula según lo que realmente se
-    // dibujó en cada columna (yA/yB), con un margen chico.
-    const yCierre = Math.max(yA, yB) + 3
-    doc.setDrawColor(210, 210, 210)
-    doc.setLineWidth(0.2)
-    doc.line(xColA, yCierre, xColBFin, yCierre)
-
-    y = yCierre + 5
-  }
+  const { y: yHeader } = await dibujarEncabezadoConDatosFiscales(
+    doc,
+    empresaParaHeader,
+    comprobante.tipoLabel,
+    numeroParaHeader,
+    comprobante.fecha,
+    condicionIvaEmisor,
+    opcionesFiscal,
+    marginX,
+  )
+  let y = yHeader
 
   // ─── Datos del cliente + condición de venta ──────────────────
   // Fase 38b: se agregan dirección/teléfono/condición de IVA cuando
