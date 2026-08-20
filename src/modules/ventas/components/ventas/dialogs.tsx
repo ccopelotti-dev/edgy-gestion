@@ -38,7 +38,7 @@ import {
 } from '../../types';
 
 import { formatARS, formatPct, todayISO } from '../../lib/format';
-import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal';
+import { sanitizarDecimal, parsearDecimal, decimalATexto } from '@/lib/decimal';
 import { esCuitValido } from '@/lib/validarCuit';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -1394,7 +1394,14 @@ interface ImputacionRow {
   numero: number;
   fecha: string;
   saldoPendiente: number;
-  montoImputado: number;
+  // Fase 43m (20/08, a pedido de Carlos -- "las flechitas laterales"):
+  // mismo patrón que el resto de la app (ver comentario de
+  // sanitizarDecimal en @/lib/decimal) -- se guarda como texto, no
+  // number, para poder usar <input type="text" inputMode="decimal">
+  // en vez del <input type="number"> nativo (que trae spinners y
+  // rechaza la coma decimal en teclado en español). El number real se
+  // deriva con parsearDecimal() donde hace falta calcular.
+  textoImputado: string;
 }
 
 export function CobroDialog({
@@ -1405,16 +1412,18 @@ export function CobroDialog({
   onSave,
 }: CobroDialogProps) {
   const [fecha, setFecha] = useState(todayISO());
-  const [monto, setMonto] = useState(0);
+  const [montoTexto, setMontoTexto] = useState('');
   const [medioPago, setMedioPago] = useState<MedioPago>('efectivo');
   const [imputaciones, setImputaciones] = useState<ImputacionRow[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const monto = parsearDecimal(montoTexto);
 
   // Initialize imputaciones from pending comprobantes
   useEffect(() => {
     if (open) {
       setFecha(todayISO());
-      setMonto(0);
+      setMontoTexto('');
       setMedioPago('efectivo');
       setErrors({});
 
@@ -1426,7 +1435,7 @@ export function CobroDialog({
           numero: c.numero,
           fecha: c.fecha,
           saldoPendiente: c.saldoPendiente,
-          montoImputado: 0,
+          textoImputado: '',
         }));
       setImputaciones(pendientes);
     }
@@ -1434,28 +1443,28 @@ export function CobroDialog({
 
   // Auto-distribute monto across comprobantes oldest-first
   const distribuirMonto = useCallback(
-    (nuevoMonto: number) => {
-      setMonto(nuevoMonto);
-      let restante = nuevoMonto;
+    (montoTextoNuevo: string) => {
+      setMontoTexto(montoTextoNuevo);
+      let restante = parsearDecimal(montoTextoNuevo);
       setImputaciones((prev) =>
         prev.map((imp) => {
-          if (restante <= 0) return { ...imp, montoImputado: 0 };
+          if (restante <= 0) return { ...imp, textoImputado: '' };
           const asignar = Math.min(restante, imp.saldoPendiente);
           restante -= asignar;
-          return { ...imp, montoImputado: Math.round(asignar * 100) / 100 };
+          return { ...imp, textoImputado: decimalATexto(Math.round(asignar * 100) / 100) };
         }),
       );
     },
     [],
   );
 
-  const updateImputacion = (index: number, value: number) => {
+  const updateImputacion = (index: number, textoNuevo: string) => {
     setImputaciones((prev) =>
-      prev.map((imp, i) => (i === index ? { ...imp, montoImputado: value } : imp)),
+      prev.map((imp, i) => (i === index ? { ...imp, textoImputado: textoNuevo } : imp)),
     );
   };
 
-  const totalImputado = imputaciones.reduce((sum, imp) => sum + imp.montoImputado, 0);
+  const totalImputado = imputaciones.reduce((sum, imp) => sum + parsearDecimal(imp.textoImputado), 0);
   // Techo real de imputación: no tiene sentido pedirle al operador que
   // impute más de lo que hay de deuda pendiente -- si el cobro es mayor
   // a la deuda total, el excedente queda legítimamente "sin imputar"
@@ -1470,7 +1479,7 @@ export function CobroDialog({
     const next: Record<string, string> = {};
     if (monto <= 0) next.monto = 'El monto debe ser mayor a 0';
     if (totalImputado > monto + 0.01) next.imputaciones = 'La suma de imputaciones excede el monto';
-    const invalid = imputaciones.some((imp) => imp.montoImputado > imp.saldoPendiente + 0.01);
+    const invalid = imputaciones.some((imp) => parsearDecimal(imp.textoImputado) > imp.saldoPendiente + 0.01);
     if (invalid) next.imputaciones = 'Una imputación excede el saldo pendiente';
     if (totalImputado < montoQueDeberiaImputarse - 0.01) {
       next.imputaciones = `Falta imputar ${formatARS(montoQueDeberiaImputarse - totalImputado)} a comprobantes pendientes antes de guardar (o ajuste el monto del cobro).`;
@@ -1486,8 +1495,8 @@ export function CobroDialog({
       monto,
       medioPago,
       imputaciones: imputaciones
-        .filter((imp) => imp.montoImputado > 0)
-        .map(({ comprobanteId, montoImputado }) => ({ comprobanteId, montoImputado })),
+        .map((imp) => ({ comprobanteId: imp.comprobanteId, montoImputado: parsearDecimal(imp.textoImputado) }))
+        .filter((imp) => imp.montoImputado > 0),
     });
     onOpenChange(false);
   };
@@ -1522,11 +1531,11 @@ export function CobroDialog({
                 <label className={labelClass}>Monto *</label>
                 <input
                   className={inputClass}
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={monto}
-                  onChange={(e) => distribuirMonto(Number(e.target.value))}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  value={montoTexto}
+                  onChange={(e) => distribuirMonto(sanitizarDecimal(e.target.value))}
                 />
                 {errors.monto && <p className="text-xs text-red-600 mt-1">{errors.monto}</p>}
               </div>
@@ -1579,12 +1588,11 @@ export function CobroDialog({
                           <td className="px-2 py-1.5">
                             <input
                               className="w-full text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900/20"
-                              type="number"
-                              min={0}
-                              max={imp.saldoPendiente}
-                              step={0.01}
-                              value={imp.montoImputado}
-                              onChange={(e) => updateImputacion(idx, Number(e.target.value))}
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="0,00"
+                              value={imp.textoImputado}
+                              onChange={(e) => updateImputacion(idx, sanitizarDecimal(e.target.value))}
                             />
                           </td>
                         </tr>
