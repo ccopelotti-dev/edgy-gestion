@@ -300,12 +300,32 @@ export function formatNumeroConPuntoVenta(puntoVentaNumero: string, numero: numb
   return `${puntoVentaNumero}-${String(numero).padStart(8, '0')}`
 }
 
+/** Luminancia relativa (WCAG) de un color hex -- para decidir si el
+ * texto que va ENCIMA de ese color debe ser oscuro o blanco. Hizo
+ * falta desde que Punto Tex fue el primer cliente con un color de
+ * marca muy claro (#e7e0cd, un beige) -- el encabezado tenía texto
+ * blanco fijo (pensado para colores oscuros) y quedaba casi
+ * ilegible/"lavado" sobre un fondo tan claro (ver Fase 43c). */
+function luminanciaRelativa(hex: string): number {
+  const [r, g, b] = hexToRgb(hex)
+  const canal = (c: number) => {
+    const cs = c / 255
+    return cs <= 0.03928 ? cs / 12.92 : Math.pow((cs + 0.055) / 1.055, 2.4)
+  }
+  return 0.2126 * canal(r) + 0.7152 * canal(g) + 0.0722 * canal(b)
+}
+
 /**
- * Encabezado alternativo -- banda de color con logo + nombre, y debajo
- * un recuadro de 2 columnas (emisor / documento) con los datos de
- * contacto y fiscales que hoy solo mostraba la Factura. Sin letra
- * fiscal ni titular (ver comentario de arriba). Devuelve la Y desde
- * donde seguir dibujando el cuerpo, igual que `dibujarEncabezado`.
+ * Encabezado alternativo -- Fase 43c (20/08, a pedido de Carlos, tomado
+ * como "modelo base para todo"): UN solo panel de color (no banda
+ * angosta + recuadro blanco debajo, que era la Fase 43 original) con
+ * logo grande a la izquierda y las dos columnas de datos (emisor /
+ * documento) adentro -- calcado del mockup que armó a mano en
+ * Inkscape. Color de texto automático según el color de marca (ver
+ * luminanciaRelativa) para que funcione igual de bien con marcas
+ * oscuras que con una tan clara como la de Punto Tex. Sin letra fiscal
+ * ni titular (no es un comprobante fiscal). Devuelve la Y desde donde
+ * seguir dibujando el cuerpo, igual que `dibujarEncabezado`.
  */
 export async function dibujarEncabezadoConDatosFiscales(
   doc: jsPDF,
@@ -318,56 +338,17 @@ export async function dibujarEncabezadoConDatosFiscales(
   const color = empresa.colorMarca || COLOR_DEFAULT
   const pageWidth = doc.internal.pageSize.getWidth()
   const marginX = 15
-  const anchoBanda = 20
 
-  doc.setFillColor(color)
-  doc.rect(0, 0, pageWidth, anchoBanda, 'F')
+  const fondoClaro = luminanciaRelativa(color) > 0.5
+  const colorTitulo = fondoClaro ? '#2b2320' : '#ffffff'
+  const colorTexto = fondoClaro ? '#5c5450' : '#f0ece6'
 
   let logoInfo: { dataUrl: string; formato: 'PNG' | 'JPEG' } | null = null
   if (empresa.logoUrl) logoInfo = await logoADataUrl(empresa.logoUrl)
-  const textoX = logoInfo ? marginX + 18 : marginX
-  if (logoInfo) {
-    try {
-      doc.addImage(logoInfo.dataUrl, logoInfo.formato, marginX, 3, 15, 15)
-    } catch {
-      // Formato no soportado por jsPDF -- seguimos sin logo.
-    }
-  }
 
-  doc.setTextColor('#ffffff')
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(13)
-  doc.text(empresa.nombre, textoX, 12)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(12)
-  doc.text(tituloDocumento.toUpperCase(), pageWidth - marginX, 12, { align: 'right' })
-
-  const yBox = anchoBanda + 7
-  const xColA = marginX
-  const xColB = pageWidth / 2 + 5
-
-  // (a) Emisor -- nombre (sin línea de titular, no aplica acá),
-  // domicilio, condición de IVA, contactos con pictograma.
-  let yA = yBox
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(8.5)
-  doc.setTextColor('#222222')
-  doc.text(empresa.nombre, xColA, yA)
-  yA += 4.5
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(7.3)
-  doc.setTextColor('#555555')
-  if (empresa.direccion) {
-    doc.text(empresa.direccion, xColA, yA)
-    yA += 4.2
-  }
-  if (condicionIvaEmisor) {
-    const leyenda = leyendaCondicionIvaEmisor(condicionIvaEmisor)
-    if (leyenda) {
-      doc.text(leyenda, xColA, yA)
-      yA += 4.2
-    }
-  }
+  const logoSize = 28
+  const colIzqX = logoInfo ? marginX + logoSize + 6 : marginX
+  const colDerX = pageWidth / 2 + 10
 
   const contactos: { tipo: 'whatsapp' | 'instagram' | 'web'; texto: string; iconoUrl?: string | null }[] = []
   if (empresa.whatsappComercial) {
@@ -379,60 +360,109 @@ export async function dibujarEncabezadoConDatosFiscales(
   if (empresa.sitioWeb) {
     contactos.push({ tipo: 'web', texto: empresa.sitioWeb, iconoUrl: empresa.sitioWebIconoUrl })
   }
+
+  const leyendaIva = condicionIvaEmisor ? leyendaCondicionIvaEmisor(condicionIvaEmisor) : ''
+  const iibbTexto = leyendaIngresosBrutosEmisor(empresa.ingresosBrutosCondicion, empresa.ingresosBrutosNumero, empresa.provincia)
+  const partesDoc: string[] = []
+  if (iibbTexto) partesDoc.push(iibbTexto)
+  if (empresa.inicioActividades) partesDoc.push(`Inicio activ. ${formatFechaCortaISO(empresa.inicioActividades)}`)
+
+  // Alto del panel: hay que saberlo ANTES de dibujar el rectángulo de
+  // fondo -- jsPDF no tiene forma de "mandar atrás" algo ya dibujado --
+  // así que se precalcula según cuántas líneas va a tener cada columna,
+  // con los mismos saltos que se usan más abajo al dibujar de verdad.
+  const topPad = 9
+  const bottomPad = 8
+  let altoColIzq = 6 // nombre
+  if (empresa.direccion) altoColIzq += 4.3
+  if (leyendaIva) altoColIzq += 4.3
+  altoColIzq += contactos.length * 4.3
+
+  let altoColDer = 6 + 4.5 // tipoDocumento + N.º
+  altoColDer += 4.3 // Fecha
+  if (empresa.cuit) altoColDer += 4.3
+  if (partesDoc.length > 0) altoColDer += 4.3
+
+  const altoContenido = Math.max(altoColIzq, altoColDer, logoInfo ? logoSize : 0)
+  const altoPanel = topPad + altoContenido + bottomPad
+
+  doc.setFillColor(color)
+  doc.rect(0, 0, pageWidth, altoPanel, 'F')
+
+  if (logoInfo) {
+    const logoY = topPad + Math.max(0, (altoContenido - logoSize) / 2)
+    try {
+      doc.addImage(logoInfo.dataUrl, logoInfo.formato, marginX, logoY, logoSize, logoSize)
+    } catch {
+      // Formato no soportado por jsPDF -- seguimos sin logo.
+    }
+  }
+
+  // Columna izquierda -- nombre, domicilio, condición de IVA, contactos.
+  let yA = topPad + 4
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(13)
+  doc.setTextColor(colorTitulo)
+  doc.text(empresa.nombre, colIzqX, yA)
+  yA += 6
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(colorTexto)
+  if (empresa.direccion) {
+    doc.text(empresa.direccion, colIzqX, yA)
+    yA += 4.3
+  }
+  if (leyendaIva) {
+    doc.text(leyendaIva, colIzqX, yA)
+    yA += 4.3
+  }
   if (contactos.length > 0) {
-    const iconoSize = 3.2
-    doc.setFontSize(7)
+    const iconoSize = 3.4
+    doc.setFontSize(7.5)
     for (const c of contactos) {
-      const yIcono = yA - iconoSize + 1
+      const yIcono = yA - iconoSize + 0.8
       let iconoPropio: { dataUrl: string; formato: 'PNG' | 'JPEG' } | null = null
       if (c.iconoUrl) iconoPropio = await logoADataUrl(c.iconoUrl)
       if (iconoPropio) {
         try {
-          doc.addImage(iconoPropio.dataUrl, iconoPropio.formato, xColA, yIcono, iconoSize, iconoSize)
+          doc.addImage(iconoPropio.dataUrl, iconoPropio.formato, colIzqX, yIcono, iconoSize, iconoSize)
         } catch {
-          dibujarIconoContactoChico(doc, c.tipo, xColA, yIcono, iconoSize)
+          dibujarIconoContactoChico(doc, c.tipo, colIzqX, yIcono, iconoSize)
         }
       } else {
-        dibujarIconoContactoChico(doc, c.tipo, xColA, yIcono, iconoSize)
+        dibujarIconoContactoChico(doc, c.tipo, colIzqX, yIcono, iconoSize)
       }
-      doc.setTextColor('#555555')
-      doc.text(c.texto, xColA + iconoSize + 1.5, yA)
-      yA += iconoSize + 1
+      doc.setTextColor(colorTexto)
+      doc.text(c.texto, colIzqX + iconoSize + 1.5, yA)
+      yA += 4.3
     }
   }
 
-  // (b) Documento -- número correlativo con formato de punto de venta
-  // nativo, fecha, CUIT, IIBB, inicio de actividades.
-  let yB = yBox
+  // Columna derecha -- tipo de documento, número, fecha, CUIT, IIBB.
+  let yB = topPad + 4
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(8.5)
-  doc.setTextColor('#222222')
-  doc.text(`N.º ${numero}`, xColB, yB)
+  doc.setFontSize(12)
+  doc.setTextColor(colorTitulo)
+  doc.text(tituloDocumento.toUpperCase(), colDerX, yB)
+  yB += 6
+  doc.setFontSize(9.5)
+  doc.text(`N.º ${numero}`, colDerX, yB)
   yB += 4.5
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(7.3)
-  doc.setTextColor('#555555')
-  doc.text(`Fecha: ${fecha}`, xColB, yB)
-  yB += 4.2
+  doc.setFontSize(8)
+  doc.setTextColor(colorTexto)
+  doc.text(`Fecha: ${fecha}`, colDerX, yB)
+  yB += 4.3
   if (empresa.cuit) {
-    doc.text(`CUIT: ${empresa.cuit}`, xColB, yB)
-    yB += 4.2
+    doc.text(`CUIT: ${empresa.cuit}`, colDerX, yB)
+    yB += 4.3
   }
-  const iibbTexto = leyendaIngresosBrutosEmisor(empresa.ingresosBrutosCondicion, empresa.ingresosBrutosNumero, empresa.provincia)
-  const partesB: string[] = []
-  if (iibbTexto) partesB.push(iibbTexto)
-  if (empresa.inicioActividades) partesB.push(`Inicio activ. ${formatFechaCortaISO(empresa.inicioActividades)}`)
-  if (partesB.length > 0) {
-    doc.text(partesB.join(' · '), xColB, yB)
-    yB += 4.2
+  if (partesDoc.length > 0) {
+    doc.text(partesDoc.join(' · '), colDerX, yB)
+    yB += 4.3
   }
 
-  const yCierre = Math.max(yA, yB) + 3
-  doc.setDrawColor(210, 210, 210)
-  doc.setLineWidth(0.2)
-  doc.line(marginX, yCierre, pageWidth - marginX, yCierre)
-
-  return { y: yCierre + 6, color }
+  return { y: altoPanel + 8, color }
 }
 
 /** Pie de página común -- nombre y teléfono de la empresa emisora. */
