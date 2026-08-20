@@ -11,12 +11,15 @@ import type { Cobro, Cliente, Comprobante, MedioPago, ImputacionCobro } from '..
 import { MEDIO_PAGO_LABEL, generarId } from '../types';
 import {
   Receipt, Search, Plus, ChevronDown, ChevronRight,
-  DollarSign, Clock, TrendingUp, FileText,
+  DollarSign, Clock, TrendingUp, FileText, Download, Loader2,
 } from 'lucide-react';
+import { useClienteActual } from '@/hooks/useClienteActual';
+import { descargarReciboPdf } from '../lib/pdfComprobantes';
 
 export default function Cobranzas() {
   const { clientes, comprobantes, cobros, config } = useVentas();
   const dispatch = useVentasDispatch();
+  const { cliente: empresaActual } = useClienteActual();
 
   const [busqueda, setBusqueda] = useState('');
   const [filtroMedio, setFiltroMedio] = useState('');
@@ -25,6 +28,11 @@ export default function Cobranzas() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogCliente, setDialogCliente] = useState<Cliente | null>(null);
+  // Fase 43l (20/08, a pedido de Carlos): Cobranzas no tenía forma de
+  // descargar el Recibo de un cobro ya registrado -- Comprobantes y
+  // Presupuestos ya lo permiten (esta última para el recibo de seña),
+  // acá faltaba para cualquier cobro, no solo señas.
+  const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
 
   // ─── KPIs ─────────────────────────────────────────────────
   const hoy = todayISO();
@@ -77,6 +85,17 @@ export default function Cobranzas() {
   function abrirCobro(cliente: Cliente) {
     setDialogCliente(cliente);
     setDialogOpen(true);
+  }
+
+  async function handleDescargarPdf(cobro: Cobro) {
+    if (!empresaActual) return;
+    setGenerandoPdfId(cobro.id);
+    try {
+      const cliente = clienteMap.get(cobro.clienteId);
+      await descargarReciboPdf(empresaActual, cliente, cobro, comprobantes, cliente?.nombre ?? 'Cliente');
+    } finally {
+      setGenerandoPdfId(null);
+    }
   }
 
   function handleSaveCobro(data: { fecha: string; monto: number; medioPago: MedioPago; imputaciones: ImputacionCobro[]; notas?: string }) {
@@ -166,12 +185,14 @@ export default function Cobranzas() {
                 <th className="px-4 py-3 font-medium">Fecha</th>
                 <th className="px-4 py-3 font-medium">Medio</th>
                 <th className="px-4 py-3 font-medium text-right">Monto</th>
+                <th className="px-4 py-3 font-medium w-8"></th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {cobrosFiltrados.map(cobro => {
                 const cli = clienteMap.get(cobro.clienteId);
                 const expanded = expandedId === cobro.id;
+                const generandoPdf = generandoPdfId === cobro.id;
                 return (
                   <Fragment key={cobro.id}>
                     <tr
@@ -186,10 +207,20 @@ export default function Cobranzas() {
                       <td className="px-4 py-3">{formatDate(cobro.fecha)}</td>
                       <td className="px-4 py-3"><MedioPagoBadge medio={cobro.medioPago} /></td>
                       <td className="px-4 py-3 text-right"><Amount value={cobro.monto} /></td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDescargarPdf(cobro); }}
+                          disabled={generandoPdf}
+                          title="Descargar recibo"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                        >
+                          {generandoPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                        </button>
+                      </td>
                     </tr>
                     {expanded && (
                       <tr>
-                        <td colSpan={6} className="bg-gray-50/50 px-8 py-4">
+                        <td colSpan={7} className="bg-gray-50/50 px-8 py-4">
                           <div className="space-y-3">
                             {cobro.notas && <p className="text-sm text-gray-600">{cobro.notas}</p>}
                             <h4 className="text-xs font-semibold text-gray-500 uppercase">Imputaciones</h4>
