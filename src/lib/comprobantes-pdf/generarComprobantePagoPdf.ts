@@ -20,7 +20,8 @@ import {
   type EmpresaParaPdf,
   formatARS,
   aclarar,
-  dibujarEncabezado,
+  colorLegibleSobreBlanco,
+  dibujarEncabezadoConDatosFiscales,
   dibujarPie,
   imprimirOGuardarPdf,
 } from './pdfHelpers'
@@ -66,7 +67,16 @@ export async function generarComprobantePagoPdf(
   const pageHeight = doc.internal.pageSize.getHeight()
   const marginX = 15
 
-  const { y: y0, color } = await dibujarEncabezado(doc, empresa, 'Comprobante de Pago', pago.numero, pago.fecha)
+  // Fase 43n (20/08): mismo panel único que el resto del sistema (ver
+  // comentario largo en generarReciboPdf.ts) -- sin dirección, no hay
+  // punto de venta que resolver acá.
+  const { y: y0, color } = await dibujarEncabezadoConDatosFiscales(
+    doc,
+    { ...empresa, direccion: null },
+    'Comprobante de Pago',
+    pago.numero,
+    pago.fecha,
+  )
   let y = y0
 
   // ─── Pagado a ───────────────────────────────────────────────────
@@ -97,7 +107,10 @@ export async function generarComprobantePagoPdf(
   doc.text('Importe pagado', marginX + 6, y)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(15)
-  doc.setTextColor(color)
+  // Fase 43n: mismo mecanismo que "Pasa Barral"/IVA Responsable
+  // Inscripto -- con una marca clara el color de marca sin modificar
+  // queda casi invisible sobre el fondo clarito de esta caja.
+  doc.setTextColor(colorLegibleSobreBlanco(color))
   doc.text(`$ ${formatARS(pago.monto)}`, pageWidth - marginX - 6, y + 1, { align: 'right' })
   y += 20
 

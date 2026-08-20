@@ -18,7 +18,8 @@ import {
   type EmpresaParaPdf,
   formatARS,
   aclarar,
-  dibujarEncabezado,
+  colorLegibleSobreBlanco,
+  dibujarEncabezadoConDatosFiscales,
   dibujarPie,
   imprimirOGuardarPdf,
 } from './pdfHelpers'
@@ -52,7 +53,23 @@ export async function generarReciboPdf(
   const pageHeight = doc.internal.pageSize.getHeight()
   const marginX = 15
 
-  const { y: y0, color } = await dibujarEncabezado(doc, empresa, 'Recibo', recibo.numero, recibo.fecha)
+  // Fase 43n (20/08, a pedido de Carlos): mismo panel único con
+  // contraste automático que ya usan Toma de Pedidos y el motor
+  // compartido de comprobantes (Factura/Recibo-comprobante/NC/ND/
+  // Presupuesto/etc.) -- este generador es uno aparte (Recibo de
+  // COBRO, no el `Comprobante` tipo "recibo"), así que había quedado
+  // afuera de esa migración con el encabezado viejo. La dirección NO
+  // se muestra -- `Cobro` no tiene noción de punto de venta como sí
+  // tiene `Comprobante`, así que no hay de dónde resolver la dirección
+  // correcta; se omite en vez de mostrar la fiscal (que dejó de
+  // publicarse en todo el sistema).
+  const { y: y0, color } = await dibujarEncabezadoConDatosFiscales(
+    doc,
+    { ...empresa, direccion: null },
+    'Recibo',
+    recibo.numero,
+    recibo.fecha,
+  )
   let y = y0
 
   // ─── Recibí de ──────────────────────────────────────────────────
@@ -83,7 +100,11 @@ export async function generarReciboPdf(
   doc.text('Importe recibido', marginX + 6, y)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(15)
-  doc.setTextColor(color)
+  // Fase 43n: mismo mecanismo que "Pasa Barral"/IVA Responsable
+  // Inscripto -- con una marca clara (ej. Punto Tex) el color de marca
+  // sin modificar queda casi invisible sobre el fondo clarito de esta
+  // caja (aclarar(color, 0.88)).
+  doc.setTextColor(colorLegibleSobreBlanco(color))
   doc.text(`$ ${formatARS(recibo.monto)}`, pageWidth - marginX - 6, y + 1, { align: 'right' })
   y += 20
 

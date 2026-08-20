@@ -20,7 +20,8 @@ import {
   type EmpresaParaPdf,
   formatARS,
   aclarar,
-  dibujarEncabezado,
+  colorLegibleSobreBlanco,
+  dibujarEncabezadoConDatosFiscales,
   dibujarPie,
   imprimirOGuardarPdf,
 } from './pdfHelpers'
@@ -62,7 +63,17 @@ export async function generarResumenCuentaPdf(
     month: '2-digit',
     year: 'numeric',
   })
-  const { y: y0, color } = await dibujarEncabezado(doc, empresa, 'Resumen de cuenta', '', fechaHoy)
+  // Fase 43n (20/08): mismo panel único que el resto del sistema (ver
+  // comentario largo en generarReciboPdf.ts) -- sin dirección, no hay
+  // punto de venta que resolver acá (es un ledger de TODOS los
+  // movimientos históricos, no de un solo local).
+  const { y: y0, color } = await dibujarEncabezadoConDatosFiscales(
+    doc,
+    { ...empresa, direccion: null },
+    'Resumen de cuenta',
+    '',
+    fechaHoy,
+  )
   let y = y0
 
   // ─── Entidad (proveedor / cliente) ────────────────────────────
@@ -161,7 +172,10 @@ export async function generarResumenCuentaPdf(
   doc.roundedRect(colHaber - 5, y - 6, colSaldo - colHaber + 5, 10, 1.5, 1.5, 'F')
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
-  doc.setTextColor(color)
+  // Fase 43n: mismo mecanismo que "Pasa Barral"/IVA Responsable
+  // Inscripto -- con una marca clara el color de marca sin modificar
+  // queda casi invisible sobre el fondo clarito de esta caja.
+  doc.setTextColor(colorLegibleSobreBlanco(color))
   doc.text('Saldo final', colHaber, y)
   doc.text(formatARS(resumen.saldoFinal), colSaldo, y, { align: 'right' })
   y += 16
