@@ -31,6 +31,8 @@ export function filaAFicha(row: any): FichaMedida {
       incluyeBarral: it.incluye_barral ?? undefined,
       tipoBarral: it.tipo_barral ?? undefined,
       tipoCortina: it.tipo_cortina ?? undefined,
+      medidaTotalAncho: it.medida_total_ancho !== null && it.medida_total_ancho !== undefined ? Number(it.medida_total_ancho) : undefined,
+      medidaTotalAlto: it.medida_total_alto !== null && it.medida_total_alto !== undefined ? Number(it.medida_total_alto) : undefined,
       notas: it.notas ?? undefined,
       panos: (it.ficha_medida_panos ?? [])
         .slice()
@@ -185,6 +187,8 @@ export function useFichasMedida(): UseFichasMedidaResult {
         incluye_barral: it.incluyeBarral ?? null,
         tipo_barral: it.tipoBarral || null,
         tipo_cortina: it.tipoCortina || null,
+        medida_total_ancho: it.medidaTotalAncho ?? null,
+        medida_total_alto: it.medidaTotalAlto ?? null,
         notas: it.notas || null,
         orden: i,
       })

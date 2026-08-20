@@ -70,17 +70,20 @@ export interface ItemFichaMedida {
    * que ambos datos queden distinguibles en el detalle relevado. */
   color?: string
   cantidad: number
-  /** Genérica: descripción libre de la medida del producto. Fase 43g
-   * (20/08): en Cortinas pasa a usarse para la medida total del
-   * hueco/ventana (dato de referencia, distinto de las medidas de
-   * corte por paño de `panos`). */
-  medida?: string
   // Genérica
+  medida?: string
   peso?: string
   // Cortinas
   incluyeBarral?: boolean
   tipoBarral?: string
   tipoCortina?: string
+  /** Fase 43h (20/08, a pedido de Carlos): medida TOTAL del hueco/
+   * ventana -- dato de referencia que da el cliente de entrada ("quiero
+   * cubrir una ventana de 1.30 x 1.42"), distinto de las medidas de
+   * corte por paño de `panos` (que pueden diferir por fruncido/
+   * superposición de la tela). Solo aplica a fichas tipo 'cortinas'. */
+  medidaTotalAncho?: number
+  medidaTotalAlto?: number
   notas?: string
   /** Solo se usa si la ficha es tipo 'cortinas' -- varias ventanas/paños
    * con Ancho/Alto propios por ítem. */

@@ -60,6 +60,10 @@ interface ItemFormRow {
   incluyeBarral: boolean;
   tipoBarral: string;
   tipoCortina: string;
+  // Fase 43h (20/08, a pedido de Carlos): medida total del hueco/
+  // ventana (Cortinas) -- distinta de las medidas de corte por paño.
+  textoMedidaTotalAncho: string;
+  textoMedidaTotalAlto: string;
   notas: string;
   panos: { key: string; textoAncho: string; textoAlto: string }[];
 }
@@ -77,6 +81,8 @@ function nuevaFilaItem(): ItemFormRow {
     incluyeBarral: false,
     tipoBarral: '',
     tipoCortina: '',
+    textoMedidaTotalAncho: '',
+    textoMedidaTotalAlto: '',
     notas: '',
     panos: [],
   };
@@ -99,6 +105,8 @@ function itemFormAFila(it: ItemFichaMedida): ItemFormRow {
     incluyeBarral: it.incluyeBarral ?? false,
     tipoBarral: it.tipoBarral ?? '',
     tipoCortina: it.tipoCortina ?? '',
+    textoMedidaTotalAncho: it.medidaTotalAncho !== undefined ? String(it.medidaTotalAncho) : '',
+    textoMedidaTotalAlto: it.medidaTotalAlto !== undefined ? String(it.medidaTotalAlto) : '',
     notas: it.notas ?? '',
     panos: (it.panos ?? []).map((p: PanoMedida) => ({
       key: p.id,
@@ -510,16 +518,18 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
         tela: it.tela.trim() || undefined,
         color: it.color.trim() || undefined,
         cantidad: parseDecimal(it.textoCantidad) || 1,
-        // Fase 43g (20/08, a pedido de Carlos): `medida` deja de ser
-        // exclusiva de la ficha Genérica -- en Cortinas pasa a guardar
-        // la medida total del hueco/ventana (dato de referencia del
-        // cliente, distinto de las medidas de corte por paño que ya se
-        // cargan abajo). `peso` sigue siendo solo de Genérica.
-        medida: it.medida.trim() || undefined,
+        medida: tipo === 'generica' ? it.medida.trim() || undefined : undefined,
         peso: tipo === 'generica' ? it.peso.trim() || undefined : undefined,
         incluyeBarral: tipo === 'cortinas' ? it.incluyeBarral : undefined,
         tipoBarral: tipo === 'cortinas' ? it.tipoBarral || undefined : undefined,
         tipoCortina: tipo === 'cortinas' ? it.tipoCortina || undefined : undefined,
+        // Fase 43h (20/08, a pedido de Carlos): medida total del hueco/
+        // ventana -- dato de referencia distinto de las medidas de
+        // corte por paño (panos, más abajo).
+        medidaTotalAncho:
+          tipo === 'cortinas' && it.textoMedidaTotalAncho.trim() ? parseDecimal(it.textoMedidaTotalAncho) : undefined,
+        medidaTotalAlto:
+          tipo === 'cortinas' && it.textoMedidaTotalAlto.trim() ? parseDecimal(it.textoMedidaTotalAlto) : undefined,
         notas: it.notas.trim() || undefined,
         panos:
           tipo === 'cortinas'
@@ -855,24 +865,42 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                         </>
                       )}
 
-                      {/* Fase 43g (20/08, a pedido de Carlos): medida
-                          total del hueco/ventana -- dato de referencia
+                      {/* Fase 43h (20/08, a pedido de Carlos): medida
+                          TOTAL del hueco/ventana -- dato de referencia
                           que el cliente da de entrada ("quiero cubrir
-                          una ventana de 1.40 x 1.20"), distinto de las
+                          una ventana de 1.30 x 1.42"), distinto de las
                           medidas de corte por paño (que pueden diferir
-                          por fruncido/superposición). Ocupa el mismo
-                          lugar en la grilla que "Medida" en Genérica. */}
+                          por fruncido/superposición). Dos campos
+                          numéricos, mismo patrón que Ancho/Alto de
+                          paño -- ocupan el mismo lugar en la grilla que
+                          Medida/Peso en Genérica. */}
                       {tipo === 'cortinas' && (
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-500">Medida total de la ventana</label>
-                          <input
-                            type="text"
-                            value={it.medida}
-                            onChange={(e) => actualizarItem(it.key, { medida: e.target.value })}
-                            placeholder="Ej. 1.40 x 1.20"
-                            className={inputClass}
-                          />
-                        </div>
+                        <>
+                          <div>
+                            <label className="mb-1 block text-xs text-gray-500">Ancho ventana (m)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={it.textoMedidaTotalAncho}
+                              onChange={(e) =>
+                                actualizarItem(it.key, { textoMedidaTotalAncho: sanitizarDecimal(e.target.value) })
+                              }
+                              className={inputClass}
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-gray-500">Alto ventana (m)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={it.textoMedidaTotalAlto}
+                              onChange={(e) =>
+                                actualizarItem(it.key, { textoMedidaTotalAlto: sanitizarDecimal(e.target.value) })
+                              }
+                              className={inputClass}
+                            />
+                          </div>
+                        </>
                       )}
                     </div>
 

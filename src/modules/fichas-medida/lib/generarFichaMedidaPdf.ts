@@ -51,6 +51,18 @@ function panosDibujables(item: ItemFichaMedida): { ancho: number; alto: number }
 function descripcionItem(item: ItemFichaMedida, conEsquema: boolean, esCortina: boolean): string[] {
   const lineas: string[] = []
   lineas.push(`${item.producto}${item.cantidad && item.cantidad !== 1 ? ` · cant. ${item.cantidad}` : ''}`)
+  // Fase 43h (20/08, a pedido de Carlos): medida TOTAL del hueco/
+  // ventana -- va primero, antes de Tela, porque es el primer dato que
+  // da el cliente en la entrevista ("quiero cubrir una ventana de
+  // 1.30 x 1.42"). Distinta de las medidas de corte por paño (Paño:
+  // más abajo, o el esquema técnico si hay dibujo).
+  if (esCortina && (item.medidaTotalAncho || item.medidaTotalAlto)) {
+    const partes = [
+      item.medidaTotalAncho ? `Ancho: ${item.medidaTotalAncho} m` : null,
+      item.medidaTotalAlto ? `Alto ${item.medidaTotalAlto} m` : null,
+    ].filter(Boolean)
+    lineas.push(`Medidas: ${partes.join(' x ')}`)
+  }
   if (item.tela) lineas.push(`Tela: ${item.tela}`)
   if (item.color) lineas.push(`Color: ${item.color}`)
   if (conEsquema) {
@@ -65,10 +77,7 @@ function descripcionItem(item: ItemFichaMedida, conEsquema: boolean, esCortina: 
   }
   if (item.tipoBarral) lineas.push(`Barral: ${item.tipoBarral}${item.incluyeBarral ? '' : ' (no incluido)'}`)
   if (item.tipoCortina) lineas.push(`Tipo de cortina: ${item.tipoCortina}`)
-  // Fase 43g (20/08): en Cortinas, `medida` es la medida total del
-  // hueco/ventana (dato de referencia distinto de las medidas de corte
-  // por paño) -- se etiqueta distinto para no confundirla con esas.
-  if (item.medida) lineas.push(esCortina ? `Medida total de la ventana: ${item.medida}` : `Medida: ${item.medida}`)
+  if (item.medida) lineas.push(`Medida: ${item.medida}`)
   if (item.peso) lineas.push(`Peso: ${item.peso}`)
   if (item.notas) lineas.push(`Notas: ${item.notas}`)
   return lineas
