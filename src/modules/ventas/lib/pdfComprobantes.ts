@@ -44,7 +44,11 @@ interface PuntoVentaParaPdf {
   direccion: string | null;
 }
 
-function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
+// Fase 43 (20/08): exportada -- Fichas de medida ("Toma de Pedidos") la
+// reusa para armar el mismo EmpresaParaPdf rico (titular/IIBB/contactos
+// con pictograma) que ya usa Factura, en vez de duplicar el mapeo con
+// solo los campos chicos que tenía antes.
+export function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
   return {
     nombre: empresaActual.nombre,
     cuit: empresaActual.cuit,

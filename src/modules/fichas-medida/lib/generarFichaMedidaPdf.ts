@@ -11,12 +11,13 @@
 
 import { jsPDF } from 'jspdf'
 import {
-  type EmpresaParaPdf,
+  type EmpresaParaPdfCompleta,
   aclarar,
-  dibujarEncabezado,
+  dibujarEncabezadoConDatosFiscales,
   dibujarPie,
   imprimirOGuardarPdf,
   formatARS,
+  formatNumeroConPuntoVenta,
 } from '@/lib/comprobantes-pdf/pdfHelpers'
 import type { FichaMedida, ItemFichaMedida } from '../types'
 import { MODALIDAD_ENTREGA_LABEL, TIPO_FICHA_LABEL } from '../types'
@@ -225,9 +226,10 @@ export function dibujarDetalleRelevado(
 }
 
 export async function generarFichaMedidaPdf(
-  empresa: EmpresaParaPdf,
+  empresa: EmpresaParaPdfCompleta,
   ficha: FichaMedida,
   nombreArchivo: string,
+  condicionIvaEmisor?: string | null,
 ): Promise<void> {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -236,7 +238,19 @@ export async function generarFichaMedidaPdf(
   const alturaMaxima = pageHeight - 45
 
   const fechaHoy = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const { y: y0, color } = await dibujarEncabezado(doc, empresa, 'Ficha de medida', '', fechaHoy)
+  // Fase 43 (20/08, "Toma de Pedidos"): encabezado tipo Anexo II (sin
+  // letra fiscal ni titular) con la numeración correlativa propia de
+  // esta sección, formato de punto de venta nativo -- ver
+  // dibujarEncabezadoConDatosFiscales en pdfHelpers.ts.
+  const numeroFormateado = formatNumeroConPuntoVenta(ficha.puntoVentaNumero, ficha.numero)
+  const { y: y0, color } = await dibujarEncabezadoConDatosFiscales(
+    doc,
+    empresa,
+    'Toma de pedidos',
+    numeroFormateado,
+    fechaHoy,
+    condicionIvaEmisor,
+  )
   let y = y0
 
   // ─── Cliente ────────────────────────────────────────────────────

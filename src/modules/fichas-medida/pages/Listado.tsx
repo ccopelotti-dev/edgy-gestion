@@ -17,7 +17,8 @@ import { formatARS } from '@/modules/ventas/lib/format';
 import { EstadoPresupuestoBadge } from '@/modules/ventas/components/ventas/display';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
-import type { EmpresaParaPdf } from '@/lib/comprobantes-pdf/pdfHelpers';
+import { empresaParaPdf } from '@/modules/ventas/lib/pdfComprobantes';
+import { supabase } from '@/lib/supabase';
 
 const ESTADO_BADGE: Record<EstadoFicha, string> = {
   borrador: 'bg-gray-100 text-gray-600',
@@ -112,12 +113,12 @@ export default function Listado() {
   // se puede adjuntar automáticamente (limitación de mailto:/wa.me) --
   // hay que descargarlo aparte y adjuntarlo a mano si hace falta.
   function armarTextoFicha(f: FichaMedida) {
-    const numero = f.id.slice(0, 8).toUpperCase();
+    const numero = `${f.puntoVentaNumero}-${String(f.numero).padStart(8, '0')}`;
     return {
-      asunto: `Ficha de medida · ${f.clienteNombre}`,
+      asunto: `Toma de pedidos · ${f.clienteNombre}`,
       cuerpo:
         `Hola${f.clienteNombre ? ` ${f.clienteNombre}` : ''},\n\n` +
-        `Te enviamos el comprobante con el detalle de la medición (Ficha ${numero}).\n\n` +
+        `Te enviamos el comprobante con el detalle de la medición (N.º ${numero}).\n\n` +
         `Cualquier consulta quedamos a disposición.\nSaludos.`,
     };
   }
@@ -126,15 +127,22 @@ export default function Listado() {
     if (!empresaActual) return;
     setGenerandoPdfId(f.id);
     try {
-      const empresa: EmpresaParaPdf = {
-        nombre: empresaActual.nombre,
-        cuit: empresaActual.cuit,
-        direccion: empresaActual.direccion,
-        telefono: empresaActual.telefono,
-        logoUrl: empresaActual.logo_url,
-        colorMarca: empresaActual.color_marca,
-      };
-      await generarFichaMedidaPdf(empresa, f, `Ficha de medida - ${f.clienteNombre}`);
+      const empresa = empresaParaPdf(empresaActual);
+      // Fase 43 (20/08): condición de IVA del emisor -- mismo dato que
+      // usa Factura para la leyenda "IVA Responsable Inscripto" del
+      // recuadro, acá resuelto puntual (sin hook) porque es una
+      // descarga de un solo tiro, no una pantalla en vivo.
+      const { data: arcaConfig } = await supabase
+        .from('clientes_arca_config')
+        .select('condicion_iva')
+        .eq('cliente_id', empresaActual.id)
+        .maybeSingle();
+      await generarFichaMedidaPdf(
+        empresa,
+        f,
+        `Toma de pedidos - ${f.clienteNombre}`,
+        arcaConfig?.condicion_iva ?? null,
+      );
     } finally {
       setGenerandoPdfId(null);
     }
@@ -157,7 +165,7 @@ export default function Listado() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-medium text-gray-900">Fichas de medida</h1>
+          <h1 className="text-lg font-medium text-gray-900">Toma de pedidos</h1>
           <p className="text-sm text-gray-500">Toma de medidas a domicilio para presupuestar productos a medida.</p>
         </div>
         <button

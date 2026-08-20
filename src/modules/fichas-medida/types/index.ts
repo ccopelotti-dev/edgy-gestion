@@ -85,6 +85,14 @@ export interface ItemFichaMedida {
 
 export interface FichaMedida {
   id: string
+  /** Fase 43 (20/08, "Toma de Pedidos"): correlativo propio de esta
+   * sección, asignado al crear (nunca se reasigna) -- junto con
+   * `puntoVentaNumero` arma el "0005-00000001" que se imprime en el
+   * nuevo encabezado del PDF. */
+  numero: number
+  /** El "0005" congelado en el momento de creación -- ver
+   * resolverNumeroPuntoVenta() en src/lib/puntoVenta.ts. */
+  puntoVentaNumero: string
   clienteVentaId: string
   /** Denormalizado en el join de lectura -- no se persiste acá, viene
    * siempre de clientes_venta (fuente de verdad real). */

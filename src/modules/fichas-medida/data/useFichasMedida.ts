@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { resolverNumeroPuntoVenta } from '@/lib/puntoVenta'
 import type { EstadoFicha, FichaMedida, ItemFichaMedida, ModalidadEntrega, TipoFicha } from '../types'
 import { useClienteId } from './useClienteId'
 
@@ -43,6 +44,8 @@ export function filaAFicha(row: any): FichaMedida {
 
   return {
     id: row.id,
+    numero: row.numero,
+    puntoVentaNumero: row.punto_venta_numero,
     clienteVentaId: row.cliente_venta_id,
     clienteNombre: cv.nombre ?? 'Cliente',
     clienteTelefono: cv.telefono ?? undefined,
@@ -289,9 +292,9 @@ export function useFichasMedida(): UseFichasMedidaResult {
     // ficha del cliente si esta vez es otro lugar.
     const direccionTexto = domicilioTrabajo || clienteRow?.direccion
     const direccion = direccionTexto ? ` (${direccionTexto})` : ''
-    const descripcionReplanteo = `Ficha de medida de ${nombre}${direccion} -- ver módulo Fichas de medida.`
+    const descripcionReplanteo = `Toma de pedidos de ${nombre}${direccion} -- ver módulo Toma de Pedidos.`
     const modalidadTexto = modalidadEntrega === 'obra_instalacion' ? 'En obra con instalación' : 'Retiro en local'
-    const descripcionEntrega = `Ficha de medida de ${nombre}${direccion} -- ${modalidadTexto}. Ver módulo Fichas de medida.`
+    const descripcionEntrega = `Toma de pedidos de ${nombre}${direccion} -- ${modalidadTexto}. Ver módulo Toma de Pedidos.`
 
     const tareaReplanteoId = await sincronizarUnaTarea({
       tareaIdActual: tareaReplanteoIdActual,
@@ -324,8 +327,28 @@ export function useFichasMedida(): UseFichasMedidaResult {
       setError(null)
       const fichaId = crypto.randomUUID()
 
+      // Fase 43 (20/08, "Toma de Pedidos"): numeración correlativa propia
+      // de esta sección -- mismo criterio que Presupuesto (max+1 por
+      // cliente_id), asignada acá al crear (no al imprimir), para que el
+      // número quede fijo en el orden real de alta. El punto de venta se
+      // congela en este mismo momento (ver resolverNumeroPuntoVenta) para
+      // que no cambie si más adelante se edita/borra el punto de venta.
+      const [{ data: maxRow }, puntoVentaNumero] = await Promise.all([
+        supabase
+          .from('fichas_medida')
+          .select('numero')
+          .eq('cliente_id', clienteId)
+          .order('numero', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        resolverNumeroPuntoVenta(clienteId),
+      ])
+      const numero = (maxRow?.numero ?? 0) + 1
+
       const { error: errFicha } = await supabase.from('fichas_medida').insert({
         id: fichaId,
+        numero,
+        punto_venta_numero: puntoVentaNumero,
         cliente_id: clienteId,
         cliente_venta_id: data.clienteVentaId,
         tipo: data.tipo,

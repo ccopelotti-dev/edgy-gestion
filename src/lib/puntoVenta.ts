@@ -55,6 +55,41 @@ export async function resolverPuntoVentaId(clienteId: string): Promise<string | 
 }
 
 /**
+ * Fase 43 (20/08, a pedido de Carlos): "0005" que se imprime como
+ * prefijo de la numeración de Fichas de medida (Toma de Pedidos) --
+ * mismo formato visual que usa Factura (`formatNumeroFiscal`), pero acá
+ * no hay resolución fiscal contra ARCA de por medio, es puramente
+ * decorativo/organizativo. Reusa `resolverPuntoVentaId` (mismo criterio
+ * que ya usan las escrituras de stock: punto de venta del usuario
+ * logueado, o el "por defecto" del cliente si tiene 2+ locales) y, si
+ * el cliente es de un solo local (`resolverPuntoVentaId` devuelve
+ * `null`), cae al punto de venta único declarado para ARCA
+ * (`clientes_arca_config.punto_venta` -- el mismo dato que ya usa la
+ * Factura para esos clientes). Si no hay absolutamente nada cargado,
+ * devuelve "0001" en vez de romper la descarga del PDF.
+ */
+export async function resolverNumeroPuntoVenta(clienteId: string): Promise<string> {
+  const puntoVentaId = await resolverPuntoVentaId(clienteId)
+  if (puntoVentaId) {
+    const { data } = await supabase
+      .from('puntos_venta')
+      .select('numero')
+      .eq('id', puntoVentaId)
+      .maybeSingle()
+    if (data?.numero) return String(data.numero).padStart(4, '0')
+  }
+
+  const { data: arca } = await supabase
+    .from('clientes_arca_config')
+    .select('punto_venta')
+    .eq('cliente_id', clienteId)
+    .maybeSingle()
+  if (arca?.punto_venta) return String(arca.punto_venta).padStart(4, '0')
+
+  return '0001'
+}
+
+/**
  * Ajusta un renglón de `stock_por_punto_venta` de forma atómica (RPC
  * `ajustar_stock_punto_venta`, migración 0073) -- usarla SIEMPRE que
  * `resolverPuntoVentaId()` haya devuelto un id no nulo, EN VEZ DE escribir
