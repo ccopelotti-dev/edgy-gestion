@@ -70,8 +70,12 @@ export interface ItemFichaMedida {
    * que ambos datos queden distinguibles en el detalle relevado. */
   color?: string
   cantidad: number
-  // Genérica
+  /** Genérica: descripción libre de la medida del producto. Fase 43g
+   * (20/08): en Cortinas pasa a usarse para la medida total del
+   * hueco/ventana (dato de referencia, distinto de las medidas de
+   * corte por paño de `panos`). */
   medida?: string
+  // Genérica
   peso?: string
   // Cortinas
   incluyeBarral?: boolean

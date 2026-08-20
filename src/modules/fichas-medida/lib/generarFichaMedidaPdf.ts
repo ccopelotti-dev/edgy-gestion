@@ -48,7 +48,7 @@ function panosDibujables(item: ItemFichaMedida): { ancho: number; alto: number }
  * ancho/alto de cada uno en texto. Si NO hay dibujo (ítem genérico, o
  * paños sin medidas completas), se listan igual que antes para no perder
  * el dato. */
-function descripcionItem(item: ItemFichaMedida, conEsquema: boolean): string[] {
+function descripcionItem(item: ItemFichaMedida, conEsquema: boolean, esCortina: boolean): string[] {
   const lineas: string[] = []
   lineas.push(`${item.producto}${item.cantidad && item.cantidad !== 1 ? ` · cant. ${item.cantidad}` : ''}`)
   if (item.tela) lineas.push(`Tela: ${item.tela}`)
@@ -65,7 +65,10 @@ function descripcionItem(item: ItemFichaMedida, conEsquema: boolean): string[] {
   }
   if (item.tipoBarral) lineas.push(`Barral: ${item.tipoBarral}${item.incluyeBarral ? '' : ' (no incluido)'}`)
   if (item.tipoCortina) lineas.push(`Tipo de cortina: ${item.tipoCortina}`)
-  if (item.medida) lineas.push(`Medida: ${item.medida}`)
+  // Fase 43g (20/08): en Cortinas, `medida` es la medida total del
+  // hueco/ventana (dato de referencia distinto de las medidas de corte
+  // por paño) -- se etiqueta distinto para no confundirla con esas.
+  if (item.medida) lineas.push(esCortina ? `Medida total de la ventana: ${item.medida}` : `Medida: ${item.medida}`)
   if (item.peso) lineas.push(`Peso: ${item.peso}`)
   if (item.notas) lineas.push(`Notas: ${item.notas}`)
   return lineas
@@ -204,7 +207,7 @@ export function dibujarDetalleRelevado(
   for (const item of ficha.items) {
     const panosDibujo = ficha.tipo === 'cortinas' ? panosDibujables(item) : []
     const conEsquema = panosDibujo.length > 0
-    const lineas = descripcionItem(item, conEsquema)
+    const lineas = descripcionItem(item, conEsquema, ficha.tipo === 'cortinas')
     if (lineas.length === 0) continue
 
     // Alto del bloque: si hay esquema, es fijo (ESQUEMA_ALTO_TOTAL) salvo

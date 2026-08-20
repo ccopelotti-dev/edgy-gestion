@@ -510,7 +510,12 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
         tela: it.tela.trim() || undefined,
         color: it.color.trim() || undefined,
         cantidad: parseDecimal(it.textoCantidad) || 1,
-        medida: tipo === 'generica' ? it.medida.trim() || undefined : undefined,
+        // Fase 43g (20/08, a pedido de Carlos): `medida` deja de ser
+        // exclusiva de la ficha Genérica -- en Cortinas pasa a guardar
+        // la medida total del hueco/ventana (dato de referencia del
+        // cliente, distinto de las medidas de corte por paño que ya se
+        // cargan abajo). `peso` sigue siendo solo de Genérica.
+        medida: it.medida.trim() || undefined,
         peso: tipo === 'generica' ? it.peso.trim() || undefined : undefined,
         incluyeBarral: tipo === 'cortinas' ? it.incluyeBarral : undefined,
         tipoBarral: tipo === 'cortinas' ? it.tipoBarral || undefined : undefined,
@@ -848,6 +853,26 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                             />
                           </div>
                         </>
+                      )}
+
+                      {/* Fase 43g (20/08, a pedido de Carlos): medida
+                          total del hueco/ventana -- dato de referencia
+                          que el cliente da de entrada ("quiero cubrir
+                          una ventana de 1.40 x 1.20"), distinto de las
+                          medidas de corte por paño (que pueden diferir
+                          por fruncido/superposición). Ocupa el mismo
+                          lugar en la grilla que "Medida" en Genérica. */}
+                      {tipo === 'cortinas' && (
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-500">Medida total de la ventana</label>
+                          <input
+                            type="text"
+                            value={it.medida}
+                            onChange={(e) => actualizarItem(it.key, { medida: e.target.value })}
+                            placeholder="Ej. 1.40 x 1.20"
+                            className={inputClass}
+                          />
+                        </div>
                       )}
                     </div>
 
