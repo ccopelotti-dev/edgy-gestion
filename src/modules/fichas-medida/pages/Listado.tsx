@@ -131,17 +131,17 @@ export default function Listado() {
       // Fase 43 (20/08): condición de IVA del emisor -- mismo dato que
       // usa Factura para la leyenda "IVA Responsable Inscripto" del
       // recuadro, acá resuelto puntual (sin hook) porque es una
-      // descarga de un solo tiro, no una pantalla en vivo.
-      const { data: arcaConfig } = await supabase
-        .from('clientes_arca_config')
-        .select('condicion_iva')
-        .eq('cliente_id', empresaActual.id)
-        .maybeSingle();
+      // descarga de un solo tiro, no una pantalla en vivo. Fase 43b:
+      // vía RPC (ver obtener_condicion_iva) -- un select directo a
+      // clientes_arca_config siempre devuelve vacío (RLS sin políticas).
+      const { data: condicionIva } = await supabase.rpc('obtener_condicion_iva', {
+        p_cliente_id: empresaActual.id,
+      });
       await generarFichaMedidaPdf(
         empresa,
         f,
         `Toma de pedidos - ${f.clienteNombre}`,
-        arcaConfig?.condicion_iva ?? null,
+        (condicionIva as string | null) ?? null,
       );
     } finally {
       setGenerandoPdfId(null);

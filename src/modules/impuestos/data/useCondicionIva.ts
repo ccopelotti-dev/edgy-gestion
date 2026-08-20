@@ -28,14 +28,16 @@ export function useCondicionIva(): UseCondicionIvaResult {
     }
 
     let activo = true
+    // Fase 43b (20/08): `clientes_arca_config` tiene RLS activado sin
+    // políticas -- un select directo desde acá siempre devolvía vacío
+    // (bug preexistente, encontrado al armar el encabezado de Toma de
+    // Pedidos). Se lee vía RPC angosta que solo expone `condicion_iva`,
+    // sin abrir el resto de la tabla (certificado/clave privada ARCA).
     supabase
-      .from('clientes_arca_config')
-      .select('condicion_iva')
-      .eq('cliente_id', clienteId)
-      .maybeSingle()
+      .rpc('obtener_condicion_iva', { p_cliente_id: clienteId })
       .then(({ data }) => {
         if (!activo) return
-        setCondicionIva(data?.condicion_iva ?? null)
+        setCondicionIva((data as string | null) ?? null)
         setCargando(false)
       })
 
