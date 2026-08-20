@@ -315,6 +315,23 @@ function luminanciaRelativa(hex: string): number {
   return 0.2126 * canal(r) + 0.7152 * canal(g) + 0.0722 * canal(b)
 }
 
+/** Mismo problema que arriba pero al revés: texto en el color de marca
+ * DIRECTO, dibujado sobre fondo BLANCO (no sobre el panel de color) --
+ * ej. el título del esquema técnico de la Ficha. Con una marca clara
+ * como la de Punto Tex, el color sin modificar queda casi invisible
+ * sobre blanco. Si la luminancia es alta, se oscurece el mismo color
+ * (no se lo reemplaza por un gris genérico) para que siga siendo
+ * "de la marca" pero legible. */
+export function colorLegibleSobreBlanco(hex: string): string {
+  if (luminanciaRelativa(hex) <= 0.55) return hex
+  const [r, g, b] = hexToRgb(hex)
+  const factor = 0.55
+  const oscurecerCanal = (c: number) => Math.round(c * (1 - factor))
+  return `#${[r, g, b]
+    .map((c) => oscurecerCanal(c).toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
 /**
  * Encabezado alternativo -- Fase 43c (20/08, a pedido de Carlos, tomado
  * como "modelo base para todo"): UN solo panel de color (no banda

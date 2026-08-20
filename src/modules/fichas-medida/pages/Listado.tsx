@@ -127,16 +127,25 @@ export default function Listado() {
     if (!empresaActual) return;
     setGenerandoPdfId(f.id);
     try {
-      const empresa = empresaParaPdf(empresaActual);
-      // Fase 43 (20/08): condición de IVA del emisor -- mismo dato que
-      // usa Factura para la leyenda "IVA Responsable Inscripto" del
-      // recuadro, acá resuelto puntual (sin hook) porque es una
-      // descarga de un solo tiro, no una pantalla en vivo. Fase 43b:
-      // vía RPC (ver obtener_condicion_iva) -- un select directo a
-      // clientes_arca_config siempre devuelve vacío (RLS sin políticas).
-      const { data: condicionIva } = await supabase.rpc('obtener_condicion_iva', {
-        p_cliente_id: empresaActual.id,
-      });
+      // Fase 43e (20/08, a pedido de Carlos): la dirección que va en el
+      // encabezado es la del PUNTO DE VENTA que tomó el pedido -- igual
+      // que Factura -- no la fiscal de la empresa (que dejó de
+      // publicarse hace varias fases, ver EmpresaParaPdf en
+      // generarComprobantePdf.ts). Se resuelve por el `puntoVentaNumero`
+      // que la ficha ya tiene congelado desde que se creó (Fase 43); si
+      // no hay una fila de `puntos_venta` con ese número (cliente de un
+      // solo local, numeración tomada de clientes_arca_config) esa línea
+      // directamente no se dibuja -- mismo comportamiento que Factura.
+      const [{ data: puntoVenta }, { data: condicionIva }] = await Promise.all([
+        supabase
+          .from('puntos_venta')
+          .select('direccion')
+          .eq('cliente_id', empresaActual.id)
+          .eq('numero', f.puntoVentaNumero)
+          .maybeSingle(),
+        supabase.rpc('obtener_condicion_iva', { p_cliente_id: empresaActual.id }),
+      ]);
+      const empresa = { ...empresaParaPdf(empresaActual), direccion: puntoVenta?.direccion ?? null };
       await generarFichaMedidaPdf(
         empresa,
         f,

@@ -13,6 +13,7 @@ import { jsPDF } from 'jspdf'
 import {
   type EmpresaParaPdfCompleta,
   aclarar,
+  colorLegibleSobreBlanco,
   dibujarEncabezadoConDatosFiscales,
   dibujarPie,
   imprimirOGuardarPdf,
@@ -100,8 +101,20 @@ function dibujarEsquemaCortina(
   color: string,
 ): void {
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(8)
-  doc.setTextColor(color)
+  // Fase 43d: "Terminación: <tipo>" es bastante más largo que el tipo
+  // solo -- se achica la fuente si no entra en el ancho del recuadro
+  // (42mm con padding) en vez de dejarla desbordar el borde.
+  let tituloFontSize = 8
+  const anchoDisponibleTitulo = ESQUEMA_ANCHO - ESQUEMA_PADDING * 2
+  doc.setFontSize(tituloFontSize)
+  while (doc.getTextWidth(titulo) > anchoDisponibleTitulo && tituloFontSize > 5.5) {
+    tituloFontSize -= 0.5
+    doc.setFontSize(tituloFontSize)
+  }
+  // Fase 43d (20/08, a pedido de Carlos): con un color de marca claro
+  // (ej. el beige de Punto Tex) este título quedaba casi invisible
+  // sobre el fondo blanco del esquema -- ver colorLegibleSobreBlanco.
+  doc.setTextColor(colorLegibleSobreBlanco(color))
   doc.text(titulo, x + ESQUEMA_ANCHO / 2, yTop + ESQUEMA_TITULO_ALTO - 1, { align: 'center' })
 
   const canvasTopBase = yTop + ESQUEMA_TITULO_ALTO + ESQUEMA_PADDING
@@ -123,8 +136,14 @@ function dibujarEsquemaCortina(
   const altoRealMax = maxAlto * escala
   const canvasTop = canvasTopBase + (ESQUEMA_ALTO_CANVAS - altoRealMax) / 2
 
+  // Fase 43f (20/08, a pedido de Carlos): el contorno de los paños y el
+  // borde del recuadro usan el mismo color de marca "legible" que el
+  // título (colorLegibleSobreBlanco) en vez de un gris fijo -- así el
+  // esquema entero queda consistente con la marca en vez de mezclar
+  // grises sueltos con el color corregido del título.
+  const colorContorno = colorLegibleSobreBlanco(color)
   let cursorX = canvasLeft
-  doc.setDrawColor(140, 140, 140)
+  doc.setDrawColor(colorContorno)
   doc.setLineWidth(0.25)
   for (const p of panos) {
     const w = p.ancho * escala
@@ -145,7 +164,7 @@ function dibujarEsquemaCortina(
     cursorX += w + gap
   }
 
-  doc.setDrawColor(225, 225, 225)
+  doc.setDrawColor(colorContorno)
   doc.setLineWidth(0.2)
   doc.roundedRect(x, yTop - 2, ESQUEMA_ANCHO, ESQUEMA_ALTO_TOTAL, 1.5, 1.5)
 }
@@ -203,7 +222,11 @@ export function dibujarDetalleRelevado(
     const yInicioBloque = y
 
     if (conEsquema) {
-      dibujarEsquemaCortina(doc, marginX, y, item.tipoCortina || 'Cortina', panosDibujo, color)
+      // Fase 43d: "Terminación: <tipo>" en vez del tipo solo -- Carlos
+      // pidió aclarar a qué se refiere esa palabra sobre el esquema
+      // (quedaba muy "vacío" con solo "Pasa barral" como título).
+      const tituloEsquema = item.tipoCortina ? `Terminación: ${item.tipoCortina}` : 'Cortina'
+      dibujarEsquemaCortina(doc, marginX, y, tituloEsquema, panosDibujo, color)
     }
 
     doc.setFont('helvetica', 'bold')
