@@ -56,6 +56,13 @@ export default function Produccion() {
   const [factorTexto, setFactorTexto] = useState('1')
   const [cantidadReal, setCantidadReal] = useState<number | ''>('')
   const [cantidadRealTexto, setCantidadRealTexto] = useState('')
+  // Fase 43p (Charcutería, "Lectura A"): en qué unidad está tipeando el
+  // operador el rendimiento del lote -- la nativa de la fórmula
+  // (unidadProducida) o la alternativa opcional (unidadSecundaria), si la
+  // fórmula la tiene configurada. Se convierte a unidadProducida recién
+  // al registrar (ver handleRegistrar) -- el stock del producto sigue
+  // siendo un solo número, en su unidad de siempre.
+  const [modoUnidad, setModoUnidad] = useState<'primaria' | 'secundaria'>('primaria')
   const [fecha, setFecha] = useState(todayISO())
   const [notas, setNotas] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -66,13 +73,28 @@ export default function Produccion() {
     [state.formulas, selectedProductoId],
   )
 
+  const tieneUnidadSecundaria = !!(
+    formulaSeleccionada?.unidadSecundaria && formulaSeleccionada.equivalenciaSecundaria
+  )
+
   const cantidadTeorica = formulaSeleccionada
     ? formulaSeleccionada.cantidadProducida * factor
     : 0
 
+  // Convierte lo que haya tipeado el operador (en la unidad activa) a
+  // unidadProducida -- la única que el resto del sistema (stock,
+  // historial, cantidadTeorica) entiende.
+  const cantidadRealEnUnidadProducida = useMemo(() => {
+    if (cantidadReal === '') return cantidadTeorica
+    if (modoUnidad === 'secundaria' && formulaSeleccionada?.equivalenciaSecundaria) {
+      return cantidadReal * formulaSeleccionada.equivalenciaSecundaria
+    }
+    return cantidadReal
+  }, [cantidadReal, modoUnidad, formulaSeleccionada, cantidadTeorica])
+
   async function handleRegistrar() {
     if (!formulaSeleccionada || guardando) return
-    const real = cantidadReal === '' ? cantidadTeorica : cantidadReal
+    const real = cantidadRealEnUnidadProducida
     if (real <= 0 || factor <= 0) return
     if (!cliente?.id) {
       setErrorGuardado('No se pudo identificar la cuenta -- probá recargar la página.')
@@ -104,6 +126,7 @@ export default function Produccion() {
     setFactorTexto('1')
     setCantidadReal('')
     setCantidadRealTexto('')
+    setModoUnidad('primaria')
     setFecha(todayISO())
     setNotas('')
   }
@@ -300,6 +323,7 @@ export default function Produccion() {
                     setSelectedProductoId(e.target.value)
                     setCantidadReal('')
                     setCantidadRealTexto('')
+                    setModoUnidad('primaria')
                   }}
                 >
                   <option value="">Seleccionar un producto...</option>
@@ -341,14 +365,57 @@ export default function Produccion() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">
-                      Rendimiento real ({unidadAbrev(formulaSeleccionada.unidadProducida)})
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-muted-foreground">
+                        Rendimiento real (
+                        {unidadAbrev(
+                          modoUnidad === 'secundaria' && formulaSeleccionada.unidadSecundaria
+                            ? formulaSeleccionada.unidadSecundaria
+                            : formulaSeleccionada.unidadProducida,
+                        )}
+                        )
+                      </label>
+                      {tieneUnidadSecundaria && (
+                        <div className="flex rounded-md border overflow-hidden text-[11px]">
+                          <button
+                            type="button"
+                            className={cn(
+                              'px-2 py-0.5',
+                              modoUnidad === 'primaria' ? 'bg-primary text-primary-foreground' : 'bg-background',
+                            )}
+                            onClick={() => {
+                              setModoUnidad('primaria')
+                              setCantidadReal('')
+                              setCantidadRealTexto('')
+                            }}
+                          >
+                            {unidadAbrev(formulaSeleccionada.unidadProducida)}
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(
+                              'px-2 py-0.5',
+                              modoUnidad === 'secundaria' ? 'bg-primary text-primary-foreground' : 'bg-background',
+                            )}
+                            onClick={() => {
+                              setModoUnidad('secundaria')
+                              setCantidadReal('')
+                              setCantidadRealTexto('')
+                            }}
+                          >
+                            {unidadAbrev(formulaSeleccionada.unidadSecundaria!)}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <input
                       className={cn(inputClass, 'text-right')}
                       type="text"
                       inputMode="decimal"
-                      placeholder={cantidadTeorica.toFixed(2)}
+                      placeholder={(modoUnidad === 'secundaria' && formulaSeleccionada.equivalenciaSecundaria
+                        ? cantidadTeorica / formulaSeleccionada.equivalenciaSecundaria
+                        : cantidadTeorica
+                      ).toFixed(2)}
                       value={cantidadRealTexto}
                       onChange={(e) => {
                         const texto = sanitizarDecimal(e.target.value)
@@ -356,6 +423,20 @@ export default function Produccion() {
                         setCantidadReal(texto === '' ? '' : parsearDecimal(texto))
                       }}
                     />
+                    {tieneUnidadSecundaria && cantidadReal !== '' && (
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        {modoUnidad === 'secundaria' ? (
+                          <>
+                            ≈ {cantidadRealEnUnidadProducida.toFixed(2)} {unidadAbrev(formulaSeleccionada.unidadProducida)}
+                          </>
+                        ) : (
+                          <>
+                            ≈ {(cantidadReal / formulaSeleccionada.equivalenciaSecundaria!).toFixed(2)}{' '}
+                            {unidadAbrev(formulaSeleccionada.unidadSecundaria!)}
+                          </>
+                        )}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">
@@ -584,6 +665,12 @@ export default function Produccion() {
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium">
                       {p.cantidadRealProducida.toFixed(2)} {unidad}
+                      {formula?.unidadSecundaria && formula.equivalenciaSecundaria ? (
+                        <span className="block text-[11px] font-normal text-muted-foreground">
+                          ≈ {(p.cantidadRealProducida / formula.equivalenciaSecundaria).toFixed(2)}{' '}
+                          {unidadAbrev(formula.unidadSecundaria)}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{p.notas || '-'}</td>
                   </tr>

@@ -89,6 +89,12 @@ interface FormulaLocal {
   /** Fase 43o: si está tildado, la merma pasa a afectar el costo unitario
    * calculado (ver comentario en Formula.aplicarMermaCosto). */
   aplicarMermaCosto: boolean
+  /** Fase 43p: unidad alternativa opcional para cargar el rendimiento en
+   * Producción (ver comentario en Formula.unidadSecundaria). '' = sin
+   * unidad secundaria (comportamiento de siempre). */
+  unidadSecundaria: UnidadMedida | ''
+  equivalenciaSecundaria: number
+  equivalenciaSecundariaTexto: string
 }
 
 function emptyFormula(): FormulaLocal {
@@ -101,6 +107,9 @@ function emptyFormula(): FormulaLocal {
     mermaPorcentaje: 0,
     mermaPorcentajeTexto: '',
     aplicarMermaCosto: false,
+    unidadSecundaria: '',
+    equivalenciaSecundaria: 0,
+    equivalenciaSecundariaTexto: '',
   }
 }
 
@@ -125,6 +134,9 @@ function formulaToLocal(f: Formula): FormulaLocal {
     mermaPorcentaje: f.mermaPorcentaje ?? 0,
     mermaPorcentajeTexto: decimalATexto(f.mermaPorcentaje ?? 0),
     aplicarMermaCosto: f.aplicarMermaCosto ?? false,
+    unidadSecundaria: f.unidadSecundaria ?? '',
+    equivalenciaSecundaria: f.equivalenciaSecundaria ?? 0,
+    equivalenciaSecundariaTexto: decimalATexto(f.equivalenciaSecundaria ?? 0),
   }
 }
 
@@ -967,6 +979,10 @@ export default function FormularProducto() {
         notas: formula.notas,
         mermaPorcentaje: formula.mermaPorcentaje,
         aplicarMermaCosto: formula.aplicarMermaCosto,
+        unidadSecundaria: formula.unidadSecundaria || null,
+        equivalenciaSecundaria: formula.unidadSecundaria && formula.equivalenciaSecundaria > 0
+          ? formula.equivalenciaSecundaria
+          : null,
         createdAt: existingFormula?.createdAt,
       },
       cliente.id,
@@ -1180,6 +1196,60 @@ export default function FormularProducto() {
                   )}
                 </p>
               </div>
+            )}
+            {/* Fase 43p (Charcutería, "Lectura A"): unidad alternativa para
+                cargar el rendimiento del lote en Producción -- ej. contar
+                "unidad" en vez de pesar "kg". Opcional: si no se completa,
+                Producción funciona exactamente igual que siempre. */}
+            <div className="mt-3 pt-3 border-t flex flex-wrap items-center gap-3">
+              <label className="text-sm text-muted-foreground">
+                Unidad secundaria para Producción (opcional):
+              </label>
+              <select
+                className={cn(inputClass, 'w-40')}
+                value={formula.unidadSecundaria}
+                onChange={(e) => {
+                  const nueva = e.target.value as UnidadMedida | ''
+                  setFormula((prev) => (prev ? { ...prev, unidadSecundaria: nueva } : prev))
+                  setDirty(true)
+                }}
+              >
+                <option value="">Sin unidad secundaria</option>
+                {UNIDADES.filter((u) => u.value !== formula.unidadProducida).map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+              {formula.unidadSecundaria && (
+                <>
+                  <span className="text-sm text-muted-foreground">1 {unidadAbrev(formula.unidadSecundaria)} =</span>
+                  <input
+                    className={cn(inputClass, 'w-24 text-right')}
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={formula.equivalenciaSecundariaTexto}
+                    onChange={(e) => {
+                      const texto = sanitizarDecimal(e.target.value)
+                      setFormula((prev) =>
+                        prev
+                          ? { ...prev, equivalenciaSecundariaTexto: texto, equivalenciaSecundaria: parsearDecimal(texto) }
+                          : prev,
+                      )
+                      setDirty(true)
+                    }}
+                  />
+                  <span className="text-sm text-muted-foreground">{unidadAbrev(formula.unidadProducida)}</span>
+                </>
+              )}
+            </div>
+            {formula.unidadSecundaria && formula.equivalenciaSecundaria > 0 && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                En Producción vas a poder cargar el rendimiento en {unidadAbrev(formula.unidadProducida)} o en{' '}
+                {unidadAbrev(formula.unidadSecundaria)} -- el sistema convierte solo. No crea un stock aparte: el
+                producto sigue con un único número de stock, en {unidadAbrev(formula.unidadProducida)}.
+              </p>
             )}
           </div>
 

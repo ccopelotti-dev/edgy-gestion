@@ -671,6 +671,26 @@ export interface Formula {
    * este campo en `false` y usar la merma solo como dato informativo.
    */
   aplicarMermaCosto: boolean
+  /**
+   * Fase 43p (20/08, caso Charcutería -- "Lectura A"): unidad alternativa
+   * opcional para CARGAR el rendimiento de un lote en Producción, cuando
+   * es más práctico medirlo así que en `unidadProducida` (ej. contar "60
+   * unidad" en vez de pesar "30 kg" cada vez que se saca un lote de
+   * salame del secadero). No crea un segundo stock: Producción convierte
+   * lo que se tipeé acá a `unidadProducida` con `equivalenciaSecundaria`
+   * ANTES de aplicar el ajuste real -- el producto sigue con un solo
+   * número de stock, en su unidad de siempre. Si queda sin cargar (caso
+   * normal, todos los clientes existentes), Producción se ve exactamente
+   * igual que antes.
+   */
+  unidadSecundaria?: UnidadMedida | null
+  /**
+   * Cuánto vale, en `unidadProducida`, UNA unidad de `unidadSecundaria`
+   * (ej. 0.5 si unidadProducida='kg' y unidadSecundaria='unidad' -- cada
+   * salame pesa en promedio 500g). Sin esto, `unidadSecundaria` no sirve
+   * de nada -- los dos campos van siempre juntos.
+   */
+  equivalenciaSecundaria?: number | null
   createdAt: string
 }
 

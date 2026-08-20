@@ -1342,6 +1342,8 @@ function formulaToRow(f: Formula, clienteId: string) {
     notas: f.notas,
     merma_porcentaje: f.mermaPorcentaje,
     aplicar_merma_costo: f.aplicarMermaCosto,
+    unidad_secundaria: f.unidadSecundaria || null,
+    equivalencia_secundaria: f.equivalenciaSecundaria || null,
   }
 }
 
@@ -2231,6 +2233,10 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     createdAt: (r.created_at ?? '').slice(0, 10),
     mermaPorcentaje: Number(r.merma_porcentaje ?? 0),
     aplicarMermaCosto: Boolean(r.aplicar_merma_costo ?? false),
+    unidadSecundaria: r.unidad_secundaria ?? null,
+    equivalenciaSecundaria: r.equivalencia_secundaria === null || r.equivalencia_secundaria === undefined
+      ? null
+      : Number(r.equivalencia_secundaria),
   }))
 
   const producciones: Produccion[] = (produccionesRes.data ?? []).map((r: any) => ({
@@ -2484,6 +2490,8 @@ export async function guardarFormulaConfirmada(
     notas: string
     mermaPorcentaje: number
     aplicarMermaCosto: boolean
+    unidadSecundaria?: UnidadMedida | null
+    equivalenciaSecundaria?: number | null
     /** Solo relevante al actualizar -- se preserva la fecha de creación original. */
     createdAt?: string
   },
@@ -2499,6 +2507,8 @@ export async function guardarFormulaConfirmada(
     notas: args.notas,
     mermaPorcentaje: args.mermaPorcentaje,
     aplicarMermaCosto: args.aplicarMermaCosto,
+    unidadSecundaria: args.unidadSecundaria ?? null,
+    equivalenciaSecundaria: args.equivalenciaSecundaria ?? null,
     createdAt: args.createdAt ?? todayISO(),
   }
 
