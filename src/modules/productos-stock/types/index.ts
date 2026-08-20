@@ -644,10 +644,10 @@ export interface Formula {
   /**
    * Fase 9 (recetas/costeo real): % de merma DE PROCESO -- la pérdida
    * esperada y repetible de este proceso puntual (ej: un salame que en
-   * salazón pierde 30% de su peso). Es solo informativo: no cambia el
-   * cálculo de costo (que sigue siendo total / cantidadProducida), pero
-   * hace explícito y auditable un dato que hoy quedaba escondido dentro
-   * de `cantidadProducida` cargado a mano.
+   * salazón pierde 30% de su peso). Por defecto es solo informativo (ver
+   * `aplicarMermaCosto`): no cambia el cálculo de costo, pero hace
+   * explícito y auditable un dato que hoy quedaba escondido dentro de
+   * `cantidadProducida` cargado a mano.
    *
    * OJO con el nombre: no es lo mismo que `MotivoAjuste.merma` en Stock
    * (ver más abajo) -- ese es un ajuste IRREGULAR y puntual (se pudrió,
@@ -656,6 +656,21 @@ export interface Formula {
    * se llama "Merma de proceso", para no pisarse con el otro concepto.
    */
   mermaPorcentaje: number
+  /**
+   * Fase 43o (20/08, a pedido de Carlos -- caso Charcutería, salame que
+   * se vende por kg y pierde peso en el curado): si está en `true`, el
+   * costo unitario deja de ser `total / cantidadProducida` y pasa a ser
+   * `total / (cantidadProducida * (1 - mermaPorcentaje/100))` -- es
+   * decir, el costo se reparte entre la cantidad REAL vendible después
+   * de la pérdida, no la cantidad nominal cargada en la receta. Default
+   * `false` a propósito: ningún cliente/fórmula existente cambia de
+   * comportamiento a menos que lo tilde explícitamente. Solo tiene
+   * sentido si `unidadProducida` está en la misma magnitud que erosiona
+   * la merma (ej. Kilogramo) -- si el producto se cuenta por pieza
+   * (Unidad) y el precio no varía con el peso real de cada una, dejar
+   * este campo en `false` y usar la merma solo como dato informativo.
+   */
+  aplicarMermaCosto: boolean
   createdAt: string
 }
 

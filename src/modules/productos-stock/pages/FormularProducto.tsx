@@ -83,9 +83,12 @@ interface FormulaLocal {
   unidadProducida: UnidadMedida
   lineas: LocalLinea[]
   notas: string
-  /** Fase 9: % de merma de proceso (informativo, ver comentario en types/index.ts). */
+  /** Fase 9: % de merma de proceso (ver comentario en types/index.ts). */
   mermaPorcentaje: number
   mermaPorcentajeTexto: string
+  /** Fase 43o: si está tildado, la merma pasa a afectar el costo unitario
+   * calculado (ver comentario en Formula.aplicarMermaCosto). */
+  aplicarMermaCosto: boolean
 }
 
 function emptyFormula(): FormulaLocal {
@@ -97,6 +100,7 @@ function emptyFormula(): FormulaLocal {
     notas: '',
     mermaPorcentaje: 0,
     mermaPorcentajeTexto: '',
+    aplicarMermaCosto: false,
   }
 }
 
@@ -120,6 +124,7 @@ function formulaToLocal(f: Formula): FormulaLocal {
     notas: f.notas,
     mermaPorcentaje: f.mermaPorcentaje ?? 0,
     mermaPorcentajeTexto: decimalATexto(f.mermaPorcentaje ?? 0),
+    aplicarMermaCosto: f.aplicarMermaCosto ?? false,
   }
 }
 
@@ -890,10 +895,14 @@ export default function FormularProducto() {
     }
 
     const total = insumos + manoDeObra + operativos
-    const unitario =
-      formula.cantidadProducida > 0
-        ? total / formula.cantidadProducida
-        : total
+    // Fase 43o: mismo criterio que useCostoFormulado en store.tsx -- con
+    // el tilde "aplicar merma al costo" activo, se reparte entre la
+    // cantidad real vendible después de la pérdida de proceso.
+    const cantidadEfectiva =
+      formula.aplicarMermaCosto && formula.mermaPorcentaje > 0
+        ? formula.cantidadProducida * (1 - formula.mermaPorcentaje / 100)
+        : formula.cantidadProducida
+    const unitario = cantidadEfectiva > 0 ? total / cantidadEfectiva : total
 
     return { insumos, manoDeObra, operativos, total, unitario }
   }, [formula])
@@ -957,6 +966,7 @@ export default function FormularProducto() {
         lineas,
         notas: formula.notas,
         mermaPorcentaje: formula.mermaPorcentaje,
+        aplicarMermaCosto: formula.aplicarMermaCosto,
         createdAt: existingFormula?.createdAt,
       },
       cliente.id,
@@ -1134,15 +1144,42 @@ export default function FormularProducto() {
               </div>
             </div>
             {formula.mermaPorcentaje > 0 && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Con {formula.mermaPorcentaje}% de merma de proceso, la cantidad de insumos antes
-                de la pérdida sería de aprox.{' '}
-                <span className="font-medium">
-                  {(formula.cantidadProducida / (1 - formula.mermaPorcentaje / 100)).toFixed(2)}{' '}
-                  {unidadAbrev(formula.unidadProducida)}
-                </span>
-                . Es solo informativo, no cambia el costo calculado.
-              </p>
+              <div className="mt-2 space-y-1.5">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={formula.aplicarMermaCosto}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setFormula((prev) => (prev ? { ...prev, aplicarMermaCosto: checked } : prev))
+                      setDirty(true)
+                    }}
+                  />
+                  Aplicar la merma al costo (repartir el total entre la cantidad real vendible
+                  después de la pérdida, no la cantidad cargada arriba)
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  Con {formula.mermaPorcentaje}% de merma de proceso, la cantidad de insumos antes
+                  de la pérdida sería de aprox.{' '}
+                  <span className="font-medium">
+                    {(formula.cantidadProducida / (1 - formula.mermaPorcentaje / 100)).toFixed(2)}{' '}
+                    {unidadAbrev(formula.unidadProducida)}
+                  </span>
+                  .{' '}
+                  {formula.aplicarMermaCosto ? (
+                    <>
+                      Con el tilde activo, el costo unitario se calcula sobre{' '}
+                      <span className="font-medium">
+                        {(formula.cantidadProducida * (1 - formula.mermaPorcentaje / 100)).toFixed(2)}{' '}
+                        {unidadAbrev(formula.unidadProducida)}
+                      </span>{' '}
+                      (la cantidad ya con la pérdida descontada), no sobre la cantidad cargada arriba.
+                    </>
+                  ) : (
+                    'Por ahora es solo informativo, no cambia el costo calculado.'
+                  )}
+                </p>
+              </div>
             )}
           </div>
 

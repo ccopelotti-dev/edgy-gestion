@@ -1341,6 +1341,7 @@ function formulaToRow(f: Formula, clienteId: string) {
     unidad_producida: f.unidadProducida,
     notas: f.notas,
     merma_porcentaje: f.mermaPorcentaje,
+    aplicar_merma_costo: f.aplicarMermaCosto,
   }
 }
 
@@ -2229,6 +2230,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     notas: r.notas ?? '',
     createdAt: (r.created_at ?? '').slice(0, 10),
     mermaPorcentaje: Number(r.merma_porcentaje ?? 0),
+    aplicarMermaCosto: Boolean(r.aplicar_merma_costo ?? false),
   }))
 
   const producciones: Produccion[] = (produccionesRes.data ?? []).map((r: any) => ({
@@ -2481,6 +2483,7 @@ export async function guardarFormulaConfirmada(
     lineas: LineaFormula[]
     notas: string
     mermaPorcentaje: number
+    aplicarMermaCosto: boolean
     /** Solo relevante al actualizar -- se preserva la fecha de creación original. */
     createdAt?: string
   },
@@ -2495,6 +2498,7 @@ export async function guardarFormulaConfirmada(
     lineas: args.lineas,
     notas: args.notas,
     mermaPorcentaje: args.mermaPorcentaje,
+    aplicarMermaCosto: args.aplicarMermaCosto,
     createdAt: args.createdAt ?? todayISO(),
   }
 
@@ -3955,8 +3959,15 @@ export function useCostoFormulado(productoId: string) {
     }
 
     const total = insumos + manoDeObra + costosOperativos
-    const costoUnitario =
-      formula.cantidadProducida > 0 ? total / formula.cantidadProducida : total
+    // Fase 43o: si la fórmula tildó "aplicar merma al costo", el costo se
+    // reparte entre la cantidad REAL vendible después de la pérdida de
+    // proceso (ej. peso de curado de un salame), no la cantidad nominal
+    // cargada en la receta -- ver comentario largo en Formula.aplicarMermaCosto.
+    const cantidadEfectiva =
+      formula.aplicarMermaCosto && formula.mermaPorcentaje > 0
+        ? formula.cantidadProducida * (1 - formula.mermaPorcentaje / 100)
+        : formula.cantidadProducida
+    const costoUnitario = cantidadEfectiva > 0 ? total / cantidadEfectiva : total
 
     return { insumos, manoDeObra, costosOperativos, total, costoUnitario }
   }, [state.formulas, productoId])
