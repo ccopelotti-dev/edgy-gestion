@@ -206,7 +206,11 @@ export default function Listado() {
             className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900"
           />
         </div>
-        <div className="flex gap-1.5">
+        {/* Fase 43i (20/08, a pedido de Carlos): "flex-wrap" en vez de una
+            sola fila fija -- en mobile (donde se usa mucho esta pantalla)
+            los 4 filtros no entraban en el ancho de pantalla y "Convertida
+            a presupuesto" quedaba cortado contra el borde. */}
+        <div className="flex flex-wrap gap-1.5">
           {(['', 'borrador', 'lista', 'convertida'] as const).map((e) => (
             <button
               key={e || 'todas'}
@@ -236,7 +240,13 @@ export default function Listado() {
       <div className="space-y-2">
         {fichasFiltradas.map((f) => (
           <div key={f.id} className="rounded-lg border border-gray-200 p-3">
-            <div className="flex items-start justify-between gap-3">
+            {/* Fase 43i (20/08, a pedido de Carlos): en mobile la fila de
+                acciones (descargar/email/whatsapp/Presupuesto/etc.) pasa
+                a una fila propia DEBAJO del contenido, en vez de
+                achicarse al lado -- antes se cortaba contra el borde de
+                pantalla ("presu..." ilegible). De sm en adelante vuelve
+                a ir al lado, como antes. */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <button onClick={() => abrirEditar(f)} className="flex-1 text-left">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-gray-900">{f.clienteNombre}</span>
@@ -278,7 +288,7 @@ export default function Listado() {
                   {f.total > 0 && <span>{formatARS(f.total)}</span>}
                 </div>
               </button>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1 border-t border-gray-100 pt-2 sm:border-t-0 sm:pt-0">
                 <button
                   onClick={() => handleDescargarPdf(f)}
                   disabled={generandoPdfId === f.id}
