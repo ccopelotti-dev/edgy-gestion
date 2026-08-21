@@ -18,8 +18,8 @@
 // ============================================================
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle } from 'lucide-react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle, ClipboardCheck, ShoppingCart } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -30,9 +30,15 @@ import {
 } from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { KpiCard, EmptyState } from '../components/productos/display'
-import { formatDate, todayISO } from '../lib/format'
+import { formatDate, formatARS, todayISO } from '../lib/format'
 import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
-import { unidadAbrev, calcularCantidadesAMedida } from '../types'
+import {
+  unidadAbrev,
+  calcularCantidadesAMedida,
+  calcularNecesidadInsumos,
+  type InsumoParaNecesidad,
+} from '../types'
+import { OC_BORRADOR_STORAGE_KEY, type OcBorrador } from '@/modules/compras/types'
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -72,6 +78,68 @@ export default function Produccion() {
     () => state.formulas.find((f) => f.productoId === selectedProductoId) ?? null,
     [state.formulas, selectedProductoId],
   )
+
+  // ── Verificar disponibilidad antes de producir (Fase 44) ───────────────
+  // Carlos (Charcutería, 21/08): antes de lanzar un lote grande (ej. 40 kg
+  // de Salame) quiere saber si el stock de insumos alcanza ANTES de
+  // producir. Reusa exactamente la misma conversión de unidades que el
+  // registro real (ver calcularNecesidadInsumos en types/index.ts) para que
+  // el chequeo previo nunca diga "alcanza" y después el registro falle (o
+  // al revés) por una diferencia de lógica entre los dos lugares.
+  const navigate = useNavigate()
+  const insumosPorId = useMemo(() => {
+    const m = new Map<string, InsumoParaNecesidad>()
+    for (const i of state.insumos) {
+      m.set(i.id, {
+        id: i.id,
+        nombre: i.nombre,
+        unidad: i.unidad,
+        stock: i.stock,
+        anchoRollo: i.anchoRollo,
+        rubroId: i.rubroId,
+        costo: i.costo,
+      })
+    }
+    return m
+  }, [state.insumos])
+  const rubrosMap = useMemo(
+    () => new Map(state.rubros.map((r) => [r.id, r.nombre])),
+    [state.rubros],
+  )
+  const necesidadesResult = useMemo(() => {
+    if (!formulaSeleccionada || factor <= 0) return null
+    return calcularNecesidadInsumos(formulaSeleccionada.lineas, factor, insumosPorId)
+  }, [formulaSeleccionada, factor, insumosPorId])
+  const necesidadesOrdenadas = useMemo(() => {
+    if (!necesidadesResult?.ok) return []
+    return [...necesidadesResult.necesidades].sort((a, b) => {
+      const rubroA = rubrosMap.get(a.rubroId) ?? ''
+      const rubroB = rubrosMap.get(b.rubroId) ?? ''
+      return rubroA.localeCompare(rubroB) || a.nombre.localeCompare(b.nombre)
+    })
+  }, [necesidadesResult, rubrosMap])
+  const faltantes = useMemo(
+    () => necesidadesOrdenadas.filter((n) => !n.alcanza),
+    [necesidadesOrdenadas],
+  )
+
+  function handleGenerarOC() {
+    if (!formulaSeleccionada || faltantes.length === 0) return
+    const productoNombre = productosConFormula.find((p) => p.id === selectedProductoId)?.nombre
+    const borrador: OcBorrador = {
+      origen: 'produccion',
+      productoNombre,
+      items: faltantes.map((n) => ({
+        insumoId: n.insumoId,
+        descripcion: n.nombre,
+        cantidad: Math.round(n.faltante * 100) / 100,
+        unidad: n.unidadNativa,
+        precioUnitario: n.costoUnitario,
+      })),
+    }
+    sessionStorage.setItem(OC_BORRADOR_STORAGE_KEY, JSON.stringify(borrador))
+    navigate('/m/compras/ordenes-compra?borrador=1')
+  }
 
   const tieneUnidadSecundaria = !!(
     formulaSeleccionada?.unidadSecundaria && formulaSeleccionada.equivalenciaSecundaria
@@ -455,6 +523,72 @@ export default function Produccion() {
                   {unidadAbrev(formulaSeleccionada.unidadProducida)}. Si dejás el campo de
                   rendimiento vacío, se usa el teórico.
                 </p>
+
+                {/* Verificar disponibilidad (Fase 44) */}
+                {necesidadesResult && !necesidadesResult.ok ? (
+                  <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400 mb-3">
+                    {necesidadesResult.error}
+                  </div>
+                ) : necesidadesOrdenadas.length > 0 ? (
+                  <div className="rounded-md border mb-3 overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/30">
+                      <ClipboardCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-xs font-semibold">
+                        Disponibilidad para {factor} {factor === 1 ? 'lote' : 'lotes'}
+                      </span>
+                      {faltantes.length === 0 ? (
+                        <span className="ml-auto text-xs text-emerald-600 font-medium">
+                          Alcanza el stock de todos los insumos
+                        </span>
+                      ) : (
+                        <span className="ml-auto text-xs text-red-600 font-medium">
+                          Faltan {faltantes.length} insumo{faltantes.length === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="max-h-64 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b text-left text-muted-foreground bg-muted/10">
+                            <th className="px-3 py-1.5 font-medium">Insumo</th>
+                            <th className="px-3 py-1.5 font-medium">Rubro</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Necesario</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Stock actual</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Faltante</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {necesidadesOrdenadas.map((n) => (
+                            <tr key={n.lineaId} className={cn('border-b last:border-0', !n.alcanza && 'bg-red-50 dark:bg-red-950/20')}>
+                              <td className="px-3 py-1.5">{n.nombre}</td>
+                              <td className="px-3 py-1.5 text-muted-foreground">{rubrosMap.get(n.rubroId) ?? '-'}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">
+                                {n.cantidadNecesaria.toFixed(2)} {unidadAbrev(n.unidadNativa)}
+                              </td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">
+                                {n.stockActual.toFixed(2)} {unidadAbrev(n.unidadNativa)}
+                              </td>
+                              <td className={cn('px-3 py-1.5 text-right tabular-nums font-medium', !n.alcanza && 'text-red-600')}>
+                                {n.alcanza ? '—' : `${n.faltante.toFixed(2)} ${unidadAbrev(n.unidadNativa)}`}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {faltantes.length > 0 && (
+                      <div className="flex items-center justify-between gap-3 px-3 py-2 border-t bg-muted/20">
+                        <span className="text-xs text-muted-foreground">
+                          Estimado de compra: {formatARS(faltantes.reduce((s, n) => s + n.faltante * n.costoUnitario, 0))}
+                        </span>
+                        <Button type="button" size="sm" variant="outline" onClick={handleGenerarOC}>
+                          <ShoppingCart className="h-3.5 w-3.5 mr-1.5" />
+                          Generar Orden de Compra
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </>
             )}
 

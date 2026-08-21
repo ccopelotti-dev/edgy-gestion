@@ -3,7 +3,8 @@
 // Edgy Gestion · Gestion de ordenes de compra
 // ============================================================
 
-import { Fragment, useState, useMemo } from 'react';
+import { Fragment, useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Search,
   Plus,
@@ -19,6 +20,7 @@ import {
   Tag,
   Mail,
   MessageCircle,
+  Building2,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -46,12 +48,14 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra, Proveedor } from '../types';
+import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra, Proveedor, OcBorrador } from '../types';
 import {
   ESTADO_OC_LABEL,
   generarId,
   calcularSubtotalItem,
+  OC_BORRADOR_STORAGE_KEY,
 } from '../types';
+import type { UnidadMedida } from '@/modules/productos-stock/types';
 
 // ─── Componente principal ───────────────────────────────────
 
@@ -85,6 +89,14 @@ export default function OrdenesCompra() {
   // cotización respondida, acá se cargan los precios cotizados y se
   // confirman -- ver OrdenCompraPreciosDialog.
   const [preciosOrdenId, setPreciosOrdenId] = useState<string | null>(null);
+  // Fase 44 (a pedido de Carlos): antes el proveedor de una OC no se podía
+  // cambiar después de creada -- útil sobre todo cuando la OC se generó
+  // desde un borrador de faltantes de Producción sin elegir proveedor
+  // todavía, o si se equivocó al elegirlo. Solo mientras está 'pendiente'
+  // -- una vez parcial/recibida ya hay remitos/facturas atados al proveedor
+  // original, cambiarlo ahí desincronizaría todo.
+  const [cambioProveedorOcId, setCambioProveedorOcId] = useState<string | null>(null);
+  const [nuevoProveedorId, setNuevoProveedorId] = useState('');
 
   // ── Inline form state ─────────────────────────────────────
 
@@ -93,8 +105,52 @@ export default function OrdenesCompra() {
   const [formFechaEntrega, setFormFechaEntrega] = useState('');
   const [formNotas, setFormNotas] = useState('');
   const [formItems, setFormItems] = useState([
-    { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0 },
+    { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined as string | undefined, unidad: undefined as UnidadMedida | undefined },
   ]);
+  // Fase 44: aviso de que este formulario se precargó desde un borrador de
+  // Producción (faltantes de una fórmula) -- solo para mostrarle a Carlos
+  // de dónde salió, no cambia el guardado.
+  const [formOrigenBorrador, setFormOrigenBorrador] = useState<string | null>(null);
+
+  // ── Borrador desde Producción (Fase 44) ────────────────────
+  // Si llegamos con ?borrador=1, Producción dejó un OcBorrador en
+  // sessionStorage con los insumos que faltaban para un lote -- lo
+  // levantamos una sola vez, precargamos el formulario (proveedor vacío a
+  // propósito, lo elige Carlos acá) y limpiamos el rastro para que un
+  // refresh de la página no lo vuelva a abrir solo.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('borrador') !== '1') return
+    const raw = sessionStorage.getItem(OC_BORRADOR_STORAGE_KEY)
+    sessionStorage.removeItem(OC_BORRADOR_STORAGE_KEY)
+    const next = new URLSearchParams(searchParams)
+    next.delete('borrador')
+    setSearchParams(next, { replace: true })
+    if (!raw) return
+    try {
+      const borrador = JSON.parse(raw) as OcBorrador
+      if (!borrador.items?.length) return
+      setFormItems(
+        borrador.items.map((it) => ({
+          key: generarId(),
+          descripcion: it.descripcion,
+          cantidad: it.cantidad,
+          precioUnitario: it.precioUnitario,
+          descuento: 0,
+          insumoId: it.insumoId,
+          unidad: it.unidad,
+        })),
+      )
+      setFormNotas(
+        borrador.productoNombre ? `Faltantes para producir ${borrador.productoNombre}` : '',
+      )
+      setFormOrigenBorrador(borrador.productoNombre ?? 'una producción')
+      setShowForm(true)
+    } catch {
+      // Borrador corrupto/viejo -- se ignora, el usuario arma la OC a mano.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Datos filtrados ───────────────────────────────────────
 
@@ -133,12 +189,13 @@ export default function OrdenesCompra() {
     setFormFecha(todayISO());
     setFormFechaEntrega('');
     setFormNotas('');
-    setFormItems([{ key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0 }]);
+    setFormItems([{ key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined, unidad: undefined }]);
+    setFormOrigenBorrador(null);
     setShowForm(false);
   };
 
   const addFormItem = () => {
-    setFormItems((prev) => [...prev, { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0 }]);
+    setFormItems((prev) => [...prev, { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined, unidad: undefined }]);
   };
 
   const updateFormItem = (index: number, field: string, value: string | number) => {
@@ -160,6 +217,8 @@ export default function OrdenesCompra() {
       precioUnitario: it.precioUnitario,
       descuento: it.descuento,
       subtotal: calcularSubtotalItem(it.cantidad, it.precioUnitario, it.descuento),
+      insumoId: it.insumoId,
+      unidad: it.unidad,
     }));
     const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
 
@@ -209,6 +268,17 @@ export default function OrdenesCompra() {
         updatedAt: nowISO(),
       },
     });
+  };
+
+  const handleGuardarProveedor = (ordenId: string) => {
+    const orden = ordenesCompra.find((o) => o.id === ordenId);
+    if (!orden || !nuevoProveedorId) return;
+    dispatch({
+      type: 'UPDATE_ORDEN_COMPRA',
+      payload: { ...orden, proveedorId: nuevoProveedorId, updatedAt: nowISO() },
+    });
+    setCambioProveedorOcId(null);
+    setNuevoProveedorId('');
   };
 
   // Envío por email / WhatsApp al proveedor -- mismo criterio que en
@@ -385,6 +455,11 @@ export default function OrdenesCompra() {
       {showForm && (
         <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
           <h3 className="text-sm font-semibold text-gray-900">Nueva Orden de Compra</h3>
+          {formOrigenBorrador && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+              Items precargados con los faltantes para producir {formOrigenBorrador}. Elegí el proveedor antes de crear la OC.
+            </div>
+          )}
 
           <div className="grid grid-cols-4 gap-3">
             <div>
@@ -556,6 +631,13 @@ export default function OrdenesCompra() {
                           </button>
                           {oc.estado === 'pendiente' && (
                             <>
+                              <button
+                                onClick={() => { setCambioProveedorOcId(oc.id); setNuevoProveedorId(oc.proveedorId); setExpandedId(oc.id); }}
+                                className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                                title="Cambiar proveedor"
+                              >
+                                <Building2 className="h-3.5 w-3.5" />
+                              </button>
                               <button onClick={() => setPreciosOrdenId(oc.id)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Cargar precios cotizados, IVA e impuestos / confirmar">
                                 <Tag className="h-3.5 w-3.5" />
                               </button>
@@ -596,6 +678,36 @@ export default function OrdenesCompra() {
                     {isExpanded && (
                       <tr>
                         <td colSpan={8} className="bg-gray-50/50 px-8 py-4">
+                          {cambioProveedorOcId === oc.id && (
+                            <div className="mb-3 flex items-end gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5">
+                              <div className="flex-1">
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Nuevo proveedor</label>
+                                <select
+                                  className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20"
+                                  value={nuevoProveedorId}
+                                  onChange={(e) => setNuevoProveedorId(e.target.value)}
+                                >
+                                  <option value="">Seleccionar...</option>
+                                  {proveedores.filter((p) => p.activo).map((p) => (
+                                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <button
+                                onClick={() => handleGuardarProveedor(oc.id)}
+                                disabled={!nuevoProveedorId}
+                                className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Guardar
+                              </button>
+                              <button
+                                onClick={() => { setCambioProveedorOcId(null); setNuevoProveedorId(''); }}
+                                className="px-3 py-1.5 bg-white text-gray-600 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          )}
                           {/* Items */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
                           <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">

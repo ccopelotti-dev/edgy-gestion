@@ -72,6 +72,31 @@ export interface ItemComprobanteCompra extends ItemCompra {
   montoIva: number;
 }
 
+// ─── Borrador de OC entre módulos (Fase 44) ───────────────────
+// Producción (módulo Productos y Stock) puede detectar que faltan insumos
+// para un lote y armar de una este borrador para que Órdenes de Compra lo
+// levante y precargue el formulario "Nueva OC" -- el proveedor queda vacío
+// a propósito, lo elige el usuario ahí (camino "simple" pedido por Carlos,
+// sin depender de que cada Insumo tenga un proveedor default cargado).
+// Viaja por sessionStorage (no por query string) porque puede traer varios
+// items -- se limpia solo apenas Órdenes de Compra lo consume.
+export const OC_BORRADOR_STORAGE_KEY = 'edgy_oc_borrador';
+
+export interface OcBorradorItem {
+  insumoId?: string;
+  descripcion: string;
+  cantidad: number;
+  unidad?: UnidadMedida;
+  precioUnitario: number;
+}
+
+export interface OcBorrador {
+  origen: 'produccion';
+  /** Solo informativo, para el título/notas del formulario. */
+  productoNombre?: string;
+  items: OcBorradorItem[];
+}
+
 // ─── Pedido de Cotización ────────────────────────────────────
 
 export type EstadoCotizacion =

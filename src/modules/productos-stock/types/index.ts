@@ -237,6 +237,92 @@ export function calcularCantidadesAMedida(
   return { ok: true, cantidades }
 }
 
+// ─── Chequeo de disponibilidad antes de producir (Fase 44) ───────────────────
+//
+// Carlos (Charcutería, 21/08): antes de lanzar un lote grande (ej. 40 kg de
+// Salame) quiere saber si alcanza el stock de insumos ANTES de producir, no
+// enterarse a mitad de camino. Reusa exactamente la misma conversión de
+// unidades que `registrarProduccionConfirmada` (store.tsx) aplica al
+// descontar de verdad -- así el chequeo previo nunca dice "alcanza" y
+// después el registro real falla (o viceversa) por una diferencia de
+// lógica entre los dos lugares.
+
+export interface InsumoParaNecesidad {
+  id: string
+  nombre: string
+  unidad: UnidadMedida
+  stock: number
+  anchoRollo?: number
+  rubroId: string
+  costo: number
+}
+
+export interface NecesidadInsumo {
+  lineaId: string
+  insumoId: string
+  nombre: string
+  unidadNativa: UnidadMedida
+  /** Cantidad que este lote va a consumir de este insumo, ya convertida a
+   * la unidad nativa del insumo (la misma que se le va a descontar al
+   * stock real al registrar). */
+  cantidadNecesaria: number
+  stockActual: number
+  /** max(0, cantidadNecesaria - stockActual). */
+  faltante: number
+  alcanza: boolean
+  rubroId: string
+  costoUnitario: number
+}
+
+export type ResultadoNecesidadInsumos =
+  | { ok: true; necesidades: NecesidadInsumo[] }
+  | { ok: false; error: string }
+
+/** Calcula, para un factor de lote dado, cuánto de cada insumo de la
+ * fórmula hace falta y si el stock actual alcanza. Solo mira líneas
+ * tipo='insumo' -- mano de obra y costos operativos no tienen stock que
+ * chequear. Devuelve error (no asume nada en silencio) si alguna línea
+ * queda con unidad incompatible con la del insumo, mismo criterio que el
+ * registro real. */
+export function calcularNecesidadInsumos(
+  lineas: LineaFormula[],
+  factor: number,
+  insumosPorId: Map<string, InsumoParaNecesidad>,
+): ResultadoNecesidadInsumos {
+  const necesidades: NecesidadInsumo[] = []
+  for (const l of lineas) {
+    if (l.tipo !== 'insumo' || !l.insumoId) continue
+    const insumo = insumosPorId.get(l.insumoId)
+    if (!insumo) {
+      return {
+        ok: false,
+        error: `La línea "${l.descripcion}" usa un insumo que ya no existe -- revisá la fórmula.`,
+      }
+    }
+    const cantidadNecesaria = convertirCantidad(l.cantidad * factor, l.unidad, insumo.unidad, insumo.anchoRollo)
+    if (cantidadNecesaria === null) {
+      return {
+        ok: false,
+        error: `La línea "${l.descripcion}" está cargada en ${unidadLabel(l.unidad)}, una unidad incompatible con la del insumo (${unidadLabel(insumo.unidad)}).`,
+      }
+    }
+    const faltante = Math.max(0, cantidadNecesaria - insumo.stock)
+    necesidades.push({
+      lineaId: l.id,
+      insumoId: insumo.id,
+      nombre: insumo.nombre,
+      unidadNativa: insumo.unidad,
+      cantidadNecesaria,
+      stockActual: insumo.stock,
+      faltante,
+      alcanza: faltante <= 0,
+      rubroId: insumo.rubroId,
+      costoUnitario: insumo.costo,
+    })
+  }
+  return { ok: true, necesidades }
+}
+
 // ─── IVA ────────────────────────────────────────────────────────────────────────
 
 export type AlicuotaIVA = 0 | 10.5 | 21 | 27
