@@ -48,12 +48,13 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra, Proveedor, OcBorrador } from '../types';
+import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra, Proveedor } from '../types';
 import {
   ESTADO_OC_LABEL,
   generarId,
   calcularSubtotalItem,
-  OC_BORRADOR_STORAGE_KEY,
+  tomarSiguienteOcBorrador,
+  guardarColaOcBorrador,
 } from '../types';
 import type { UnidadMedida } from '@/modules/productos-stock/types';
 
@@ -116,48 +117,63 @@ export default function OrdenesCompra() {
   const [formItems, setFormItems] = useState([
     { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined as string | undefined, unidad: undefined as UnidadMedida | undefined },
   ]);
-  // Fase 44: aviso de que este formulario se precargó desde un borrador de
-  // Producción (faltantes de una fórmula) -- solo para mostrarle a Carlos
-  // de dónde salió, no cambia el guardado.
-  const [formOrigenBorrador, setFormOrigenBorrador] = useState<string | null>(null);
+  // Fase 44/45g: aviso de que este formulario se precargó desde un
+  // borrador de Producción (faltantes de una fórmula) -- solo para
+  // mostrarle a Carlos de dónde salió, no cambia el guardado.
+  // `restantes` (Fase 45g) es cuántas OC más quedan en la cola después de
+  // esta (split por rubro) -- 0 = era la última.
+  const [formOrigenBorrador, setFormOrigenBorrador] = useState<{
+    productoNombre?: string;
+    rubroNombre?: string;
+    restantes: number;
+  } | null>(null);
 
-  // ── Borrador desde Producción (Fase 44) ────────────────────
-  // Si llegamos con ?borrador=1, Producción dejó un OcBorrador en
-  // sessionStorage con los insumos que faltaban para un lote -- lo
-  // levantamos una sola vez, precargamos el formulario (proveedor vacío a
-  // propósito, lo elige Carlos acá) y limpiamos el rastro para que un
-  // refresh de la página no lo vuelva a abrir solo.
+  // ── Borrador desde Producción (Fase 44/45g) ────────────────
+  // Si llegamos con ?borrador=1, Producción dejó una cola de OcBorrador en
+  // sessionStorage con los insumos que faltaban para un lote, agrupados
+  // por rubro -- se levanta uno por vez: precarga el formulario (proveedor
+  // vacío a propósito, lo elige Carlos acá) y, apenas esa OC se crea,
+  // levanta automáticamente el siguiente si queda alguno (ver
+  // handleSubmitOC). Devuelve true si efectivamente cargó algo.
+  const cargarSiguienteBorrador = () => {
+    const siguiente = tomarSiguienteOcBorrador();
+    if (!siguiente || !siguiente.borrador.items?.length) return false;
+    const { borrador, restantes } = siguiente;
+    setFormItems(
+      borrador.items.map((it) => ({
+        key: generarId(),
+        descripcion: it.descripcion,
+        cantidad: it.cantidad,
+        precioUnitario: it.precioUnitario,
+        descuento: 0,
+        insumoId: it.insumoId,
+        unidad: it.unidad,
+      })),
+    );
+    setFormProveedorId('');
+    setFormFecha(todayISO());
+    setFormFechaEntrega('');
+    setFormNotas(
+      borrador.productoNombre
+        ? `Faltantes para producir ${borrador.productoNombre}${borrador.rubroNombre ? ` — Rubro: ${borrador.rubroNombre}` : ''}`
+        : '',
+    );
+    setFormOrigenBorrador({
+      productoNombre: borrador.productoNombre,
+      rubroNombre: borrador.rubroNombre,
+      restantes,
+    });
+    setShowForm(true);
+    return true;
+  };
+
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     if (searchParams.get('borrador') !== '1') return
-    const raw = sessionStorage.getItem(OC_BORRADOR_STORAGE_KEY)
-    sessionStorage.removeItem(OC_BORRADOR_STORAGE_KEY)
     const next = new URLSearchParams(searchParams)
     next.delete('borrador')
     setSearchParams(next, { replace: true })
-    if (!raw) return
-    try {
-      const borrador = JSON.parse(raw) as OcBorrador
-      if (!borrador.items?.length) return
-      setFormItems(
-        borrador.items.map((it) => ({
-          key: generarId(),
-          descripcion: it.descripcion,
-          cantidad: it.cantidad,
-          precioUnitario: it.precioUnitario,
-          descuento: 0,
-          insumoId: it.insumoId,
-          unidad: it.unidad,
-        })),
-      )
-      setFormNotas(
-        borrador.productoNombre ? `Faltantes para producir ${borrador.productoNombre}` : '',
-      )
-      setFormOrigenBorrador(borrador.productoNombre ?? 'una producción')
-      setShowForm(true)
-    } catch {
-      // Borrador corrupto/viejo -- se ignora, el usuario arma la OC a mano.
-    }
+    cargarSiguienteBorrador()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -199,6 +215,12 @@ export default function OrdenesCompra() {
     setFormFechaEntrega('');
     setFormNotas('');
     setFormItems([{ key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined, unidad: undefined }]);
+    // Fase 45g: "Cancelar" descarta el resto de la cola de borradores
+    // (si quedaba alguna OC más por generar del split por rubro) -- así
+    // no queda nada pendiente en sessionStorage esperando reaparecer solo
+    // más adelante. Si en cambio se quiere seguir con la siguiente, hay
+    // que confirmar esta OC (ver handleSubmitOC), no cancelarla.
+    if (formOrigenBorrador) guardarColaOcBorrador([]);
     setFormOrigenBorrador(null);
     setShowForm(false);
   };
@@ -248,7 +270,11 @@ export default function OrdenesCompra() {
         updatedAt: now,
       },
     });
-    resetForm();
+    // Fase 45g: si esta OC venía de un split por rubro y todavía quedan
+    // más en la cola, se precarga la siguiente de una en vez de cerrar el
+    // formulario -- así Carlos las va completando en cadena sin tener que
+    // volver a tocar "Generar Orden de Compra" en Producción.
+    if (!cargarSiguienteBorrador()) resetForm();
   };
 
   // ── OC action handlers ────────────────────────────────────
@@ -479,7 +505,16 @@ export default function OrdenesCompra() {
           <h3 className="text-sm font-semibold text-gray-900">Nueva Orden de Compra</h3>
           {formOrigenBorrador && (
             <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
-              Items precargados con los faltantes para producir {formOrigenBorrador}. Elegí el proveedor antes de crear la OC.
+              Items precargados con los faltantes para producir {formOrigenBorrador.productoNombre ?? 'una producción'}
+              {formOrigenBorrador.rubroNombre ? ` — Rubro: ${formOrigenBorrador.rubroNombre}` : ''}. Elegí el proveedor
+              antes de crear la OC.
+              {formOrigenBorrador.restantes > 0 && (
+                <>
+                  {' '}
+                  Quedan {formOrigenBorrador.restantes} orden{formOrigenBorrador.restantes === 1 ? '' : 'es'} más por
+                  generar de este chequeo (una por rubro) -- se van a ir precargando solas apenas confirmes cada una.
+                </>
+              )}
             </div>
           )}
 

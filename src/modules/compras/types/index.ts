@@ -94,7 +94,58 @@ export interface OcBorrador {
   origen: 'produccion';
   /** Solo informativo, para el título/notas del formulario. */
   productoNombre?: string;
+  /** Fase 45g (Etapa 1, "split por rubro" -- 21/08, a pedido de Carlos):
+   * cuando Producción agrupa los faltantes en más de una OC (uno por
+   * rubro, ya que un mismo lote puede faltarle tanto una carne como un
+   * insumo de envasado, de proveedores probablemente distintos), acá
+   * viaja el nombre del rubro de ESTE borrador puntual, para que el
+   * banner en Órdenes de Compra le aclare a Carlos cuál de todas está
+   * completando. undefined = borrador sin agrupar (comportamiento de
+   * siempre). */
+  rubroNombre?: string;
   items: OcBorradorItem[];
+}
+
+/**
+ * Fase 45g: reemplaza el borrador único por una COLA de borradores -- así
+ * un mismo chequeo de faltantes puede generar varias OC (una por rubro)
+ * sin perder ninguna en el camino. Guarda el array completo tal cual (o
+ * borra la clave si viene vacío) -- lo consume `tomarSiguienteOcBorrador`.
+ */
+export function guardarColaOcBorrador(cola: OcBorrador[]): void {
+  if (cola.length === 0) {
+    sessionStorage.removeItem(OC_BORRADOR_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(OC_BORRADOR_STORAGE_KEY, JSON.stringify(cola));
+}
+
+/**
+ * Saca el primer borrador de la cola guardada en sessionStorage y persiste
+ * el resto -- así Órdenes de Compra puede precargar el formulario con uno
+ * por vez (Carlos elige el proveedor y confirma cada OC a mano) y, apenas
+ * la crea, levantar automáticamente el siguiente si queda alguno. Tolera
+ * el formato viejo (un solo objeto, no un array) por si queda algo
+ * guardado de antes de esta fase. `null` si no hay nada pendiente o el
+ * contenido está corrupto.
+ */
+export function tomarSiguienteOcBorrador(): { borrador: OcBorrador; restantes: number } | null {
+  const raw = sessionStorage.getItem(OC_BORRADOR_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as OcBorrador | OcBorrador[];
+    const cola = Array.isArray(parsed) ? parsed : [parsed];
+    if (cola.length === 0) {
+      sessionStorage.removeItem(OC_BORRADOR_STORAGE_KEY);
+      return null;
+    }
+    const [borrador, ...resto] = cola;
+    guardarColaOcBorrador(resto);
+    return { borrador, restantes: resto.length };
+  } catch {
+    sessionStorage.removeItem(OC_BORRADOR_STORAGE_KEY);
+    return null;
+  }
 }
 
 // ─── Pedido de Cotización ────────────────────────────────────

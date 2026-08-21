@@ -38,7 +38,7 @@ import {
   calcularNecesidadInsumos,
   type InsumoParaNecesidad,
 } from '../types'
-import { OC_BORRADOR_STORAGE_KEY, type OcBorrador } from '@/modules/compras/types'
+import { guardarColaOcBorrador, type OcBorrador } from '@/modules/compras/types'
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -122,22 +122,46 @@ export default function Produccion() {
     () => necesidadesOrdenadas.filter((n) => !n.alcanza),
     [necesidadesOrdenadas],
   )
+  // Fase 45g: cuántos rubros distintos hay entre los faltantes -- define
+  // si "Generar Orden de Compra" va a armar una sola OC o varias (una por
+  // rubro, ver handleGenerarOC más abajo).
+  const rubrosFaltantesCount = useMemo(
+    () => new Set(faltantes.map((n) => n.rubroId)).size,
+    [faltantes],
+  )
 
+  // Fase 45g (Etapa 1 del split de OC, 21/08 a pedido de Carlos): en vez
+  // de un solo borrador con todos los faltantes mezclados, se agrupan por
+  // rubro -- un lote grande suele faltarle tanto una carne como un
+  // insumo de envasado, casi seguro de proveedores distintos, así que
+  // conviene una OC por rubro desde el arranque. `necesidadesOrdenadas`
+  // (no `faltantes`) ya viene ordenado por rubro, así que agrupar acá es
+  // simplemente ir cortando por cada vez que cambia el rubro.
   function handleGenerarOC() {
     if (!formulaSeleccionada || faltantes.length === 0) return
     const productoNombre = productosConFormula.find((p) => p.id === selectedProductoId)?.nombre
-    const borrador: OcBorrador = {
+
+    const porRubro = new Map<string, typeof faltantes>()
+    for (const n of faltantes) {
+      const lista = porRubro.get(n.rubroId)
+      if (lista) lista.push(n)
+      else porRubro.set(n.rubroId, [n])
+    }
+
+    const cola: OcBorrador[] = [...porRubro.entries()].map(([rubroId, items]) => ({
       origen: 'produccion',
       productoNombre,
-      items: faltantes.map((n) => ({
+      rubroNombre: rubrosMap.get(rubroId) ?? 'Sin rubro',
+      items: items.map((n) => ({
         insumoId: n.insumoId,
         descripcion: n.nombre,
         cantidad: Math.round(n.faltante * 100) / 100,
         unidad: n.unidadNativa,
         precioUnitario: n.costoUnitario,
       })),
-    }
-    sessionStorage.setItem(OC_BORRADOR_STORAGE_KEY, JSON.stringify(borrador))
+    }))
+
+    guardarColaOcBorrador(cola)
     navigate('/m/compras/ordenes-compra?borrador=1')
   }
 
@@ -583,7 +607,9 @@ export default function Produccion() {
                         </span>
                         <Button type="button" size="sm" variant="outline" onClick={handleGenerarOC}>
                           <ShoppingCart className="h-3.5 w-3.5 mr-1.5" />
-                          Generar Orden de Compra
+                          {rubrosFaltantesCount > 1
+                            ? `Generar ${rubrosFaltantesCount} Órdenes de Compra (por rubro)`
+                            : 'Generar Orden de Compra'}
                         </Button>
                       </div>
                     )}
