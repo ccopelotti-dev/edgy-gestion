@@ -7,6 +7,12 @@ import { colorDeKit, labelDeVertical } from '@/modules/kits'
 interface SidebarProps {
   colorMarca: string | null
   modulos: ModuloActivo[]
+  /** Fase 45k (22/08, sidebar responsive): se llama al tocar cualquier
+   * ícono de navegación -- en mobile, Layout.tsx lo usa para cerrar el
+   * drawer apenas se elige un módulo (si no, quedaría tapando la pantalla
+   * después de navegar). undefined en desktop, donde el rail es fijo y no
+   * hay nada que cerrar. */
+  onNavigate?: () => void
 }
 
 // Utilidades y Configuración son transversales (no un área de negocio
@@ -79,7 +85,7 @@ function agruparPorKit(modulos: ModuloActivo[]): { vertical: string; modulos: Mo
  * del cliente — el ícono del módulo activo se resalta con el color de
  * contraste que mejor se vea contra ese color (blanco o gris oscuro,
  * calculado, no fijo). El logo va en el header (Layout.tsx), no acá. */
-export function Sidebar({ colorMarca, modulos }: SidebarProps) {
+export function Sidebar({ colorMarca, modulos, onNavigate }: SidebarProps) {
   const fondo = colorMarca ?? '#0C1A2E'
   const contraste = colorDeContraste(fondo)
   const inactivoOpacidad = contraste === '#FFFFFF' ? 'rgba(255,255,255,0.55)' : 'rgba(32,31,27,0.55)'
@@ -102,6 +108,7 @@ export function Sidebar({ colorMarca, modulos }: SidebarProps) {
         key={modulo.id}
         to={`/m/${modulo.slug}`}
         title={modulo.nombre}
+        onClick={onNavigate}
         className="flex h-10 w-10 items-center justify-center rounded-xl transition-colors"
         style={({ isActive }) => ({
           backgroundColor: isActive ? activoFondo : 'transparent',
@@ -126,6 +133,7 @@ export function Sidebar({ colorMarca, modulos }: SidebarProps) {
         key={modulo.id}
         to={`/m/${modulo.slug}`}
         title={modulo.nombre}
+        onClick={onNavigate}
         className="flex h-10 w-10 items-center justify-center rounded-xl transition-colors"
         style={({ isActive }) => ({
           backgroundColor: isActive ? activoFondoKit : 'transparent',
@@ -144,6 +152,7 @@ export function Sidebar({ colorMarca, modulos }: SidebarProps) {
       <NavLink
         to="/dashboard"
         end
+        onClick={onNavigate}
         className="flex h-10 w-10 items-center justify-center rounded-xl transition-colors"
         style={({ isActive }) => ({
           backgroundColor: isActive ? activoFondo : 'transparent',

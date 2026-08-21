@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Outlet, Navigate, Link, useNavigate } from 'react-router-dom'
-import { Store, LogOut } from 'lucide-react'
+import { Store, LogOut, Menu, X } from 'lucide-react'
 import { Sidebar } from '@/components/Sidebar'
 import { CambiarEmailObligatorio } from '@/pages/CambiarEmailObligatorio'
 import { useClienteActual } from '@/hooks/useClienteActual'
@@ -25,6 +26,11 @@ export function DashboardLayout() {
     useClienteActual()
   const { esStaff, cargando: cargandoStaff } = usePersonalEdgy()
   const navigate = useNavigate()
+  // Fase 45k (22/08, a pedido de Carlos): sidebar mobile -- el rail queda
+  // oculto por defecto en pantallas chicas (< md) y se muestra como un
+  // drawer encima del contenido al tocar el botón hamburguesa del header.
+  // En desktop (md+) sigue fijo como siempre, este estado no se usa ahí.
+  const [sidebarAbierto, setSidebarAbierto] = useState(false)
 
   if (cargando || cargandoStaff) {
     return <div className="flex h-screen items-center justify-center text-gray-400">Cargando...</div>
@@ -99,13 +105,46 @@ export function DashboardLayout() {
 
   return (
     <div className="flex h-screen">
-      <Sidebar colorMarca={branding.colorMarca} modulos={modulosActivos} />
+      {/* Fase 45k: en mobile el rail queda fuera de flujo (fixed) y
+          arrancca oculto (-translate-x-full); en md+ vuelve a ser un
+          elemento normal del flex, fijo como siempre. El backdrop solo
+          existe (y solo se ve en mobile, md:hidden) mientras está
+          abierto -- tocarlo cierra el drawer, igual que el botón X. */}
+      {sidebarAbierto && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          onClick={() => setSidebarAbierto(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
+          sidebarAbierto ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <Sidebar
+          colorMarca={branding.colorMarca}
+          modulos={modulosActivos}
+          onNavigate={() => setSidebarAbierto(false)}
+        />
+      </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <header
-          className="flex items-center gap-3 px-6 py-4"
+          className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-6 sm:py-4"
           style={{ backgroundColor: colorMarca }}
         >
+          {/* Fase 45k: hamburguesa -- solo visible en mobile (md:hidden),
+              donde el rail de arriba está oculto por defecto. */}
+          <button
+            type="button"
+            onClick={() => setSidebarAbierto((v) => !v)}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg md:hidden"
+            style={{ color: contraste }}
+            title={sidebarAbierto ? 'Cerrar menú' : 'Abrir menú'}
+          >
+            {sidebarAbierto ? <X size={20} /> : <Menu size={20} />}
+          </button>
           <div
             className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[10px] border-[1.5px] border-dashed bg-white"
             style={{ borderColor: bordeLogo }}
