@@ -38,7 +38,7 @@ import {
   Amount,
   EmptyState,
 } from '../components/compras/display';
-import { ComprobanteCompraDialog, OrdenCompraPreciosDialog } from '../components/compras/dialogs';
+import { ComprobanteCompraDialog, OrdenCompraPreciosDialog, ProveedorDialog } from '../components/compras/dialogs';
 import { actualizarStockPorCompra } from '../lib/actualizarStockCompra';
 import {
   formatDate,
@@ -97,6 +97,15 @@ export default function OrdenesCompra() {
   // original, cambiarlo ahí desincronizaría todo.
   const [cambioProveedorOcId, setCambioProveedorOcId] = useState<string | null>(null);
   const [nuevoProveedorId, setNuevoProveedorId] = useState('');
+  // Fase 44 (a pedido de Carlos): "Nuevo proveedor" desde el propio
+  // formulario de OC -- antes había que ir a Proveedores, cargarlo, volver
+  // y perdía los items que ya había armado (sobre todo doloroso cuando
+  // vienen precargados desde un borrador de Producción). El destino del
+  // proveedor recién creado depende de dónde se abrió el diálogo: el
+  // formulario de "Nueva OC" o el selector de "Cambiar proveedor" de una
+  // OC ya existente.
+  const [nuevoProveedorDialogOpen, setNuevoProveedorDialogOpen] = useState(false);
+  const [nuevoProveedorDestino, setNuevoProveedorDestino] = useState<'form' | 'cambio'>('form');
 
   // ── Inline form state ─────────────────────────────────────
 
@@ -268,6 +277,19 @@ export default function OrdenesCompra() {
         updatedAt: nowISO(),
       },
     });
+  };
+
+  const handleGuardarNuevoProveedor = (
+    data: Omit<Proveedor, 'id' | 'saldoCuentaCorriente' | 'activo' | 'createdAt' | 'updatedAt'>,
+  ) => {
+    const now = nowISO();
+    const id = generarId();
+    dispatch({
+      type: 'ADD_PROVEEDOR',
+      payload: { ...data, id, saldoCuentaCorriente: 0, activo: true, createdAt: now, updatedAt: now },
+    });
+    if (nuevoProveedorDestino === 'cambio') setNuevoProveedorId(id);
+    else setFormProveedorId(id);
   };
 
   const handleGuardarProveedor = (ordenId: string) => {
@@ -464,16 +486,26 @@ export default function OrdenesCompra() {
           <div className="grid grid-cols-4 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor *</label>
-              <select
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20"
-                value={formProveedorId}
-                onChange={(e) => setFormProveedorId(e.target.value)}
-              >
-                <option value="">Seleccionar...</option>
-                {proveedores.filter((p) => p.activo).map((p) => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
-                ))}
-              </select>
+              <div className="flex gap-1.5">
+                <select
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20"
+                  value={formProveedorId}
+                  onChange={(e) => setFormProveedorId(e.target.value)}
+                >
+                  <option value="">Seleccionar...</option>
+                  {proveedores.filter((p) => p.activo).map((p) => (
+                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => { setNuevoProveedorDestino('form'); setNuevoProveedorDialogOpen(true); }}
+                  title="Nuevo proveedor"
+                  className="shrink-0 rounded-lg border border-gray-300 px-2.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
@@ -682,16 +714,26 @@ export default function OrdenesCompra() {
                             <div className="mb-3 flex items-end gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5">
                               <div className="flex-1">
                                 <label className="block text-xs font-medium text-gray-700 mb-1">Nuevo proveedor</label>
-                                <select
-                                  className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20"
-                                  value={nuevoProveedorId}
-                                  onChange={(e) => setNuevoProveedorId(e.target.value)}
-                                >
-                                  <option value="">Seleccionar...</option>
-                                  {proveedores.filter((p) => p.activo).map((p) => (
-                                    <option key={p.id} value={p.id}>{p.nombre}</option>
-                                  ))}
-                                </select>
+                                <div className="flex gap-1.5">
+                                  <select
+                                    className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900/20"
+                                    value={nuevoProveedorId}
+                                    onChange={(e) => setNuevoProveedorId(e.target.value)}
+                                  >
+                                    <option value="">Seleccionar...</option>
+                                    {proveedores.filter((p) => p.activo).map((p) => (
+                                      <option key={p.id} value={p.id}>{p.nombre}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setNuevoProveedorDestino('cambio'); setNuevoProveedorDialogOpen(true); }}
+                                    title="Nuevo proveedor"
+                                    className="shrink-0 rounded-lg border border-gray-300 px-2 text-gray-500 hover:text-gray-900 hover:bg-white bg-white"
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
                               </div>
                               <button
                                 onClick={() => handleGuardarProveedor(oc.id)}
@@ -816,6 +858,13 @@ export default function OrdenesCompra() {
         orden={ordenesCompra.find((o) => o.id === preciosOrdenId) ?? undefined}
         proveedorNombre={preciosOrdenId ? nombreProveedor(ordenesCompra.find((o) => o.id === preciosOrdenId)?.proveedorId ?? '') : undefined}
         onSave={(data) => { if (preciosOrdenId) handleGuardarPrecios(preciosOrdenId, data); }}
+      />
+
+      {/* Nuevo proveedor sin salir de la OC (Fase 44) */}
+      <ProveedorDialog
+        open={nuevoProveedorDialogOpen}
+        onOpenChange={setNuevoProveedorDialogOpen}
+        onSave={handleGuardarNuevoProveedor}
       />
     </div>
   );
