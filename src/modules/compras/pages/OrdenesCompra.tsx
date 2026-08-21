@@ -48,7 +48,7 @@ import {
   nowISO,
   PREFIJO_COMPROBANTE_COMPRA,
 } from '../lib/format';
-import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra, Proveedor } from '../types';
+import type { EstadoOrdenCompra, TipoComprobanteCompra, ItemComprobanteCompra, ControlRemision, ItemCompra, ImpuestoOrdenCompra, Proveedor, OcBorrador } from '../types';
 import {
   ESTADO_OC_LABEL,
   generarId,
@@ -128,20 +128,24 @@ export default function OrdenesCompra() {
     rubroNombre?: string;
     restantes: number;
   } | null>(null);
+  // Fase 45j (Etapa 4 del split de OC): aviso de cuántas OC se crearon
+  // SOLAS (sin pasar por el formulario) en la última tanda -- ver
+  // procesarColaBorradores más abajo.
+  const [mensajeAutoOc, setMensajeAutoOc] = useState<string | null>(null);
 
-  // ── Borrador desde Producción (Fase 44/45g/45h) ────────────
+  const mensajeCreadasAuto = (n: number) =>
+    `Se ${n === 1 ? 'creó' : 'crearon'} ${n} Orden${n === 1 ? '' : 'es'} de Compra automáticamente (proveedor ya conocido) -- revisalas en el listado de abajo.`;
+
+  // ── Borrador desde Producción (Fase 44/45g/45h/45j) ────────
   // Si llegamos con ?borrador=1, Producción dejó una cola de OcBorrador en
   // sessionStorage con los insumos que faltaban para un lote, agrupados
   // por proveedor habitual real (cuando el insumo lo tiene cargado) o por
-  // rubro (fallback) -- se levanta uno por vez: precarga el formulario
-  // (proveedor ya seleccionado si el grupo tenía uno, vacío si no -- lo
-  // elige Carlos en ese caso) y, apenas esa OC se crea, levanta
-  // automáticamente el siguiente si queda alguno (ver handleSubmitOC).
-  // Devuelve true si efectivamente cargó algo.
-  const cargarSiguienteBorrador = () => {
-    const siguiente = tomarSiguienteOcBorrador();
-    if (!siguiente || !siguiente.borrador.items?.length) return false;
-    const { borrador, restantes } = siguiente;
+  // rubro (fallback, sin proveedor conocido).
+
+  // Precarga el formulario "Nueva OC" con UN borrador puntual -- se usa
+  // solo para el caso "sin proveedor conocido" (Etapa 1/fallback), que sí
+  // necesita que Carlos elija a mano.
+  const precargarFormDesdeBorrador = (borrador: OcBorrador, restantes: number) => {
     setFormItems(
       borrador.items.map((it) => ({
         key: generarId(),
@@ -177,7 +181,63 @@ export default function OrdenesCompra() {
       restantes,
     });
     setShowForm(true);
-    return true;
+  };
+
+  // Fase 45j (Etapa 4): crea directo una OC "pendiente" a partir de un
+  // borrador que YA tiene proveedor conocido -- sin pasar por el
+  // formulario ni pedirle nada a Carlos. La revisa/ajusta después desde
+  // el listado (editar proveedor, precios, etc. -- todo eso ya existía).
+  const crearOcDesdeBorrador = (borrador: OcBorrador) => {
+    if (!borrador.proveedorId) return;
+    const now = nowISO();
+    const items = borrador.items.map((it) => ({
+      id: generarId(),
+      descripcion: it.descripcion,
+      cantidad: it.cantidad,
+      precioUnitario: it.precioUnitario,
+      descuento: 0,
+      subtotal: calcularSubtotalItem(it.cantidad, it.precioUnitario, 0),
+      insumoId: it.insumoId,
+      unidad: it.unidad,
+    }));
+    const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
+    dispatch({
+      type: 'ADD_ORDEN_COMPRA',
+      payload: {
+        id: generarId(),
+        proveedorId: borrador.proveedorId,
+        fecha: todayISO(),
+        estado: 'pendiente',
+        items,
+        subtotal,
+        total: subtotal,
+        notas: borrador.productoNombre ? `Faltantes para producir ${borrador.productoNombre}` : undefined,
+        comprobanteIds: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  };
+
+  // Fase 45j (Etapa 4): recorre la cola completa -- crea directo cada OC
+  // que ya tenga proveedor conocido (Etapa 2), y se detiene a precargar
+  // el formulario en la primera que NO lo tenga (fallback por rubro,
+  // Etapa 1 -- ahí sí hace falta que Carlos elija el proveedor a mano).
+  // Se llama tanto al llegar con ?borrador=1 como después de confirmar
+  // cada OC manual, para seguir drenando el resto de la cola sola.
+  const procesarColaBorradores = (): { creadas: number; cargoManual: boolean } => {
+    let creadas = 0;
+    while (true) {
+      const siguiente = tomarSiguienteOcBorrador();
+      if (!siguiente || !siguiente.borrador.items?.length) return { creadas, cargoManual: false };
+      const { borrador, restantes } = siguiente;
+      if (!borrador.proveedorId) {
+        precargarFormDesdeBorrador(borrador, restantes);
+        return { creadas, cargoManual: true };
+      }
+      crearOcDesdeBorrador(borrador);
+      creadas++;
+    }
   };
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -186,7 +246,8 @@ export default function OrdenesCompra() {
     const next = new URLSearchParams(searchParams)
     next.delete('borrador')
     setSearchParams(next, { replace: true })
-    cargarSiguienteBorrador()
+    const { creadas } = procesarColaBorradores()
+    if (creadas > 0) setMensajeAutoOc(mensajeCreadasAuto(creadas))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -283,11 +344,14 @@ export default function OrdenesCompra() {
         updatedAt: now,
       },
     });
-    // Fase 45g: si esta OC venía de un split por rubro y todavía quedan
-    // más en la cola, se precarga la siguiente de una en vez de cerrar el
-    // formulario -- así Carlos las va completando en cadena sin tener que
-    // volver a tocar "Generar Orden de Compra" en Producción.
-    if (!cargarSiguienteBorrador()) resetForm();
+    // Fase 45g/45j: si quedan más OC en la cola, se sigue procesando --
+    // las que ya tengan proveedor conocido se crean solas (Etapa 4), y si
+    // aparece una sin proveedor se precarga acá para que Carlos la
+    // complete a mano, igual que ahora. Si no queda nada, se cierra el
+    // formulario.
+    const { creadas, cargoManual } = procesarColaBorradores();
+    if (creadas > 0) setMensajeAutoOc(mensajeCreadasAuto(creadas));
+    if (!cargoManual) resetForm();
   };
 
   // ── OC action handlers ────────────────────────────────────
@@ -480,6 +544,23 @@ export default function OrdenesCompra() {
 
   return (
     <div className="space-y-4">
+      {/* Fase 45j (Etapa 4 del split de OC): aviso de OC creadas solas
+          desde un chequeo de faltantes de Producción -- se puede cerrar,
+          no bloquea nada. */}
+      {mensajeAutoOc && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+          <span>{mensajeAutoOc}</span>
+          <button
+            type="button"
+            onClick={() => setMensajeAutoOc(null)}
+            className="shrink-0 text-emerald-600 hover:text-emerald-900"
+            title="Cerrar aviso"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 flex-1">
