@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   ArrowRightLeft,
   Landmark,
+  QrCode,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react'
@@ -9,6 +10,7 @@ import { signedAmount, useBankTotals, useTreasury } from '../data/store'
 import type { BankAccount, MovementType } from '../types'
 import { MovementDialog } from '../components/treasury/MovementDialog'
 import { AccountDialog } from '../components/treasury/AccountDialog'
+import { AliasQrDialog } from '../components/treasury/AliasQrDialog'
 import {
   Amount,
   EmptyState,
@@ -39,6 +41,10 @@ export function Bancos() {
   const { state, dispatch } = useTreasury()
   const { balances, total } = useBankTotals()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Fase 45e: cuenta para la que se abrió el diálogo de QR de alias --
+  // separado de selectedId (que controla el panel de movimientos) para
+  // no pisar la selección de abajo con un click en el ícono de QR.
+  const [qrAccount, setQrAccount] = useState<BankAccount | null>(null)
 
   const selected = selectedId
     ? balances.find((b) => b.account.id === selectedId) ?? null
@@ -108,27 +114,45 @@ export function Bancos() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {balances.map(({ account, balance }) => (
-            <button
-              key={account.id}
-              type="button"
-              onClick={() => setSelectedId(selectedId === account.id ? null : account.id)}
-              className={cn(
-                'flex flex-col gap-1 rounded-xl border p-4 text-left transition-colors',
-                selectedId === account.id
-                  ? 'border-primary bg-primary/5 ring-primary/20 ring-2'
-                  : 'hover:border-primary/40',
-              )}
-            >
-              <p className="text-sm font-medium">{account.banco}</p>
-              <p className="text-muted-foreground text-xs">{account.alias}</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums">{formatARS(balance)}</p>
-              <p className="text-muted-foreground text-xs">
-                {account.tipo === 'cuenta_corriente' ? 'Cuenta corriente' : 'Caja de ahorro'} · {account.numero}
-              </p>
-            </button>
+            <div key={account.id} className="relative">
+              <button
+                type="button"
+                onClick={() => setSelectedId(selectedId === account.id ? null : account.id)}
+                className={cn(
+                  'flex w-full flex-col gap-1 rounded-xl border p-4 text-left transition-colors',
+                  selectedId === account.id
+                    ? 'border-primary bg-primary/5 ring-primary/20 ring-2'
+                    : 'hover:border-primary/40',
+                )}
+              >
+                <p className="pr-7 text-sm font-medium">{account.banco}</p>
+                <p className="text-muted-foreground text-xs">{account.alias}</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">{formatARS(balance)}</p>
+                <p className="text-muted-foreground text-xs">
+                  {account.tipo === 'cuenta_corriente' ? 'Cuenta corriente' : 'Caja de ahorro'} · {account.numero}
+                </p>
+              </button>
+              {/* Fase 45e: QR del alias -- botón aparte (no anidado
+                  dentro del <button> de selección, HTML no permite
+                  button-en-button), posicionado encima con stopPropagation
+                  para no disparar el toggle de selección de la tarjeta. */}
+              <button
+                type="button"
+                title="QR del alias"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setQrAccount(account)
+                }}
+                className="text-muted-foreground hover:bg-accent hover:text-accent-foreground absolute right-3 top-3 rounded-md p-1"
+              >
+                <QrCode className="h-4 w-4" />
+              </button>
+            </div>
           ))}
         </div>
       )}
+
+      <AliasQrDialog open={!!qrAccount} onOpenChange={(v) => !v && setQrAccount(null)} account={qrAccount} />
 
       {/* Movimientos */}
       <Card>
