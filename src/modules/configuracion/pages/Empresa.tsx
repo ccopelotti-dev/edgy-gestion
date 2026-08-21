@@ -224,6 +224,11 @@ export default function Empresa() {
   // null, "Guardar cambios" no toca logo_url y se conserva el actual.
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [subiendoLogo, setSubiendoLogo] = useState(false)
+  // Fase 45b: isotipo -- variante cuadrada del logo, mismo patrón que
+  // logoFile pero para el archivo aparte que se usa en espacios chicos
+  // (badge del header, avatar de esta misma pantalla).
+  const [isotipoFile, setIsotipoFile] = useState<File | null>(null)
+  const [subiendoIsotipo, setSubiendoIsotipo] = useState(false)
 
   // Fase 38e: mismo patrón que logoFile, uno por red -- se suben recién
   // al tocar "Guardar cambios", no apenas se elige el archivo.
@@ -428,6 +433,18 @@ export default function Empresa() {
       }
     }
 
+    // Fase 45b: mismo patrón que el logo, archivo aparte.
+    let isotipoUrl: string | null | undefined = undefined
+    if (isotipoFile) {
+      setSubiendoIsotipo(true)
+      isotipoUrl = await subirLogo(isotipoFile)
+      setSubiendoIsotipo(false)
+      if (!isotipoUrl) {
+        setMensaje('No se pudo subir el isotipo. Probá de nuevo.')
+        return
+      }
+    }
+
     // Fase 38e: mismo patrón que el logo -- solo se sube (y solo se
     // manda en el payload) el ícono que el negocio efectivamente eligió
     // en esta sesión. Los otros dos conservan lo que ya tenían.
@@ -478,12 +495,14 @@ export default function Empresa() {
       // si no, `guardar` no incluye esa clave en el payload y se
       // conserva lo que ya estaba.
       ...(logoUrl !== undefined ? { logoUrl } : {}),
+      ...(isotipoUrl !== undefined ? { isotipoUrl } : {}),
       ...(whatsappIconoUrl !== undefined ? { whatsappIconoUrl } : {}),
       ...(instagramIconoUrl !== undefined ? { instagramIconoUrl } : {}),
       ...(sitioWebIconoUrl !== undefined ? { sitioWebIconoUrl } : {}),
     })
     if (ok) {
       setLogoFile(null)
+      setIsotipoFile(null)
       setWhatsappIconoFile(null)
       setInstagramIconoFile(null)
       setSitioWebIconoFile(null)
@@ -541,11 +560,13 @@ export default function Empresa() {
         <CardHeader>
           <CardTitle>Marca</CardTitle>
           <CardDescription>
-            Logo y color de identidad. Se usan en el menú, el sidebar y en los comprobantes en
-            PDF.
+            Logo y color de identidad. El logo se usa en el catálogo público y en los
+            comprobantes en PDF. El isotipo es opcional: una variante cuadrada para espacios
+            chicos (el badge del header, el avatar acá arriba) donde un logo apaisado se recorta
+            feo — si no cargás uno, esos lugares siguen usando el logo de siempre.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <CardContent className="flex flex-col flex-wrap gap-4 sm:flex-row sm:items-start">
           <div className="flex items-center gap-3">
             <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border border-dashed">
               {logoFile ? (
@@ -568,6 +589,37 @@ export default function Empresa() {
                 className="hidden"
                 disabled={subiendoLogo}
                 onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border border-dashed">
+              {isotipoFile ? (
+                <img
+                  src={URL.createObjectURL(isotipoFile)}
+                  alt="Isotipo nuevo"
+                  className="h-full w-full object-contain p-1"
+                />
+              ) : empresa.isotipoUrl ? (
+                <img
+                  src={empresa.isotipoUrl}
+                  alt="Isotipo actual"
+                  className="h-full w-full object-contain p-1"
+                />
+              ) : (
+                <span className="text-muted-foreground px-1 text-center text-[10px]">
+                  Sin isotipo (usa el logo)
+                </span>
+              )}
+            </div>
+            <label className="hover:bg-muted cursor-pointer rounded-lg border px-4 py-2.5 text-sm font-medium">
+              {subiendoIsotipo ? 'Subiendo...' : empresa.isotipoUrl ? 'Cambiar isotipo' : 'Subir isotipo'}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={subiendoIsotipo}
+                onChange={(e) => setIsotipoFile(e.target.files?.[0] ?? null)}
               />
             </label>
           </div>
@@ -1141,8 +1193,8 @@ export default function Empresa() {
       </Card>
 
       <div className="flex items-center gap-3">
-        <Button onClick={handleGuardar} disabled={guardando || subiendoLogo || subiendoIconos}>
-          {guardando || subiendoLogo || subiendoIconos ? (
+        <Button onClick={handleGuardar} disabled={guardando || subiendoLogo || subiendoIsotipo || subiendoIconos}>
+          {guardando || subiendoLogo || subiendoIsotipo || subiendoIconos ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
             <Save className="mr-2 h-4 w-4" />

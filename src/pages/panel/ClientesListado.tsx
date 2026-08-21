@@ -44,8 +44,12 @@ export function ClientesListado() {
         {filtrados.map((cliente) => (
           <Link key={cliente.id} to={`/panel/clientes/${cliente.id}`}>
             <Card className="flex items-center gap-3 transition-shadow hover:shadow-md">
-              {cliente.logo_url ? (
-                <img src={cliente.logo_url} alt={cliente.nombre} className="h-10 w-10 rounded-md object-cover" />
+              {cliente.isotipo_url || cliente.logo_url ? (
+                <img
+                  src={cliente.isotipo_url ?? cliente.logo_url ?? undefined}
+                  alt={cliente.nombre}
+                  className="h-10 w-10 rounded-md object-cover"
+                />
               ) : (
                 <div
                   className="flex h-10 w-10 items-center justify-center rounded-md text-sm font-medium text-white"

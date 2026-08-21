@@ -51,6 +51,11 @@ export interface DatosEmpresa {
   telefono: string | null
   cuit: string | null
   logoUrl: string | null
+  /** Fase 45: variante cuadrada/isotipo del logo, para espacios chicos
+   * (badge del header, avatar de este mismo formulario) donde el logo
+   * completo (a menudo apaisado) se recorta feo. null = esos lugares
+   * caen a logoUrl, como siempre. */
+  isotipoUrl: string | null
   colorMarca: string | null
   slug: string | null
   estado: EstadoCliente

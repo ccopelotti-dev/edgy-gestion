@@ -13,6 +13,7 @@ export function filaAEmpresa(fila: Record<string, any>): DatosEmpresa {
     telefono: fila.telefono,
     cuit: fila.cuit,
     logoUrl: fila.logo_url,
+    isotipoUrl: fila.isotipo_url,
     colorMarca: fila.color_marca,
     slug: fila.slug,
     estado: fila.estado,
@@ -67,6 +68,10 @@ export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unk
   // suma acá porque el motor de PDF de comprobantes los usa como
   // identidad visual del cliente (ver Empresa.tsx).
   if ('logoUrl' in cambios) fila.logo_url = cambios.logoUrl
+  // Fase 45b: isotipo -- variante cuadrada del logo para espacios chicos
+  // (badge del header, avatar de este mismo formulario), ver comentario
+  // largo en Cliente.isotipo_url (src/types/index.ts).
+  if ('isotipoUrl' in cambios) fila.isotipo_url = cambios.isotipoUrl
   if ('colorMarca' in cambios) fila.color_marca = cambios.colorMarca
   // Fase 16: horario de atención del Catálogo público.
   if ('horarioActivo' in cambios) fila.horario_activo = cambios.horarioActivo

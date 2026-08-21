@@ -84,6 +84,7 @@ export function DashboardLayout() {
   const branding = brandingActual ?? {
     nombre: cliente.nombre,
     logoUrl: cliente.logo_url,
+    isotipoUrl: cliente.isotipo_url ?? cliente.logo_url,
     colorMarca: cliente.color_marca ?? '#0C1A2E',
   }
   const colorMarca = branding.colorMarca
@@ -109,11 +110,11 @@ export function DashboardLayout() {
             className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[10px] border-[1.5px] border-dashed bg-white"
             style={{ borderColor: bordeLogo }}
           >
-            {branding.logoUrl ? (
+            {branding.isotipoUrl ? (
               <img
-                src={branding.logoUrl}
+                src={branding.isotipoUrl}
                 alt={branding.nombre}
-                className="h-full w-full rounded-[10px] object-cover"
+                className="h-full w-full rounded-[10px] object-contain p-0.5"
               />
             ) : (
               <Store size={18} className="text-gray-400" />

@@ -101,6 +101,9 @@ interface MenuPublicoData {
     nombre: string
     slug: string
     logoUrl: string | null
+    /** Fase 45b: isotipo (variante cuadrada) para este avatar circular --
+     * null = se usa logoUrl, como siempre. */
+    isotipoUrl: string | null
     colorMarca: string | null
     // Fase 12 (Cobro online): si el negocio tiene Mercado Pago
     // configurado y habilitado (clientes_pago_config), se ofrece
@@ -788,8 +791,12 @@ export default function MenuPublico() {
       )}
 
       <div className="flex flex-col items-center gap-3 px-4 pb-8 pt-10 text-center text-white" style={{ backgroundColor: color }}>
-        {cliente.logoUrl && (
-          <img src={cliente.logoUrl} alt={cliente.nombre} className="h-16 w-16 rounded-full border-2 border-white object-cover" />
+        {(cliente.isotipoUrl || cliente.logoUrl) && (
+          <img
+            src={cliente.isotipoUrl ?? cliente.logoUrl ?? undefined}
+            alt={cliente.nombre}
+            className="h-16 w-16 rounded-full border-2 border-white object-cover"
+          />
         )}
         <h1 className="text-2xl font-bold">{cliente.nombre}</h1>
         {/* Fase 27d-2: si es el link de un local puntual, se aclara

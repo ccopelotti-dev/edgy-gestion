@@ -46,6 +46,12 @@ export interface Cliente {
   telefono: string | null
   cuit: string | null
   logo_url: string | null
+  /** Fase 45 (21/08, Charcutería): variante cuadrada/isotipo del logo,
+   * para espacios chicos (badge del header, avatar de Configuración,
+   * listado de clientes del panel, avatar circular del menú público)
+   * donde el logo completo (logo_url, a menudo apaisado) se recorta
+   * feo. null = esos lugares caen a logo_url, como siempre. */
+  isotipo_url: string | null
   color_marca: string | null
   slug: string | null
   estado: EstadoCliente

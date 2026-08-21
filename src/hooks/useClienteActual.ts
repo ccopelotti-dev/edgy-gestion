@@ -42,6 +42,13 @@ interface PuntoVentaLiviano {
 interface BrandingActual {
   nombre: string
   logoUrl: string | null
+  /** Fase 45: isotipo (variante cuadrada) para el badge del header --
+   * ver comentario largo en Cliente.isotipo_url (types/index.ts). Cae a
+   * `logoUrl` si el cliente no cargó uno (mismo comportamiento de
+   * siempre para quien no lo configure). No tiene override por punto
+   * de venta -- es una sola marca cuadrada para toda la cuenta, a
+   * diferencia de logoUrl que sí puede variar por local. */
+  isotipoUrl: string | null
   colorMarca: string
 }
 
@@ -173,6 +180,8 @@ export function useClienteActual(): UseClienteActualResult {
           ? {
               nombre: puntoVentaUsuario?.nombreVisible ?? clienteResuelto.nombre,
               logoUrl: puntoVentaUsuario?.logoUrl ?? clienteResuelto.logo_url ?? null,
+              isotipoUrl:
+                clienteResuelto.isotipo_url ?? puntoVentaUsuario?.logoUrl ?? clienteResuelto.logo_url ?? null,
               colorMarca: puntoVentaUsuario?.colorMarca ?? clienteResuelto.color_marca ?? '#0C1A2E',
             }
           : null,
