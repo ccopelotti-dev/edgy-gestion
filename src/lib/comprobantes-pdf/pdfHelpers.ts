@@ -112,6 +112,38 @@ export async function logoADataUrl(
 }
 
 /**
+ * Tamaño final con el que dibujar un logo dentro de un cuadro de
+ * `maxWidth` x `maxHeight`, respetando su proporción real -- nunca lo
+ * estira. Antes todos los headers hacían `addImage(..., logoSize,
+ * logoSize)` a lo bruto, así que un logo que no fuera cuadrado (banner
+ * horizontal, por ejemplo, como el de La Charcutería: "LA CHARCUTERIA -
+ * Productos Artesanales" en formato apaisado) salía deformado (21/08,
+ * a pedido de Carlos). `doc.getImageProperties` lee el ancho/alto real
+ * del archivo sin tener que cargarlo aparte en un <img>. El resto del
+ * layout (dónde arranca el texto de al lado) sigue midiendo contra
+ * `maxWidth`/`maxHeight` como cota fija -- ver `dibujarEncabezado` y
+ * `dibujarEncabezadoConDatosFiscales` -- así ningún logo, sea cual sea
+ * su proporción, corre el resto del contenido del documento.
+ */
+function tamañoLogoProporcional(
+  doc: jsPDF,
+  dataUrl: string,
+  maxWidth: number,
+  maxHeight: number,
+): { width: number; height: number } {
+  try {
+    const props = doc.getImageProperties(dataUrl)
+    const escala = Math.min(maxWidth / props.width, maxHeight / props.height)
+    return { width: props.width * escala, height: props.height * escala }
+  } catch {
+    // Si no se pueden leer las propiedades de la imagen, degradamos al
+    // cuadro completo (mismo comportamiento que antes) en vez de fallar
+    // la descarga del documento.
+    return { width: maxWidth, height: maxHeight }
+  }
+}
+
+/**
  * Dibuja la banda de encabezado (logo + nombre de la empresa a la
  * izquierda, tipo de documento + número + fecha a la derecha) -- común a
  * todos los documentos PDF del sistema. Devuelve el `y` desde donde
@@ -137,10 +169,14 @@ export async function dibujarEncabezado(
   if (empresa.logoUrl) {
     logoInfo = await logoADataUrl(empresa.logoUrl)
   }
-  const textoX = logoInfo ? marginX + 24 : marginX
+  const logoBox = 20
+  const textoX = logoInfo ? marginX + logoBox + 4 : marginX
   if (logoInfo) {
     try {
-      doc.addImage(logoInfo.dataUrl, logoInfo.formato, marginX, 6, 20, 20)
+      const { width, height } = tamañoLogoProporcional(doc, logoInfo.dataUrl, logoBox, logoBox)
+      const logoX = marginX + (logoBox - width) / 2
+      const logoY = 6 + (logoBox - height) / 2
+      doc.addImage(logoInfo.dataUrl, logoInfo.formato, logoX, logoY, width, height)
     } catch {
       // Formato de imagen no soportado por jsPDF -- seguimos sin logo en
       // vez de romper la descarga del documento.
@@ -454,9 +490,11 @@ export async function dibujarEncabezadoConDatosFiscales(
   doc.rect(0, 0, pageWidth, altoPanel, 'F')
 
   if (logoInfo) {
-    const logoY = topPad + Math.max(0, (altoContenido - logoSize) / 2)
     try {
-      doc.addImage(logoInfo.dataUrl, logoInfo.formato, marginX, logoY, logoSize, logoSize)
+      const { width, height } = tamañoLogoProporcional(doc, logoInfo.dataUrl, logoSize, logoSize)
+      const logoX = marginX + (logoSize - width) / 2
+      const logoY = topPad + Math.max(0, (altoContenido - height) / 2)
+      doc.addImage(logoInfo.dataUrl, logoInfo.formato, logoX, logoY, width, height)
     } catch {
       // Formato no soportado por jsPDF -- seguimos sin logo.
     }
