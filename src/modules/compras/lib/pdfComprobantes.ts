@@ -112,6 +112,7 @@ export async function descargarOrdenCompraPdf(
       tipoLabel: 'Orden de compra',
       numero,
       fecha: formatDate(oc.fecha),
+      clienteLabel: 'Proveedor',
       clienteNombre: nombreProveedorFallback(proveedor, proveedorNombreFallback),
       clienteDocumento: proveedor?.cuit ?? null,
       items: oc.items.map((i) => ({
@@ -143,6 +144,7 @@ export async function descargarCotizacionPdf(
       tipoLabel: 'Pedido de cotización',
       numero,
       fecha: formatDate(cot.fecha),
+      clienteLabel: 'Proveedor',
       clienteNombre: nombreProveedorFallback(proveedor, proveedorNombreFallback),
       clienteDocumento: proveedor?.cuit ?? null,
       items: cot.items.map((i) => ({

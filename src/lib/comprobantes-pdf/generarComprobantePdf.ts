@@ -163,6 +163,12 @@ export interface ComprobanteParaPdf {
    * si `afip` está presente. */
   fechaIso?: string
   clienteNombre: string
+  /** Fase 45d (21/08, a pedido de Carlos): rótulo que va antes del
+   * nombre -- 'Cliente' por defecto (Factura/Recibo/Presupuesto/etc.),
+   * pero los documentos de Compras (Orden de compra, Pedido de
+   * cotización) lo pisan a 'Proveedor', porque `clienteNombre` en esos
+   * casos en realidad trae el nombre del proveedor, no de un cliente. */
+  clienteLabel?: string
   clienteDocumento?: string | null
   /** Fase 38b: datos adicionales del cliente, todos opcionales -- si
    * no están cargados, esa línea simplemente no se dibuja. */
@@ -375,7 +381,7 @@ export async function generarComprobantePdf(
   // 152"/CUIT/IIBB de la caja de arriba), y el NOMBRE del cliente en
   // particular pasa a negrita al mismo tamaño que el titular (8.3),
   // para que se note quién es el destinatario del comprobante.
-  const labelCliente = 'Cliente: '
+  const labelCliente = `${comprobante.clienteLabel ?? 'Cliente'}: `
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(7.2)
   doc.setTextColor('#555555')
