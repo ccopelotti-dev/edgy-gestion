@@ -29,6 +29,7 @@ import {
   type PedidoAMedidaPendiente,
 } from '../data/store'
 import { useClienteActual } from '@/hooks/useClienteActual'
+import { supabase } from '@/lib/supabase'
 import { KpiCard, EmptyState } from '../components/productos/display'
 import { formatDate, formatARS, todayISO } from '../lib/format'
 import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
@@ -87,6 +88,25 @@ export default function Produccion() {
   // el chequeo previo nunca diga "alcanza" y después el registro falle (o
   // al revés) por una diferencia de lógica entre los dos lugares.
   const navigate = useNavigate()
+
+  // Fase 45h (Etapa 2 del split de OC): nombres de proveedor (catálogo de
+  // Compras) para agrupar/etiquetar los faltantes por proveedor habitual
+  // real -- mismo criterio directo-a-Supabase que InsumoDialog, sin
+  // acoplar este módulo al Context de Compras solo por esto.
+  const [proveedoresMap, setProveedoresMap] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    let activo = true
+    supabase
+      .from('proveedores')
+      .select('id, nombre')
+      .then(({ data }) => {
+        if (activo) setProveedoresMap(new Map((data ?? []).map((p) => [p.id, p.nombre])))
+      })
+    return () => {
+      activo = false
+    }
+  }, [])
+
   const insumosPorId = useMemo(() => {
     const m = new Map<string, InsumoParaNecesidad>()
     for (const i of state.insumos) {
@@ -98,6 +118,7 @@ export default function Produccion() {
         anchoRollo: i.anchoRollo,
         rubroId: i.rubroId,
         costo: i.costo,
+        proveedorId: i.proveedorId,
       })
     }
     return m
@@ -122,36 +143,46 @@ export default function Produccion() {
     () => necesidadesOrdenadas.filter((n) => !n.alcanza),
     [necesidadesOrdenadas],
   )
-  // Fase 45g: cuántos rubros distintos hay entre los faltantes -- define
-  // si "Generar Orden de Compra" va a armar una sola OC o varias (una por
-  // rubro, ver handleGenerarOC más abajo).
-  const rubrosFaltantesCount = useMemo(
-    () => new Set(faltantes.map((n) => n.rubroId)).size,
+  // Fase 45h (Etapa 2 del split de OC): clave de agrupamiento de UN
+  // faltante -- si el insumo tiene proveedor habitual cargado, agrupa por
+  // ESE proveedor real (`prov:<id>`); si no, cae al agrupado por rubro de
+  // la Etapa 1 (`rubro:<id>`), que sigue funcionando igual que antes para
+  // los insumos sin proveedor asignado todavía.
+  function claveGrupoFaltante(n: (typeof faltantes)[number]): string {
+    return n.proveedorId ? `prov:${n.proveedorId}` : `rubro:${n.rubroId}`
+  }
+
+  // Cuántos grupos (proveedor real, o rubro cuando no hay proveedor
+  // cargado) hay entre los faltantes -- define si "Generar Orden de
+  // Compra" va a armar una sola OC o varias (ver handleGenerarOC).
+  const gruposFaltantesCount = useMemo(
+    () => new Set(faltantes.map(claveGrupoFaltante)).size,
     [faltantes],
   )
 
-  // Fase 45g (Etapa 1 del split de OC, 21/08 a pedido de Carlos): en vez
-  // de un solo borrador con todos los faltantes mezclados, se agrupan por
-  // rubro -- un lote grande suele faltarle tanto una carne como un
-  // insumo de envasado, casi seguro de proveedores distintos, así que
-  // conviene una OC por rubro desde el arranque. `necesidadesOrdenadas`
-  // (no `faltantes`) ya viene ordenado por rubro, así que agrupar acá es
-  // simplemente ir cortando por cada vez que cambia el rubro.
+  // Fase 45g/45h (Etapa 1 + 2 del split de OC, 21/08 a pedido de Carlos):
+  // en vez de un solo borrador con todos los faltantes mezclados, se
+  // agrupan por proveedor habitual real cuando el insumo lo tiene cargado
+  // (Etapa 2), y por rubro para los que todavía no (Etapa 1, fallback) --
+  // un lote grande suele faltarle tanto una carne como un insumo de
+  // envasado, casi seguro de proveedores distintos.
   function handleGenerarOC() {
     if (!formulaSeleccionada || faltantes.length === 0) return
     const productoNombre = productosConFormula.find((p) => p.id === selectedProductoId)?.nombre
 
-    const porRubro = new Map<string, typeof faltantes>()
+    const grupos = new Map<string, { proveedorId?: string; rubroId?: string; items: typeof faltantes }>()
     for (const n of faltantes) {
-      const lista = porRubro.get(n.rubroId)
-      if (lista) lista.push(n)
-      else porRubro.set(n.rubroId, [n])
+      const key = claveGrupoFaltante(n)
+      const existente = grupos.get(key)
+      if (existente) existente.items.push(n)
+      else grupos.set(key, { proveedorId: n.proveedorId, rubroId: n.proveedorId ? undefined : n.rubroId, items: [n] })
     }
 
-    const cola: OcBorrador[] = [...porRubro.entries()].map(([rubroId, items]) => ({
+    const cola: OcBorrador[] = [...grupos.values()].map(({ proveedorId, rubroId, items }) => ({
       origen: 'produccion',
       productoNombre,
-      rubroNombre: rubrosMap.get(rubroId) ?? 'Sin rubro',
+      proveedorId,
+      rubroNombre: rubroId ? (rubrosMap.get(rubroId) ?? 'Sin rubro') : undefined,
       items: items.map((n) => ({
         insumoId: n.insumoId,
         descripcion: n.nombre,
@@ -576,6 +607,7 @@ export default function Produccion() {
                           <tr className="border-b text-left text-muted-foreground bg-muted/10">
                             <th className="px-3 py-1.5 font-medium">Insumo</th>
                             <th className="px-3 py-1.5 font-medium">Rubro</th>
+                            <th className="px-3 py-1.5 font-medium">Proveedor habitual</th>
                             <th className="px-3 py-1.5 font-medium text-right">Necesario</th>
                             <th className="px-3 py-1.5 font-medium text-right">Stock actual</th>
                             <th className="px-3 py-1.5 font-medium text-right">Faltante</th>
@@ -586,6 +618,9 @@ export default function Produccion() {
                             <tr key={n.lineaId} className={cn('border-b last:border-0', !n.alcanza && 'bg-red-50 dark:bg-red-950/20')}>
                               <td className="px-3 py-1.5">{n.nombre}</td>
                               <td className="px-3 py-1.5 text-muted-foreground">{rubrosMap.get(n.rubroId) ?? '-'}</td>
+                              <td className="px-3 py-1.5 text-muted-foreground">
+                                {n.proveedorId ? (proveedoresMap.get(n.proveedorId) ?? '-') : '—'}
+                              </td>
                               <td className="px-3 py-1.5 text-right tabular-nums">
                                 {n.cantidadNecesaria.toFixed(2)} {unidadAbrev(n.unidadNativa)}
                               </td>
@@ -607,8 +642,8 @@ export default function Produccion() {
                         </span>
                         <Button type="button" size="sm" variant="outline" onClick={handleGenerarOC}>
                           <ShoppingCart className="h-3.5 w-3.5 mr-1.5" />
-                          {rubrosFaltantesCount > 1
-                            ? `Generar ${rubrosFaltantesCount} Órdenes de Compra (por rubro)`
+                          {gruposFaltantesCount > 1
+                            ? `Generar ${gruposFaltantesCount} Órdenes de Compra`
                             : 'Generar Orden de Compra'}
                         </Button>
                       </div>

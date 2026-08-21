@@ -94,14 +94,22 @@ export interface OcBorrador {
   origen: 'produccion';
   /** Solo informativo, para el título/notas del formulario. */
   productoNombre?: string;
+  /** Fase 45h (Etapa 2 del split de OC): si TODOS los insumos de este
+   * grupo tienen el mismo proveedor habitual cargado (Insumo.proveedorId,
+   * módulo Productos y Stock), viaja acá -- Órdenes de Compra lo usa para
+   * precargar el select de proveedor directo, sin que Carlos tenga que
+   * elegirlo a mano. undefined = grupo "de fallback" sin proveedor
+   * conocido (cayó agrupado por rubro, ver `rubroNombre`), el proveedor
+   * lo sigue eligiendo el usuario ahí, camino "simple" de siempre. */
+  proveedorId?: string;
   /** Fase 45g (Etapa 1, "split por rubro" -- 21/08, a pedido de Carlos):
    * cuando Producción agrupa los faltantes en más de una OC (uno por
    * rubro, ya que un mismo lote puede faltarle tanto una carne como un
    * insumo de envasado, de proveedores probablemente distintos), acá
    * viaja el nombre del rubro de ESTE borrador puntual, para que el
    * banner en Órdenes de Compra le aclare a Carlos cuál de todas está
-   * completando. undefined = borrador sin agrupar (comportamiento de
-   * siempre). */
+   * completando. undefined = el grupo ya tiene proveedor conocido
+   * (`proveedorId` seteado) o el borrador no agrupa. */
   rubroNombre?: string;
   items: OcBorradorItem[];
 }

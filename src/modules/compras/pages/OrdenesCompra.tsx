@@ -117,24 +117,27 @@ export default function OrdenesCompra() {
   const [formItems, setFormItems] = useState([
     { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined as string | undefined, unidad: undefined as UnidadMedida | undefined },
   ]);
-  // Fase 44/45g: aviso de que este formulario se precargó desde un
+  // Fase 44/45g/45h: aviso de que este formulario se precargó desde un
   // borrador de Producción (faltantes de una fórmula) -- solo para
   // mostrarle a Carlos de dónde salió, no cambia el guardado.
-  // `restantes` (Fase 45g) es cuántas OC más quedan en la cola después de
-  // esta (split por rubro) -- 0 = era la última.
+  // `restantes` es cuántas OC más quedan en la cola después de esta
+  // (split por proveedor/rubro) -- 0 = era la última.
   const [formOrigenBorrador, setFormOrigenBorrador] = useState<{
     productoNombre?: string;
+    proveedorNombre?: string;
     rubroNombre?: string;
     restantes: number;
   } | null>(null);
 
-  // ── Borrador desde Producción (Fase 44/45g) ────────────────
+  // ── Borrador desde Producción (Fase 44/45g/45h) ────────────
   // Si llegamos con ?borrador=1, Producción dejó una cola de OcBorrador en
   // sessionStorage con los insumos que faltaban para un lote, agrupados
-  // por rubro -- se levanta uno por vez: precarga el formulario (proveedor
-  // vacío a propósito, lo elige Carlos acá) y, apenas esa OC se crea,
-  // levanta automáticamente el siguiente si queda alguno (ver
-  // handleSubmitOC). Devuelve true si efectivamente cargó algo.
+  // por proveedor habitual real (cuando el insumo lo tiene cargado) o por
+  // rubro (fallback) -- se levanta uno por vez: precarga el formulario
+  // (proveedor ya seleccionado si el grupo tenía uno, vacío si no -- lo
+  // elige Carlos en ese caso) y, apenas esa OC se crea, levanta
+  // automáticamente el siguiente si queda alguno (ver handleSubmitOC).
+  // Devuelve true si efectivamente cargó algo.
   const cargarSiguienteBorrador = () => {
     const siguiente = tomarSiguienteOcBorrador();
     if (!siguiente || !siguiente.borrador.items?.length) return false;
@@ -150,16 +153,26 @@ export default function OrdenesCompra() {
         unidad: it.unidad,
       })),
     );
-    setFormProveedorId('');
+    setFormProveedorId(borrador.proveedorId ?? '');
     setFormFecha(todayISO());
     setFormFechaEntrega('');
+    const proveedorNombre = borrador.proveedorId
+      ? proveedores.find((p) => p.id === borrador.proveedorId)?.nombre
+      : undefined;
     setFormNotas(
       borrador.productoNombre
-        ? `Faltantes para producir ${borrador.productoNombre}${borrador.rubroNombre ? ` — Rubro: ${borrador.rubroNombre}` : ''}`
+        ? `Faltantes para producir ${borrador.productoNombre}${
+            proveedorNombre
+              ? ` — Proveedor: ${proveedorNombre}`
+              : borrador.rubroNombre
+                ? ` — Rubro: ${borrador.rubroNombre}`
+                : ''
+          }`
         : '',
     );
     setFormOrigenBorrador({
       productoNombre: borrador.productoNombre,
+      proveedorNombre,
       rubroNombre: borrador.rubroNombre,
       restantes,
     });
@@ -506,13 +519,18 @@ export default function OrdenesCompra() {
           {formOrigenBorrador && (
             <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
               Items precargados con los faltantes para producir {formOrigenBorrador.productoNombre ?? 'una producción'}
-              {formOrigenBorrador.rubroNombre ? ` — Rubro: ${formOrigenBorrador.rubroNombre}` : ''}. Elegí el proveedor
-              antes de crear la OC.
+              {formOrigenBorrador.proveedorNombre ? (
+                <> — Proveedor: <strong>{formOrigenBorrador.proveedorNombre}</strong> (ya seleccionado, es el habitual de estos insumos).</>
+              ) : formOrigenBorrador.rubroNombre ? (
+                <> — Rubro: {formOrigenBorrador.rubroNombre}. Ninguno tiene proveedor habitual cargado -- elegilo antes de crear la OC.</>
+              ) : (
+                <>. Elegí el proveedor antes de crear la OC.</>
+              )}
               {formOrigenBorrador.restantes > 0 && (
                 <>
                   {' '}
                   Quedan {formOrigenBorrador.restantes} orden{formOrigenBorrador.restantes === 1 ? '' : 'es'} más por
-                  generar de este chequeo (una por rubro) -- se van a ir precargando solas apenas confirmes cada una.
+                  generar de este chequeo -- se van a ir precargando solas apenas confirmes cada una.
                 </>
               )}
             </div>

@@ -1265,6 +1265,27 @@ export function InsumoDialog({
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
 
+  // Fase 45h (Etapa 2 del split de OC): proveedores (catálogo de Compras)
+  // para el select de "Proveedor habitual" -- mismo criterio directo-a-
+  // Supabase que en ProductoDialog (ver comentario ahí), sin acoplar este
+  // módulo al Context de Compras solo por esto.
+  const [proveedores, setProveedores] = useState<{ id: string; nombre: string }[]>([])
+
+  useEffect(() => {
+    if (!open) return
+    let activo = true
+    supabase
+      .from('proveedores')
+      .select('id, nombre')
+      .order('nombre')
+      .then(({ data }) => {
+        if (activo) setProveedores(data ?? [])
+      })
+    return () => {
+      activo = false
+    }
+  }, [open])
+
   // Fase 34+ (fix): si el insumo es un espejo, nombre/rubro/sub-rubro/
   // unidad/stock mínimo/costo se re-escriben solos cada vez que se guarda
   // el producto vinculado (ver sincronizarInsumoDeProducto en store.tsx).
@@ -1425,6 +1446,32 @@ export function InsumoDialog({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Fase 45h (Etapa 2 del split de OC): proveedor habitual --
+              mismo campo liviano que "Proveedor preferido" en
+              ProductoDialog. No se bloquea con `vinculado`: aunque el
+              insumo sea un espejo de un producto, quién se lo provee es
+              un dato propio del insumo, no algo que el producto sincronice. */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Proveedor habitual</label>
+            <select
+              className={inputClass}
+              value={form.proveedorId ?? ''}
+              onChange={(e) => update('proveedorId', e.target.value || undefined)}
+            >
+              <option value="">Sin proveedor habitual</option>
+              {proveedores.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nombre}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Opcional -- si lo cargás, cuando Producción genere una Orden de Compra por
+              faltantes de este insumo, se agrupa con los demás de este mismo proveedor en vez
+              de por rubro.
+            </p>
           </div>
 
           {/* Fase 41.7: ancho de rollo -- ver mismo campo en ProductoDialog. */}

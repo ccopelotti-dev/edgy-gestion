@@ -255,6 +255,9 @@ export interface InsumoParaNecesidad {
   anchoRollo?: number
   rubroId: string
   costo: number
+  /** Fase 45h (Etapa 2 del split de OC): proveedor habitual del insumo,
+   * ver Insumo.proveedorId. undefined = sin cargar. */
+  proveedorId?: string
 }
 
 export interface NecesidadInsumo {
@@ -272,6 +275,10 @@ export interface NecesidadInsumo {
   alcanza: boolean
   rubroId: string
   costoUnitario: number
+  /** Fase 45h: se copia de InsumoParaNecesidad.proveedorId -- Producción
+   * lo usa para agrupar los faltantes en la OC por proveedor real cuando
+   * está cargado (Etapa 2), en vez de por rubro (Etapa 1). */
+  proveedorId?: string
 }
 
 export type ResultadoNecesidadInsumos =
@@ -318,6 +325,7 @@ export function calcularNecesidadInsumos(
       alcanza: faltante <= 0,
       rubroId: insumo.rubroId,
       costoUnitario: insumo.costo,
+      proveedorId: insumo.proveedorId,
     })
   }
   return { ok: true, necesidades }
@@ -689,6 +697,14 @@ export interface Insumo {
   /** Fase 41.7: ver comentario en Producto.anchoRollo -- mismo campo,
    * espejado si viene de un producto vinculado. */
   anchoRollo?: number
+  /** Fase 45h (Etapa 2 del split de OC, 21/08): proveedor habitual/
+   * preferido de este insumo (catálogo de Compras) -- mismo patrón
+   * liviano que Producto.proveedorId, un enlace opcional simple. undefined
+   * = sin proveedor habitual cargado (default, sin cambios para insumos
+   * existentes). Cuando está cargado, Producción lo usa para agrupar los
+   * faltantes en una OC por proveedor real en vez de por rubro -- ver
+   * `agruparFaltantesPorOC` más abajo. */
+  proveedorId?: string
   createdAt: string
 }
 

@@ -1191,6 +1191,7 @@ function insumoToRow(i: Insumo, clienteId: string) {
     es_comercializable: i.esComercializable,
     producto_vinculado_id: i.productoVinculadoId || null,
     ancho_rollo: i.anchoRollo ?? null,
+    proveedor_id: i.proveedorId || null,
   }
 }
 
@@ -2125,6 +2126,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     esComercializable: r.es_comercializable,
     productoVinculadoId: r.producto_vinculado_id ?? undefined,
     anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
+    proveedorId: r.proveedor_id ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -2631,6 +2633,7 @@ async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
     esComercializable: r.es_comercializable,
     productoVinculadoId: r.producto_vinculado_id ?? undefined,
     anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
+    proveedorId: r.proveedor_id ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 }
