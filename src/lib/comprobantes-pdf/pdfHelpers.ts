@@ -174,8 +174,13 @@ export async function dibujarEncabezado(
   if (logoInfo) {
     try {
       const { width, height } = tamañoLogoProporcional(doc, logoInfo.dataUrl, logoBox, logoBox)
+      // Fase 45c (21/08, a pedido de Carlos): alineado arriba, no
+      // centrado -- así el borde superior del logo queda a la misma
+      // altura que el nombre de la empresa de al lado, y lo que sobra de
+      // la caja (logos más "cuadrados" que el cuadro de logoBox) fuga
+      // hacia abajo en vez de repartirse mitad arriba/mitad abajo.
       const logoX = marginX + (logoBox - width) / 2
-      const logoY = 6 + (logoBox - height) / 2
+      const logoY = 6
       doc.addImage(logoInfo.dataUrl, logoInfo.formato, logoX, logoY, width, height)
     } catch {
       // Formato de imagen no soportado por jsPDF -- seguimos sin logo en
@@ -492,8 +497,14 @@ export async function dibujarEncabezadoConDatosFiscales(
   if (logoInfo) {
     try {
       const { width, height } = tamañoLogoProporcional(doc, logoInfo.dataUrl, logoSize, logoSize)
+      // Fase 45c (21/08, a pedido de Carlos): alineado arriba en vez de
+      // centrado -- el borde superior del logo coincide con el arranque
+      // del bloque de texto (yA = topPad + 4, ver más abajo), y el
+      // espacio que sobra dentro de logoSize x logoSize (cuando el logo
+      // no llena el cuadro por su proporción) fuga hacia abajo, no se
+      // reparte arriba/abajo como antes.
       const logoX = marginX + (logoSize - width) / 2
-      const logoY = topPad + Math.max(0, (altoContenido - height) / 2)
+      const logoY = topPad
       doc.addImage(logoInfo.dataUrl, logoInfo.formato, logoX, logoY, width, height)
     } catch {
       // Formato no soportado por jsPDF -- seguimos sin logo.
