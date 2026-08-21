@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Search,
@@ -15,9 +15,12 @@ import {
   SlidersHorizontal,
   History,
   Merge,
+  Truck,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 import {
   useProductosStock,
   fetchProductosStockState,
@@ -68,6 +71,91 @@ export default function Insumos() {
   // fantasma" (insumo que desaparece de la lista pero sigue en la base
   // porque el DELETE fue rechazado por estar en uso en una fórmula/compra).
   const [eliminandoId, setEliminandoId] = useState<string | null>(null)
+
+  // Fase 45i (Etapa 3 del split de OC): proveedores (catálogo de
+  // Compras) para la columna "Proveedor habitual" y el selector de la
+  // barra de asignación masiva -- mismo criterio directo-a-Supabase que
+  // InsumoDialog/Producción, sin acoplar este módulo al Context de Compras.
+  const [proveedores, setProveedores] = useState<{ id: string; nombre: string }[]>([])
+  useEffect(() => {
+    let activo = true
+    supabase
+      .from('proveedores')
+      .select('id, nombre')
+      .order('nombre')
+      .then(({ data }) => {
+        if (activo) setProveedores(data ?? [])
+      })
+    return () => {
+      activo = false
+    }
+  }, [])
+  const proveedoresMap = useMemo(
+    () => new Map(proveedores.map((p) => [p.id, p.nombre])),
+    [proveedores],
+  )
+
+  // Fase 45i: selección múltiple para asignar "Proveedor habitual" en
+  // tanda -- pensada para usar junto con el filtro de Rubro de arriba
+  // (filtrás por rubro, seleccionás los visibles, asignás el proveedor
+  // de una sola vez) en vez de entrar insumo por insumo. `seleccion`
+  // sobrevive a cambios de filtro a propósito -- si filtrás, seleccionás
+  // algunos, y después cambiás el filtro para agregar más de otro rubro,
+  // no perdés lo ya tildado.
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
+  const [proveedorMasivo, setProveedorMasivo] = useState('')
+  const [asignandoMasivo, setAsignandoMasivo] = useState(false)
+  const [errorAsignacionMasiva, setErrorAsignacionMasiva] = useState('')
+
+  function toggleSeleccion(id: string) {
+    setSeleccion((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSeleccionVisibles() {
+    setSeleccion((prev) => {
+      const todosVisiblesSeleccionados = filtered.every((i) => prev.has(i.id))
+      const next = new Set(prev)
+      if (todosVisiblesSeleccionados) {
+        for (const i of filtered) next.delete(i.id)
+      } else {
+        for (const i of filtered) next.add(i.id)
+      }
+      return next
+    })
+  }
+
+  async function handleAsignarProveedorMasivo() {
+    if (!cliente?.id || seleccion.size === 0) return
+    setErrorAsignacionMasiva('')
+    setAsignandoMasivo(true)
+    const proveedorIdNuevo = proveedorMasivo || undefined
+    const insumosSeleccionados = state.insumos.filter((i) => seleccion.has(i.id))
+    const resultados = await Promise.all(
+      insumosSeleccionados.map((i) =>
+        actualizarInsumoConfirmado({ ...i, proveedorId: proveedorIdNuevo }, cliente.id),
+      ),
+    )
+    setAsignandoMasivo(false)
+    const fallidos = resultados.filter(
+      (r): r is { ok: false; error: string } => !r.ok,
+    )
+    for (const r of resultados) {
+      if (r.ok) dispatch({ type: 'CONFIRM_INSUMO', payload: r.data })
+    }
+    if (fallidos.length > 0) {
+      setErrorAsignacionMasiva(
+        `Se asignó a ${resultados.length - fallidos.length} de ${resultados.length} insumos -- ${fallidos.length} fallaron (${fallidos[0].error}).`,
+      )
+      return
+    }
+    setSeleccion(new Set())
+    setProveedorMasivo('')
+  }
 
   // Fase 34+ (fix): insumos sueltos que comparten nombre con un producto
   // vinculado -- ver duplicados-dialog.tsx. Se calcula acá arriba (no solo
@@ -307,6 +395,52 @@ export default function Insumos() {
         </Button>
       </div>
 
+      {/* Fase 45i (Etapa 3 del split de OC): barra de asignación masiva
+          de Proveedor habitual -- aparece con la selección tildada en la
+          tabla de abajo. Pensada para usar junto con el filtro de Rubro
+          de arriba: filtrás por rubro, tildás los visibles, asignás. */}
+      {seleccion.size > 0 && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <Truck className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="text-sm font-medium">
+            {seleccion.size} insumo{seleccion.size === 1 ? '' : 's'} seleccionado{seleccion.size === 1 ? '' : 's'}
+          </span>
+          <select
+            className={cn(inputClass, 'w-full sm:w-56')}
+            value={proveedorMasivo}
+            onChange={(e) => setProveedorMasivo(e.target.value)}
+          >
+            <option value="">Sin proveedor habitual</option>
+            {proveedores.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nombre}
+              </option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            onClick={handleAsignarProveedorMasivo}
+            disabled={asignandoMasivo}
+            className="shrink-0"
+          >
+            {asignandoMasivo && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+            Asignar a la selección
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setSeleccion(new Set())}
+            disabled={asignandoMasivo}
+            className="shrink-0"
+          >
+            Cancelar selección
+          </Button>
+          {errorAsignacionMasiva && (
+            <span className="text-xs text-red-500 basis-full">{errorAsignacionMasiva}</span>
+          )}
+        </div>
+      )}
+
       {/* Table */}
       {filtered.length === 0 ? (
         <EmptyState
@@ -323,8 +457,17 @@ export default function Insumos() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
+                <th className="w-8 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every((i) => seleccion.has(i.id))}
+                    onChange={toggleSeleccionVisibles}
+                    title="Seleccionar todos los visibles"
+                  />
+                </th>
                 <th className="px-4 py-3 font-medium">Nombre</th>
                 <th className="px-4 py-3 font-medium">Rubro</th>
+                <th className="px-4 py-3 font-medium">Proveedor habitual</th>
                 <th className="px-4 py-3 font-medium text-right">Stock</th>
                 <th className="px-4 py-3 font-medium text-right">Minimo</th>
                 <th className="px-4 py-3 font-medium text-right">Costo</th>
@@ -335,6 +478,13 @@ export default function Insumos() {
             <tbody>
               {filtered.map((i) => (
                 <tr key={i.id} className="border-b last:border-0 hover:bg-muted/50">
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={seleccion.has(i.id)}
+                      onChange={() => toggleSeleccion(i.id)}
+                    />
+                  </td>
                   <td className="px-4 py-3 font-medium">
                     {i.nombre}
                     {i.productoVinculadoId && (
@@ -353,6 +503,9 @@ export default function Insumos() {
                       if (!rubro) return '-'
                       return subRubro ? `${rubro.nombre} / ${subRubro.nombre}` : rubro.nombre
                     })()}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {i.proveedorId ? (proveedoresMap.get(i.proveedorId) ?? '-') : '—'}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <span className="tabular-nums mr-1">
