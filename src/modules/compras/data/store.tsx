@@ -376,6 +376,7 @@ function proveedorToRow(p: Proveedor, clienteId: string) {
     id: p.id,
     cliente_id: clienteId,
     nombre: p.nombre,
+    nombre_fantasia: p.nombreFantasia ?? null,
     cuit: p.cuit || null,
     condicion_iva: p.condicionIva,
     email: p.email ?? null,
@@ -830,6 +831,7 @@ async function fetchComprasState(): Promise<ComprasState> {
   const proveedores: Proveedor[] = (proveedoresRes.data ?? []).map((r: any) => ({
     id: r.id,
     nombre: r.nombre,
+    nombreFantasia: r.nombre_fantasia ?? undefined,
     cuit: r.cuit ?? '',
     condicionIva: r.condicion_iva,
     email: r.email ?? undefined,

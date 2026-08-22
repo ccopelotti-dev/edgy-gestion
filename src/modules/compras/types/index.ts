@@ -15,6 +15,10 @@ export type CondicionIvaProveedor =
 export interface Proveedor {
   id: string;
   nombre: string;
+  /** Nombre comercial / de fantasía (ej. "Don René"), distinto de la razón
+   * social (`nombre`). Solo referencia visual en pantalla -- comprobantes y
+   * PDF siguen usando la razón social. */
+  nombreFantasia?: string;
   cuit: string;
   condicionIva: CondicionIvaProveedor;
   email?: string;

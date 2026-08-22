@@ -83,8 +83,9 @@ export default function Proveedores() {
       if (soloActivos && !p.activo) return false;
       if (q) {
         const matchNombre = p.nombre.toLowerCase().includes(q);
+        const matchFantasia = (p.nombreFantasia ?? '').toLowerCase().includes(q);
         const matchCuit = p.cuit.includes(q);
-        if (!matchNombre && !matchCuit) return false;
+        if (!matchNombre && !matchFantasia && !matchCuit) return false;
       }
       return true;
     });
@@ -208,7 +209,7 @@ export default function Proveedores() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
               className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900"
-              placeholder="Buscar por nombre o CUIT..."
+              placeholder="Buscar por nombre, nombre comercial o CUIT..."
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
             />
@@ -269,7 +270,12 @@ export default function Proveedores() {
                       <td className="px-4 py-3 text-gray-400">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">{prov.nombre}</td>
+                      <td className="px-4 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">
+                        {prov.nombre}
+                        {prov.nombreFantasia && (
+                          <div className="text-[11px] font-normal text-gray-400">{prov.nombreFantasia}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{formatCuit(prov.cuit)}</td>
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{CONDICION_IVA_PROV_LABEL[prov.condicionIva]}</td>
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{prov.rubro ?? '—'}</td>

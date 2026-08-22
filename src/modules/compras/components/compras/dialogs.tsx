@@ -79,6 +79,7 @@ interface ProveedorDialogProps {
 
 interface ProveedorForm {
   nombre: string;
+  nombreFantasia: string;
   cuit: string;
   condicionIva: CondicionIvaProveedor;
   email: string;
@@ -93,6 +94,7 @@ interface ProveedorForm {
 
 const emptyProveedorForm: ProveedorForm = {
   nombre: '',
+  nombreFantasia: '',
   cuit: '',
   condicionIva: 'responsable_inscripto',
   email: '',
@@ -114,6 +116,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
       if (proveedor) {
         setForm({
           nombre: proveedor.nombre,
+          nombreFantasia: proveedor.nombreFantasia ?? '',
           cuit: proveedor.cuit,
           condicionIva: proveedor.condicionIva,
           email: proveedor.email ?? '',
@@ -150,6 +153,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
     if (!validate()) return;
     onSave({
       nombre: form.nombre.trim(),
+      nombreFantasia: form.nombreFantasia.trim() || undefined,
       cuit: form.cuit.trim(),
       condicionIva: form.condicionIva,
       email: form.email || undefined,
@@ -181,6 +185,11 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
               <label className={labelClass}>Nombre *</label>
               <input className={inputClass} value={form.nombre} onChange={(e) => update('nombre', e.target.value)} placeholder="Razon social" />
               {errors.nombre && <p className="text-xs text-red-600 mt-1">{errors.nombre}</p>}
+            </div>
+
+            <div>
+              <label className={labelClass}>Nombre comercial</label>
+              <input className={inputClass} value={form.nombreFantasia} onChange={(e) => update('nombreFantasia', e.target.value)} placeholder="Nombre de fantasia (ej. Don Rene)" />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
