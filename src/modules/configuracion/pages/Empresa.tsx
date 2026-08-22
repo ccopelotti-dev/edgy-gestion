@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { supabase } from '@/lib/supabase'
+import { convertirImagenAPng } from '@/lib/imagenAPng'
 import { useEmpresa } from '../data/useEmpresa'
 import {
   CATEGORIAS_IMPOSITIVAS,
@@ -39,8 +40,10 @@ const COLOR_MARCA_DEFAULT = '#D4537E'
 // onboarding (NuevoProyecto.tsx) -- así un logo subido acá o en el
 // alta inicial conviven sin chocar.
 async function subirLogo(file: File): Promise<string | null> {
-  const ruta = `${Date.now()}-${file.name}`
-  const { data: subida, error } = await supabase.storage.from('logos-clientes').upload(ruta, file)
+  // 22/08: estandarizar a PNG antes de subir -- ver imagenAPng.ts.
+  const archivo = await convertirImagenAPng(file)
+  const ruta = `${Date.now()}-${archivo.name}`
+  const { data: subida, error } = await supabase.storage.from('logos-clientes').upload(ruta, archivo)
   if (error || !subida) return null
   return supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
 }
@@ -51,8 +54,10 @@ async function subirLogo(file: File): Promise<string | null> {
 // sitio web -- así el PDF puede mostrar el ícono real de cada red sin
 // que Edgy tenga que reproducir un logo de marca registrada.
 async function subirIconoContacto(file: File, prefijo: string): Promise<string | null> {
-  const ruta = `icono-${prefijo}-${Date.now()}-${file.name}`
-  const { data: subida, error } = await supabase.storage.from('logos-clientes').upload(ruta, file)
+  // 22/08: estandarizar a PNG antes de subir -- ver imagenAPng.ts.
+  const archivo = await convertirImagenAPng(file)
+  const ruta = `icono-${prefijo}-${Date.now()}-${archivo.name}`
+  const { data: subida, error } = await supabase.storage.from('logos-clientes').upload(ruta, archivo)
   if (error || !subida) return null
   return supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
 }

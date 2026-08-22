@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { convertirImagenAPng } from '@/lib/imagenAPng'
 import { guardarAdmin, guardarEquipo } from '@/lib/altaEquipo'
 import { Paso1Identidad, type DatosIdentidad } from './Paso1Identidad'
 import { Paso2Admin, type DatosAdmin } from './Paso2Admin'
@@ -70,10 +71,13 @@ export function NuevoProyecto() {
 
     let logoUrl: string | null = null
     if (datosIdentidad.logoFile) {
-      const ruta = `${Date.now()}-${datosIdentidad.logoFile.name}`
+      // 22/08: estandarizar a PNG antes de subir -- ver imagenAPng.ts
+      // (evita el bug de jpeg CMYK/progresivo saliendo negro en el PDF).
+      const archivoLogo = await convertirImagenAPng(datosIdentidad.logoFile)
+      const ruta = `${Date.now()}-${archivoLogo.name}`
       const { data: subida, error: errSubida } = await supabase.storage
         .from('logos-clientes')
-        .upload(ruta, datosIdentidad.logoFile)
+        .upload(ruta, archivoLogo)
       if (subida) {
         logoUrl = supabase.storage.from('logos-clientes').getPublicUrl(subida.path).data.publicUrl
       } else if (errSubida) {

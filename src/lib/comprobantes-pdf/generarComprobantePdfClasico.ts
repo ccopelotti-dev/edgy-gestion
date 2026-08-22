@@ -139,23 +139,49 @@ function aclarar(hex: string, factor: number): [number, number, number] {
   return [mezclar(r), mezclar(g), mezclar(b)]
 }
 
+// 22/08, bugfix crítico (excepción al "no tocar" de la cabecera del
+// archivo -- ver ahí por qué): igual que en pdfHelpers.ts, un jpeg CMYK
+// o progresivo (foto de celular subida como logo) hacía que el decoder
+// de jsPDF dibujara pixels basura -- casi siempre negro sólido, en la
+// página entera. Se redibuja el logo en un <canvas> vía el decoder
+// nativo del navegador antes de pasárselo a jsPDF (que solo garantiza
+// soportar el PNG plano de 8 bits que sale de ahí).
 async function logoADataUrl(
   url: string,
 ): Promise<{ dataUrl: string; formato: 'PNG' | 'JPEG' } | null> {
+  let objectUrl: string | null = null
   try {
     const res = await fetch(url)
     if (!res.ok) return null
     const blob = await res.blob()
-    const formato: 'PNG' | 'JPEG' = blob.type.includes('png') ? 'PNG' : 'JPEG'
+    objectUrl = URL.createObjectURL(blob)
+    const urlParaImg = objectUrl
     const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.onerror = () => reject(new Error('No se pudo leer el logo'))
-      reader.readAsDataURL(blob)
+      const img = new Image()
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('No se pudo obtener contexto 2D para redibujar el logo'))
+            return
+          }
+          ctx.drawImage(img, 0, 0)
+          resolve(canvas.toDataURL('image/png'))
+        } catch (e) {
+          reject(e instanceof Error ? e : new Error('No se pudo redibujar el logo'))
+        }
+      }
+      img.onerror = () => reject(new Error('No se pudo decodificar el logo'))
+      img.src = urlParaImg
     })
-    return { dataUrl, formato }
+    return { dataUrl, formato: 'PNG' }
   } catch {
     return null
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
   }
 }
 

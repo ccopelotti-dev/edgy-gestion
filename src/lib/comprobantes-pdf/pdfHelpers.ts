@@ -89,25 +89,64 @@ export function aclarar(hex: string, factor: number): [number, number, number] {
   return [mezclar(r), mezclar(g), mezclar(b)]
 }
 
+/**
+ * 22/08, bug real (Punto Tex): el jpeg de un logo subido desde el
+ * celular (WhatsApp) venía con espacio de color CMYK -- el decoder de
+ * JPEG que trae jsPDF de fábrica solo entiende JPEG baseline sRGB, así
+ * que ante un CMYK (o un progresivo, u orientación EXIF rara -- todo
+ * bastante común en fotos de celular) no tira error: dibuja pixels
+ * basura, casi siempre negro sólido. Eso volvía negra la banda del
+ * logo Y -- porque jsPDF sigue escribiendo el resto del content stream
+ * de la página igual -- terminaba viéndose como "el PDF entero salió
+ * negro" tanto en pantalla como impreso.
+ *
+ * El fix: en vez de pasarle a jsPDF los bytes crudos que bajó `fetch`
+ * (vía FileReader.readAsDataURL, sin pasar por ningún decoder real),
+ * dejamos que el decoder nativo del navegador (que sí entiende CMYK,
+ * progresivo y EXIF) decodifique la imagen en un <img>, la volvemos a
+ * dibujar en un <canvas> y exportamos ESO como PNG. Un PNG generado
+ * por canvas siempre es RGB plano de 8 bits -- lo único que el
+ * decoder de jsPDF garantiza soportar sin sorpresas.
+ */
 export async function logoADataUrl(
   url: string,
 ): Promise<{ dataUrl: string; formato: 'PNG' | 'JPEG' } | null> {
+  let objectUrl: string | null = null
   try {
     const res = await fetch(url)
     if (!res.ok) return null
     const blob = await res.blob()
-    const formato: 'PNG' | 'JPEG' = blob.type.includes('png') ? 'PNG' : 'JPEG'
+    objectUrl = URL.createObjectURL(blob)
+    const urlParaImg = objectUrl
     const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.onerror = () => reject(new Error('No se pudo leer el logo'))
-      reader.readAsDataURL(blob)
+      const img = new Image()
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('No se pudo obtener contexto 2D para redibujar el logo'))
+            return
+          }
+          ctx.drawImage(img, 0, 0)
+          resolve(canvas.toDataURL('image/png'))
+        } catch (e) {
+          reject(e instanceof Error ? e : new Error('No se pudo redibujar el logo'))
+        }
+      }
+      img.onerror = () => reject(new Error('No se pudo decodificar el logo'))
+      img.src = urlParaImg
     })
-    return { dataUrl, formato }
+    return { dataUrl, formato: 'PNG' }
   } catch {
     // El logo es un plus visual -- si falla la descarga (CORS, red,
-    // formato raro) el documento se genera igual, sin logo.
+    // formato raro que ni el navegador puede decodificar) el
+    // documento se genera igual, sin logo.
     return null
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
   }
 }
 
