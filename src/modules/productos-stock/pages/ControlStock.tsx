@@ -358,7 +358,7 @@ export default function ControlStock() {
       {alertasVencimiento.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-lg font-semibold">Por vencer</h2>
-          <div className="rounded-lg border bg-card shadow-sm overflow-x-auto">
+          <div className="rounded-lg border bg-card shadow-sm overflow-x-auto scroll-shadow-x">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
@@ -446,7 +446,7 @@ export default function ControlStock() {
             </Button>
           </EmptyState>
         ) : (
-          <div className="rounded-lg border bg-card shadow-sm overflow-x-auto">
+          <div className="rounded-lg border bg-card shadow-sm overflow-x-auto scroll-shadow-x">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
@@ -486,7 +486,7 @@ export default function ControlStock() {
             description="No hay productos con control de stock ni insumos registrados."
           />
         ) : (
-          <div className="rounded-lg border bg-card shadow-sm overflow-x-auto">
+          <div className="rounded-lg border bg-card shadow-sm overflow-x-auto scroll-shadow-x">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">

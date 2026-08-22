@@ -187,7 +187,7 @@ export default function Turno() {
       {historial.length > 0 && (
         <div>
           <h3 className="mb-2 font-medium">Historial</h3>
-          <div className="overflow-x-auto rounded-md border">
+          <div className="overflow-x-auto scroll-shadow-x rounded-md border">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-muted-foreground">
                 <tr>

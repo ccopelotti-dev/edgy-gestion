@@ -130,7 +130,7 @@ export default function Servicios() {
           )}
         </EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-card shadow-sm">
+        <div className="overflow-x-auto scroll-shadow-x rounded-lg border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">

@@ -476,7 +476,7 @@ export default function Comprobantes() {
           description="No hay comprobantes con los filtros seleccionados"
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        <div className="overflow-x-auto scroll-shadow-x rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-left text-gray-500">
@@ -700,7 +700,7 @@ function ComprobanteRow({
                     Descargar PDF
                   </button>
                 </div>
-                <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <div className="overflow-x-auto scroll-shadow-x rounded-lg border border-gray-200 bg-white">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 text-left text-gray-500">

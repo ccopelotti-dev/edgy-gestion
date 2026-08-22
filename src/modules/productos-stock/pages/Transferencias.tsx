@@ -118,7 +118,7 @@ export default function Transferencias() {
           description="No hay transferencias registradas. Cuando tengas múltiples locales, podés transferir stock entre ellos."
         />
       ) : (
-        <div className="rounded-lg border bg-card shadow-sm overflow-x-auto">
+        <div className="rounded-lg border bg-card shadow-sm overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">

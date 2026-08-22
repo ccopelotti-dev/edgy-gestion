@@ -240,7 +240,7 @@ export default function Proveedores() {
           description="Cree un proveedor para comenzar a registrar compras."
         />
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">

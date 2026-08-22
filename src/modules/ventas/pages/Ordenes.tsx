@@ -687,7 +687,7 @@ export default function Ordenes() {
               </button>
             </div>
 
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+            <div className="overflow-x-auto scroll-shadow-x rounded-lg border border-gray-200 bg-white">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left text-gray-500">
@@ -854,7 +854,7 @@ export default function Ordenes() {
           description={`No hay ${pluralMin} con los filtros seleccionados`}
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        <div className="overflow-x-auto scroll-shadow-x rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-left text-gray-500">
@@ -1110,7 +1110,7 @@ function OrdenRow({
                   <FileText className="h-4 w-4 text-indigo-600" />
                   Detalle de items
                 </h3>
-                <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <div className="overflow-x-auto scroll-shadow-x rounded-lg border border-gray-200 bg-white">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 text-left text-gray-500">

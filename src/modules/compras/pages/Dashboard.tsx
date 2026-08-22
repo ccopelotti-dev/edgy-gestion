@@ -140,7 +140,7 @@ export default function Dashboard() {
         {ultimosComprobantes.length === 0 ? (
           <EmptyState title="No hay comprobantes registrados" />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scroll-shadow-x">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-left text-gray-500">

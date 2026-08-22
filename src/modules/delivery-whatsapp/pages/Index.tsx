@@ -542,7 +542,7 @@ export default function Index() {
 
       <div className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">En curso</h2>
-        <div className="overflow-x-auto rounded-md border">
+        <div className="overflow-x-auto scroll-shadow-x rounded-md border">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-muted-foreground">
               <tr>
@@ -598,7 +598,7 @@ export default function Index() {
       {finalizados.length > 0 && (
         <div className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold">Historial</h2>
-          <div className="overflow-x-auto rounded-md border">
+          <div className="overflow-x-auto scroll-shadow-x rounded-md border">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-muted-foreground">
                 <tr>

@@ -86,7 +86,7 @@ export function LineasEditor({ lineas, onChange, cuentasImputables, exigirBalanc
 
   return (
     <div className="space-y-2">
-      <div className="overflow-x-auto rounded-lg border">
+      <div className="overflow-x-auto scroll-shadow-x rounded-lg border">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50 text-left text-muted-foreground">

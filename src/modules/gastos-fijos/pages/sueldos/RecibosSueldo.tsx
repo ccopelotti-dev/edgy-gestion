@@ -150,7 +150,7 @@ export default function RecibosSueldo() {
         periodos.map((p) => (
           <div key={p} className="flex flex-col gap-2">
             <h4 className="text-muted-foreground text-xs font-semibold uppercase">{formatPeriodo(p)}</h4>
-            <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto scroll-shadow-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-left text-gray-500">

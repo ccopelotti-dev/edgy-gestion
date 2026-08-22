@@ -175,7 +175,7 @@ export default function Cobranzas() {
       {cobrosFiltrados.length === 0 ? (
         <EmptyState icon={<Receipt className="w-10 h-10" />} title="Sin cobros registrados" description="Los cobros aparecerán aquí cuando se registren pagos de clientes." />
       ) : (
-        <div className="rounded-xl border overflow-hidden">
+        <div className="rounded-xl border overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>

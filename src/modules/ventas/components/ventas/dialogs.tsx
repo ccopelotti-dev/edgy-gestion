@@ -1239,7 +1239,7 @@ export function ComprobanteDialog({
                 </div>
               )}
 
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-gray-600">
@@ -1567,7 +1567,7 @@ export function CobroDialog({
                   No hay comprobantes pendientes para este cliente.
                 </p>
               ) : (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-50 text-gray-600">
@@ -2281,7 +2281,7 @@ export function PresupuestoDialog({
                 </div>
               )}
 
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-gray-600">

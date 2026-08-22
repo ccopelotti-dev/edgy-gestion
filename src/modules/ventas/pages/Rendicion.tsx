@@ -198,37 +198,39 @@ export default function Rendicion() {
                     Rendir seleccionados ({formatARS(totalSeleccionado)})
                   </button>
                 </div>
-                <table className="w-full text-sm">
-                  <thead className="bg-white text-left text-gray-500">
-                    <tr>
-                      <th className="px-4 py-2 w-8"></th>
-                      <th className="px-4 py-2 font-medium">Pedido</th>
-                      <th className="px-4 py-2 font-medium">Cliente</th>
-                      <th className="px-4 py-2 font-medium">Factura</th>
-                      <th className="px-4 py-2 font-medium">Fecha</th>
-                      <th className="px-4 py-2 font-medium text-right">A cobrar</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {grupo.ordenes.map((o) => (
-                      <tr key={o.ordenId} className="hover:bg-gray-50">
-                        <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            checked={!!seleccion[o.ordenId]}
-                            onChange={() => toggleOrden(o.ordenId)}
-                            className="h-4 w-4 rounded border-gray-300"
-                          />
-                        </td>
-                        <td className="px-4 py-2 font-mono">#{o.numeroOrden}</td>
-                        <td className="px-4 py-2">{o.clienteNombre}</td>
-                        <td className="px-4 py-2 font-mono">{formatNumero('FAC', o.numeroComprobante)}</td>
-                        <td className="px-4 py-2">{formatDate(o.fecha)}</td>
-                        <td className="px-4 py-2 text-right font-semibold">{formatARS(o.saldoPendiente)}</td>
+                <div className="overflow-x-auto scroll-shadow-x">
+                  <table className="w-full text-sm">
+                    <thead className="bg-white text-left text-gray-500">
+                      <tr>
+                        <th className="px-4 py-2 w-8"></th>
+                        <th className="px-4 py-2 font-medium">Pedido</th>
+                        <th className="px-4 py-2 font-medium">Cliente</th>
+                        <th className="px-4 py-2 font-medium">Factura</th>
+                        <th className="px-4 py-2 font-medium">Fecha</th>
+                        <th className="px-4 py-2 font-medium text-right">A cobrar</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y">
+                      {grupo.ordenes.map((o) => (
+                        <tr key={o.ordenId} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">
+                            <input
+                              type="checkbox"
+                              checked={!!seleccion[o.ordenId]}
+                              onChange={() => toggleOrden(o.ordenId)}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                          </td>
+                          <td className="px-4 py-2 font-mono">#{o.numeroOrden}</td>
+                          <td className="px-4 py-2">{o.clienteNombre}</td>
+                          <td className="px-4 py-2 font-mono">{formatNumero('FAC', o.numeroComprobante)}</td>
+                          <td className="px-4 py-2">{formatDate(o.fecha)}</td>
+                          <td className="px-4 py-2 text-right font-semibold">{formatARS(o.saldoPendiente)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             );
           })}

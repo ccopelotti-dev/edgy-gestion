@@ -63,7 +63,7 @@ export default function LibroMayor() {
       ) : movimientos.length === 0 ? (
         <EmptyState icon={BookText} title="Sin movimientos" description="Esta cuenta todavía no tiene ningún movimiento cargado." />
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-card shadow-sm">
+        <div className="overflow-x-auto scroll-shadow-x rounded-lg border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">

@@ -51,18 +51,20 @@ export default function LibroDiario() {
               </span>
               <OrigenBadge origen={m.origen} />
             </div>
-            <table className="w-full text-sm">
-              <tbody>
-                {m.lineas.map((l, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="px-4 py-1.5 text-xs font-mono text-muted-foreground w-24">{l.cuentaCodigo}</td>
-                    <td className="px-4 py-1.5">{l.cuentaNombre}</td>
-                    <td className="px-4 py-1.5 text-right w-32">{l.debe ? formatARS(l.debe) : ''}</td>
-                    <td className="px-4 py-1.5 text-right w-32">{l.haber ? formatARS(l.haber) : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto scroll-shadow-x">
+              <table className="w-full text-sm">
+                <tbody>
+                  {m.lineas.map((l, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="px-4 py-1.5 text-xs font-mono text-muted-foreground w-24">{l.cuentaCodigo}</td>
+                      <td className="px-4 py-1.5">{l.cuentaNombre}</td>
+                      <td className="px-4 py-1.5 text-right w-32">{l.debe ? formatARS(l.debe) : ''}</td>
+                      <td className="px-4 py-1.5 text-right w-32">{l.haber ? formatARS(l.haber) : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ))}
       </div>

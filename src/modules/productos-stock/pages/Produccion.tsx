@@ -772,7 +772,7 @@ export default function Produccion() {
                     {previewAMedida.error}
                   </div>
                 ) : previewAMedida ? (
-                  <div className="rounded-md border overflow-x-auto mb-3">
+                  <div className="rounded-md border overflow-x-auto scroll-shadow-x mb-3">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b text-left text-muted-foreground bg-muted/30">

@@ -104,7 +104,7 @@ export default function Asientos() {
       {ordenados.length === 0 ? (
         <EmptyState icon={FileText} title="Sin asientos todavía" description="Creá el primer asiento manual para empezar." />
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-card shadow-sm">
+        <div className="overflow-x-auto scroll-shadow-x rounded-lg border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">

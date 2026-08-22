@@ -663,7 +663,7 @@ export default function OrdenesCompra() {
                 <Plus className="h-3.5 w-3.5" /> Agregar
               </button>
             </div>
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-gray-600">
@@ -729,7 +729,7 @@ export default function OrdenesCompra() {
           description="Cree una orden de compra o apruebe una cotizacion."
         />
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">
@@ -886,7 +886,7 @@ export default function OrdenesCompra() {
                           )}
                           {/* Items */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
-                          <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
+                          <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x mb-3">
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="bg-gray-50 text-gray-600">

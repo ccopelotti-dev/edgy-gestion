@@ -790,7 +790,7 @@ export default function PuntoDeVenta() {
           {lineas.length === 0 ? (
             <EmptyState title="Agregue productos para comenzar la venta" />
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <div className="overflow-x-auto scroll-shadow-x rounded-xl border border-gray-200 bg-white">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left text-gray-500">

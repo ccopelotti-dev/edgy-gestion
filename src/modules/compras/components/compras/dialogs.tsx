@@ -581,7 +581,7 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
                 )}
               </div>
 
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-gray-600">
@@ -1220,7 +1220,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
                 )}
               </div>
 
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-gray-600">
@@ -1340,7 +1340,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
               {otrosImpuestos.length === 0 ? (
                 <p className="text-xs text-gray-400">Sin percepciones cargadas -- ej. Ganancias, IIBB, débitos y créditos bancarios.</p>
               ) : (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                   <table className="w-full text-sm">
                     <tbody>
                       {otrosImpuestos.map((imp, idx) => (
@@ -1682,7 +1682,7 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
                   No hay comprobantes pendientes para este proveedor.
                 </p>
               ) : (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-50 text-gray-600">
@@ -2093,7 +2093,7 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
           )}
 
           <div className="space-y-5">
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-gray-600">
@@ -2153,7 +2153,7 @@ export function OrdenCompraPreciosDialog({ open, onOpenChange, orden, proveedorN
               {otrosImpuestos.length === 0 ? (
                 <p className="text-xs text-gray-400">Sin percepciones cargadas -- ej. Ganancias, IIBB, débitos y créditos bancarios.</p>
               ) : (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
                   <table className="w-full text-sm">
                     <tbody>
                       {otrosImpuestos.map((imp, idx) => (

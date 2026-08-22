@@ -205,7 +205,7 @@ export default function ImportacionMasiva() {
             </span>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border bg-card shadow-sm max-h-96 overflow-y-auto">
+          <div className="overflow-x-auto scroll-shadow-x rounded-lg border bg-card shadow-sm max-h-96 overflow-y-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-card">
                 <tr className="border-b text-left text-muted-foreground">
@@ -264,7 +264,7 @@ export default function ImportacionMasiva() {
             description="Las importaciones que hagas van a quedar registradas acá."
           />
         ) : (
-          <div className="overflow-x-auto rounded-lg border bg-card shadow-sm">
+          <div className="overflow-x-auto scroll-shadow-x rounded-lg border bg-card shadow-sm">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">

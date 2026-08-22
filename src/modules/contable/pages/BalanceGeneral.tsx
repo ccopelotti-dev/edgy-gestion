@@ -13,27 +13,29 @@ function TablaRama({ titulo, filas, total }: { titulo: string; filas: FilaBalanc
   return (
     <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
       <div className="border-b bg-muted/40 px-4 py-2 text-sm font-medium">{titulo}</div>
-      <table className="w-full text-sm">
-        <tbody>
-          {filas.map((f) => (
-            <tr key={f.cuentaId} className="border-b last:border-0">
-              <td className="px-4 py-1.5 text-xs font-mono text-muted-foreground w-20">{f.codigo}</td>
-              <td className="px-4 py-1.5" style={{ paddingLeft: `${1 + f.nivel * 1.25}rem` }}>
-                {f.imputable ? f.nombre : <b>{f.nombre}</b>}
+      <div className="overflow-x-auto scroll-shadow-x">
+        <table className="w-full text-sm">
+          <tbody>
+            {filas.map((f) => (
+              <tr key={f.cuentaId} className="border-b last:border-0">
+                <td className="px-4 py-1.5 text-xs font-mono text-muted-foreground w-20">{f.codigo}</td>
+                <td className="px-4 py-1.5" style={{ paddingLeft: `${1 + f.nivel * 1.25}rem` }}>
+                  {f.imputable ? f.nombre : <b>{f.nombre}</b>}
+                </td>
+                <td className="px-4 py-1.5 text-right">{f.imputable ? formatARS(f.saldo) : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-muted/30 font-medium">
+              <td className="px-4 py-2" colSpan={2}>
+                Total {titulo}
               </td>
-              <td className="px-4 py-1.5 text-right">{f.imputable ? formatARS(f.saldo) : ''}</td>
+              <td className="px-4 py-2 text-right">{formatARS(total)}</td>
             </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="bg-muted/30 font-medium">
-            <td className="px-4 py-2" colSpan={2}>
-              Total {titulo}
-            </td>
-            <td className="px-4 py-2 text-right">{formatARS(total)}</td>
-          </tr>
-        </tfoot>
-      </table>
+          </tfoot>
+        </table>
+      </div>
     </div>
   )
 }

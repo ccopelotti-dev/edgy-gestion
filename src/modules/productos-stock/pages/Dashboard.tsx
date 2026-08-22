@@ -125,7 +125,7 @@ export default function Dashboard() {
               No hay movimientos registrados.
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto scroll-shadow-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">

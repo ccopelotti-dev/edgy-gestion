@@ -60,7 +60,7 @@ export default function RetencionesPercepciones() {
       {registros.length === 0 ? (
         <p className="text-muted-foreground text-sm">No hay retenciones ni percepciones cargadas todavía.</p>
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">

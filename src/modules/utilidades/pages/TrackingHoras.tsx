@@ -94,7 +94,7 @@ function DetalleSeguimiento({
       {entradas.length === 0 ? (
         <EmptyState icon={Clock} title="Sin horas cargadas" description="Registrá la primera entrada." />
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-card shadow-sm">
+        <div className="overflow-x-auto scroll-shadow-x rounded-lg border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">

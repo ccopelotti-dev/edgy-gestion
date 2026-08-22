@@ -203,7 +203,7 @@ export default function OrdenesPago() {
           description="Elegí un proveedor y creá una Orden de Pago para empezar."
         />
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">

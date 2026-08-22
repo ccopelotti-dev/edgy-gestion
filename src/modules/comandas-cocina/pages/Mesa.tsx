@@ -543,7 +543,7 @@ export default function Mesa() {
             </Card>
           )}
 
-          <div className="overflow-x-auto rounded-md border">
+          <div className="overflow-x-auto scroll-shadow-x rounded-md border">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-muted-foreground">
                 <tr>

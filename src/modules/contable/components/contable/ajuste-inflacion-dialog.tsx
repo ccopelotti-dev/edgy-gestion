@@ -107,7 +107,7 @@ export function AjusteInflacionDialog({
             <p className="text-sm text-destructive">{preview.error}</p>
           ) : (
             <>
-              <div className="overflow-x-auto rounded-lg border max-h-56 overflow-y-auto">
+              <div className="overflow-x-auto scroll-shadow-x rounded-lg border max-h-56 overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50 text-left text-muted-foreground">

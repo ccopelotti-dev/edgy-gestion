@@ -254,7 +254,7 @@ export default function Cotizaciones() {
           description="Cree una cotizacion para solicitar precios a sus proveedores."
         />
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">
@@ -362,7 +362,7 @@ export default function Cotizaciones() {
                         <td colSpan={7} className="bg-gray-50/50 px-8 py-4">
                           {/* Items */}
                           <h4 className="font-semibold text-gray-900 text-sm mb-2">Items</h4>
-                          <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
+                          <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x mb-3">
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="bg-gray-50 text-gray-600">

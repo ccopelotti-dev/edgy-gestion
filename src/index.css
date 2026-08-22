@@ -155,3 +155,26 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Fase 45l (22/08, a pedido de Carlos): "scroll shadow" para tablas con
+   overflow-x-auto -- en mobile las tablas anchas se pueden deslizar
+   pero eso no se nota a simple vista (no hay scrollbar visible), así
+   que quedaba oculto que había más columnas (ej. "Acciones") para el
+   costado. Truco CSS puro (sin JS): dos gradientes de sombra pegados
+   al viewport (background-attachment: scroll) más dos gradientes del
+   color de fondo pegados al contenido (background-attachment: local)
+   que tapan la sombra del lado que ya no tiene más para scrollear --
+   el resultado es que la sombra aparece y desaparece sola según la
+   posición del scroll, sin escuchar ningún evento. Asume fondo blanco
+   (el mismo que ya usan bg-white/bg-card en las tablas del sistema). */
+.scroll-shadow-x {
+  background-image:
+    linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to left, white 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to right, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0));
+  background-position: left, right, left, right;
+  background-repeat: no-repeat;
+  background-size: 24px 100%, 24px 100%, 10px 100%, 10px 100%;
+  background-attachment: local, local, scroll, scroll;
+}

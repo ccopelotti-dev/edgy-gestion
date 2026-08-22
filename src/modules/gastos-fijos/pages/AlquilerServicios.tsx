@@ -87,7 +87,7 @@ export default function AlquilerServicios() {
       {gastos.length === 0 ? (
         <p className="text-muted-foreground text-sm">No hay gastos fijos cargados todavía.</p>
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto scroll-shadow-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">
