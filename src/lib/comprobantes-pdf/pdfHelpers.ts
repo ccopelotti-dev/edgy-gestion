@@ -201,6 +201,15 @@ export async function dibujarEncabezado(
   const marginX = 15
   const anchoBanda = 32
 
+  // Fase 47 (23/08, bug real reportado por Carlos -- Charcutería, color de
+  // marca #fbe6d5 un durazno/crema clarito): texto blanco fijo sobre la
+  // banda quedaba invisible con un colorMarca claro. Mismo criterio que ya
+  // usa dibujarEncabezadoConDatosFiscales (Fase 43c, caso Punto Tex) --
+  // luminancia > 0.5 = fondo claro, va texto oscuro.
+  const fondoClaro = luminanciaRelativa(color) > 0.5
+  const colorTitulo = fondoClaro ? '#2b2320' : '#ffffff'
+  const colorTexto = fondoClaro ? '#5c5450' : '#f0ece6'
+
   doc.setFillColor(color)
   doc.rect(0, 0, pageWidth, anchoBanda, 'F')
 
@@ -227,12 +236,13 @@ export async function dibujarEncabezado(
     }
   }
 
-  doc.setTextColor('#ffffff')
+  doc.setTextColor(colorTitulo)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(14)
   doc.text(empresa.nombre, textoX, 14)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
+  doc.setTextColor(colorTexto)
   let yEmpresa = 20
   if (empresa.cuit) {
     doc.text(`CUIT ${empresa.cuit}`, textoX, yEmpresa)
@@ -242,11 +252,13 @@ export async function dibujarEncabezado(
     doc.text(empresa.direccion, textoX, yEmpresa)
   }
 
+  doc.setTextColor(colorTitulo)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(13)
   doc.text(tituloDocumento, pageWidth - marginX, 14, { align: 'right' })
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
+  doc.setTextColor(colorTexto)
   if (numero) {
     doc.text(`N.º ${numero}`, pageWidth - marginX, 20, { align: 'right' })
     doc.text(fecha, pageWidth - marginX, 26, { align: 'right' })

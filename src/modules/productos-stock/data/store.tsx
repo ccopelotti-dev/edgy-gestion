@@ -2991,6 +2991,22 @@ export async function crearProduccionBorrador(
     })
   }
 
+  // Salvaguarda (23/08, tras un caso real de Charcutería donde un lote
+  // quedó guardado con insumos_imputados: [] pese a que la fórmula tenía
+  // 15 líneas de insumo -- causa no reproducible en el código, sospecha de
+  // bundle desactualizado durante la ventana de propagación del deploy,
+  // ver charla con Carlos). Nunca insertar un borrador "vacío" en silencio
+  // si la fórmula SÍ tiene líneas de insumo: mejor cortar acá con un error
+  // visible que dejar pasar un lote que, al Confirmar, no descontaría
+  // stock de ningún insumo pero sí sumaría el producto terminado.
+  if (insumosImputados.length === 0 && insumoIdsFormula.length > 0) {
+    return {
+      ok: false,
+      error:
+        'No se pudo calcular el detalle de insumos de este lote (la fórmula tiene líneas de insumo pero el cálculo dio vacío). Probá recargar la página y registrar de nuevo -- si vuelve a pasar, avisá a soporte.',
+    }
+  }
+
   const loteId = uid()
   const nuevaProduccion: Produccion = {
     id: loteId,
