@@ -805,6 +805,30 @@ export interface Formula {
 // que se ejecuta REGISTRAR_PRODUCCION se crea una fila acá, y los
 // movimientos de stock de ese lote comparten `origenId` con `Produccion.id`
 // (antes `origenId` era un uuid descartable que no apuntaba a nada real).
+/** Fase 47 (23/08, pedido de Carlos -- Charcutería): "Registrar producción"
+ * deja el lote en 'borrador' SIN tocar stock todavía; recién al "Confirmar"
+ * se descuentan los insumos y se suma el producto terminado -- mismo
+ * patrón que ya usan Recepción y Transferencias. 'anulada' queda reservado
+ * para un borrador descartado sin llegar a confirmarse (no se usa todavía
+ * desde la UI, pero evita otra migración el día que haga falta). Los lotes
+ * históricos (de antes de esta fase) nacieron ya confirmados -- el stock
+ * para ellos se movió con la lógica vieja, de una sola vez. */
+export type EstadoProduccion = 'borrador' | 'confirmada' | 'anulada'
+
+/** Fase 47: foto de un insumo imputado a un lote, tomada al crear el
+ * borrador (nombre y costo incluidos, no solo el id -- mismo criterio que
+ * LineaFormula.costoUnitario, para que el PDF y el descuento al confirmar
+ * no dependan de que la fórmula/insumo no haya cambiado mientras tanto).
+ * `cantidad` y `unidad` están en la unidad NATIVA del insumo (ya
+ * convertida desde la unidad de la línea de fórmula). */
+export interface InsumoImputado {
+  insumoId: string
+  nombre: string
+  cantidad: number
+  unidad: UnidadMedida
+  costoUnitario: number
+}
+
 export interface Produccion {
   id: string
   formulaId: string
@@ -824,6 +848,10 @@ export interface Produccion {
    * pedido se considera cerrado cuando se factura el presupuesto vinculado
    * a la ficha. */
   fichaItemId?: string
+  /** Fase 47: ver EstadoProduccion. */
+  estado: EstadoProduccion
+  /** Fase 47: ver InsumoImputado. Se congela al crear el borrador. */
+  insumosImputados: InsumoImputado[]
 }
 
 // ─── Stock ──────────────────────────────────────────────────────────────────────

@@ -84,6 +84,8 @@ import type {
   Formula,
   LineaFormula,
   Produccion,
+  EstadoProduccion,
+  InsumoImputado,
   MovimientoStock,
   Recepcion,
   LineaRecepcion,
@@ -243,6 +245,13 @@ type Action =
         recepcion?: Recepcion
         registroControl?: RegistroControl
       }
+    }
+  // Fase 47: borrar un borrador de Producción de la UI -- solo se dispara
+  // después de que eliminarProduccionBorrador ya confirmó el borrado real
+  // en Supabase (nunca tocó stock, no hay nada más que sincronizar).
+  | {
+      type: 'CONFIRM_DELETE_PRODUCCION'
+      payload: string
     }
   // Cierre de la fase (17/08, último sector de menor volumen): mismo
   // criterio confirmado, ahora para Rubros/SubRubros, Marcas, Listas de
@@ -549,7 +558,15 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
             : state.insumos,
         movimientos:
           movimientos && movimientos.length ? [...state.movimientos, ...movimientos] : state.movimientos,
-        producciones: produccion ? [...state.producciones, produccion] : state.producciones,
+        // Fase 47: un lote ahora puede pasar por acá dos veces (se agrega
+        // como 'borrador' al Registrar, se actualiza a 'confirmada' al
+        // Confirmar) -- si ya existe por id, lo reemplaza en vez de
+        // duplicarlo. Mismo criterio que ya usa `recepciones` acá abajo.
+        producciones: produccion
+          ? state.producciones.some((p) => p.id === produccion.id)
+            ? state.producciones.map((p) => (p.id === produccion.id ? produccion : p))
+            : [...state.producciones, produccion]
+          : state.producciones,
         recepciones: recepcion
           ? state.recepciones.some((r) => r.id === recepcion.id)
             ? state.recepciones.map((r) => (r.id === recepcion.id ? recepcion : r))
@@ -560,6 +577,12 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
           : state.registrosControl,
       }
     }
+
+    case 'CONFIRM_DELETE_PRODUCCION':
+      return {
+        ...state,
+        producciones: state.producciones.filter((p) => p.id !== action.payload),
+      }
 
     case 'CONFIRM_RUBRO': {
       const existe = state.rubros.some((r) => r.id === action.payload.id)
@@ -675,6 +698,12 @@ function reducer(state: ProductosStockState, action: Action): ProductosStockStat
         fecha,
         notas,
         createdAt: todayISO(),
+        // Fase 47: este case del reducer es el camino viejo (dispatch
+        // optimista), reemplazado por registrarProduccionConfirmada/
+        // crearProduccionBorrador -- ver comentario de esa función. No
+        // está enchufado a ninguna UI actual, pero se mantiene tipado.
+        estado: 'confirmada',
+        insumosImputados: [],
       }
       const nuevosMovimientos: MovimientoStock[] = []
       let insumos = state.insumos
@@ -1378,6 +1407,9 @@ function produccionToRow(p: Produccion, clienteId: string) {
     notas: p.notas || null,
     // Fase 41: ver comentario en types/index.ts (Produccion.fichaItemId).
     ficha_item_id: p.fichaItemId || null,
+    // Fase 47: ver EstadoProduccion/InsumoImputado en types/index.ts.
+    estado: p.estado,
+    insumos_imputados: p.insumosImputados,
   }
 }
 
@@ -1712,6 +1744,7 @@ async function syncToSupabase(
     case 'CONFIRM_DELETE_INSUMO':
       return
     case 'CONFIRM_STOCK_SYNC':
+    case 'CONFIRM_DELETE_PRODUCCION':
     case 'CONFIRM_RUBRO':
     case 'CONFIRM_DELETE_RUBRO':
     case 'CONFIRM_SUBRUBRO':
@@ -2252,6 +2285,8 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     notas: r.notas ?? undefined,
     createdAt: (r.created_at ?? '').slice(0, 10),
     fichaItemId: r.ficha_item_id ?? undefined,
+    estado: (r.estado ?? 'confirmada') as EstadoProduccion,
+    insumosImputados: (r.insumos_imputados ?? []) as InsumoImputado[],
   }))
 
   const movimientos: MovimientoStock[] = (movimientosRes.data ?? []).map((r: any) => ({
@@ -2845,7 +2880,17 @@ export async function recibirStockConfirmado(
  * del producto terminado. `formula` viene del estado local (ya cargado en
  * Produccion.tsx) porque sus líneas no cambian entre que se lee y se
  * ejecuta el lote -- evita una vuelta extra a la base solo para releerla. */
-export async function registrarProduccionConfirmada(
+/**
+ * Fase 47 (23/08): fase de CÁLCULO solamente -- arma el detalle de qué
+ * insumos y cuánto de cada uno consume este lote (ya convertido a la
+ * unidad nativa de cada insumo) e inserta el lote en `producciones` como
+ * 'borrador', SIN tocar stock todavía. Comparte toda la lógica de
+ * conversión de unidades que antes vivía inline en
+ * registrarProduccionConfirmada -- ver ese comentario histórico más abajo
+ * para el porqué de la conversión (evita el bug real de "800 gramo
+ * descontando 800 kg").
+ */
+export async function crearProduccionBorrador(
   params: {
     formulaId: string
     factor: number
@@ -2867,12 +2912,7 @@ export async function registrarProduccionConfirmada(
   },
   formula: Formula,
   clienteId: string,
-): Promise<ResultadoGuardado<{
-  produccion: Produccion
-  productos: Producto[]
-  insumos: Insumo[]
-  movimientos: MovimientoStock[]
-}>> {
+): Promise<ResultadoGuardado<{ produccion: Produccion }>> {
   const { formulaId, factor, cantidadRealProducida, fecha, notas, fichaItem } = params
 
   const esAMedida = Boolean(fichaItem)
@@ -2890,6 +2930,67 @@ export async function registrarProduccionConfirmada(
   // depósito -- ahí el escalado ya lo cubre `factor`.
   const multiplicadorCantidadItem = esAMedida ? fichaItem?.cantidadItem || 1 : 1
 
+  // La unidad de cada línea de fórmula es independiente de la unidad nativa
+  // del insumo (ej. una receta puede cargarse "en gramos" para precisión
+  // aunque el insumo se compre y stockee "por kg"). Sin convertir acá, se
+  // descontaría del stock real la cantidad cruda de la línea en la unidad
+  // equivocada (bug real: 800 "gramo" descontando 800 kg de stock). Se
+  // traen las unidades nativas + nombre + costo de los insumos de la
+  // fórmula en un solo batch antes del loop -- nombre y costo quedan
+  // congelados en el snapshot (InsumoImputado), no solo la unidad.
+  const insumoIdsFormula = formula.lineas
+    .filter((l) => l.tipo === 'insumo' && l.insumoId)
+    .map((l) => l.insumoId as string)
+  const datosInsumos = new Map<string, { unidad: UnidadMedida; anchoRollo?: number; nombre: string; costo: number }>()
+  if (insumoIdsFormula.length > 0) {
+    const { data: insumosRows, error: errInsumos } = await supabase
+      .from('insumos')
+      .select('id, unidad, ancho_rollo, nombre, costo')
+      .in('id', insumoIdsFormula)
+    if (errInsumos) {
+      return { ok: false, error: `No se pudieron verificar las unidades de los insumos: ${errInsumos.message}` }
+    }
+    for (const r of insumosRows ?? []) {
+      datosInsumos.set(r.id, {
+        unidad: r.unidad as UnidadMedida,
+        anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
+        nombre: r.nombre as string,
+        costo: Number(r.costo ?? 0),
+      })
+    }
+  }
+
+  const insumosImputados: InsumoImputado[] = []
+  for (const linea of formula.lineas) {
+    if (linea.tipo !== 'insumo' || !linea.insumoId) continue
+
+    // Modo a medida: la cantidad "cruda" de la línea sale de los paños del
+    // pedido (m2/ml/unidad), no del número tipeado en la fórmula -- ver
+    // calcularCantidadesAMedida. Modo depósito: sigue siendo el número
+    // tipeado tal cual, sin cambios de comportamiento.
+    const cantidadBase = cantidadesAMedida ? cantidadesAMedida.get(linea.id) ?? 0 : linea.cantidad
+
+    const datos = datosInsumos.get(linea.insumoId)
+    const cantidadConvertida = datos
+      ? convertirCantidad(cantidadBase, linea.unidad, datos.unidad, datos.anchoRollo)
+      : cantidadBase
+    if (cantidadConvertida === null) {
+      return {
+        ok: false,
+        error: `La línea "${linea.descripcion}" está cargada en ${unidadLabel(linea.unidad)}, una unidad incompatible con la del insumo (${unidadLabel(datos!.unidad)}). Corregí la unidad de esa línea en la fórmula antes de producir.`,
+      }
+    }
+    const cantidadConsumida = cantidadConvertida * factorEfectivo * multiplicadorCantidadItem
+
+    insumosImputados.push({
+      insumoId: linea.insumoId,
+      nombre: datos?.nombre ?? linea.descripcion,
+      cantidad: cantidadConsumida,
+      unidad: datos?.unidad ?? linea.unidad,
+      costoUnitario: datos?.costo ?? linea.costoUnitario,
+    })
+  }
+
   const loteId = uid()
   const nuevaProduccion: Produccion = {
     id: loteId,
@@ -2902,6 +3003,8 @@ export async function registrarProduccionConfirmada(
     notas,
     createdAt: todayISO(),
     fichaItemId: fichaItem?.id,
+    estado: 'borrador',
+    insumosImputados,
   }
 
   const { error: errProduccion } = await supabase
@@ -2911,70 +3014,48 @@ export async function registrarProduccionConfirmada(
     return { ok: false, error: `No se pudo registrar el lote de producción: ${errProduccion.message}` }
   }
 
+  return { ok: true, data: { produccion: nuevaProduccion } }
+}
+
+/**
+ * Fase 47: fase de EJECUCIÓN -- toma un lote ya guardado como 'borrador'
+ * (con su detalle de insumos ya calculado, ver InsumoImputado) y recién
+ * acá descuenta stock de cada insumo, suma stock del producto terminado
+ * (modo depósito) y deja el Kardex (movimientos_stock). Es la misma lógica
+ * de mutación que antes corría inline en registrarProduccionConfirmada,
+ * separada para poder llamarla en dos momentos distintos (de una, vía
+ * registrarProduccionConfirmada más abajo, o más tarde a mano vía
+ * confirmarProduccion). No vuelve a leer la Fórmula -- todo lo que hace
+ * falta ya está congelado en `produccion.insumosImputados`.
+ */
+async function ejecutarConsumoYConfirmar(
+  produccion: Produccion,
+  clienteId: string,
+): Promise<ResultadoGuardado<{
+  produccion: Produccion
+  productos: Producto[]
+  insumos: Insumo[]
+  movimientos: MovimientoStock[]
+}>> {
+  const { id: loteId, notas, fecha, fichaItemId } = produccion
+  const esAMedida = Boolean(fichaItemId)
+
   const movimientos: MovimientoStock[] = []
   const productoIdsAfectados = new Set<string>()
   const insumoIdsAfectados = new Set<string>()
   let puntoVentaId: string | null = null
 
-  // La unidad de cada línea de fórmula es independiente de la unidad nativa
-  // del insumo (ej. una receta puede cargarse "en gramos" para precisión
-  // aunque el insumo se compre y stockee "por kg"). Sin convertir acá, se
-  // descontaría del stock real la cantidad cruda de la línea en la unidad
-  // equivocada (bug real: 800 "gramo" descontando 800 kg de stock). Se
-  // traen las unidades nativas de los insumos de la fórmula en un solo
-  // batch antes del loop.
-  const insumoIdsFormula = formula.lineas
-    .filter((l) => l.tipo === 'insumo' && l.insumoId)
-    .map((l) => l.insumoId as string)
-  const unidadesNativas = new Map<string, UnidadMedida>()
-  // Fase 41.7: ancho de rollo por insumo -- habilita convertir metro↔m2
-  // para telas (ver comentario de convertirCantidad en types/index.ts).
-  const anchosRollo = new Map<string, number | undefined>()
-  if (insumoIdsFormula.length > 0) {
-    const { data: insumosRows, error: errInsumos } = await supabase
-      .from('insumos')
-      .select('id, unidad, ancho_rollo')
-      .in('id', insumoIdsFormula)
-    if (errInsumos) {
-      return { ok: false, error: `No se pudieron verificar las unidades de los insumos: ${errInsumos.message}` }
-    }
-    for (const r of insumosRows ?? []) {
-      unidadesNativas.set(r.id, r.unidad as UnidadMedida)
-      anchosRollo.set(r.id, r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined)
-    }
-  }
-
-  for (const linea of formula.lineas) {
-    if (linea.tipo !== 'insumo' || !linea.insumoId) continue
-
-    // Modo a medida: la cantidad "cruda" de la línea sale de los paños del
-    // pedido (m2/ml/unidad), no del número tipeado en la fórmula -- ver
-    // calcularCantidadesAMedida. Modo depósito: sigue siendo el número
-    // tipeado tal cual, sin cambios de comportamiento.
-    const cantidadBase = cantidadesAMedida ? cantidadesAMedida.get(linea.id) ?? 0 : linea.cantidad
-
-    const unidadNativa = unidadesNativas.get(linea.insumoId)
-    const cantidadConvertida = unidadNativa
-      ? convertirCantidad(cantidadBase, linea.unidad, unidadNativa, anchosRollo.get(linea.insumoId))
-      : cantidadBase
-    if (cantidadConvertida === null) {
-      return {
-        ok: false,
-        error: `La línea "${linea.descripcion}" está cargada en ${unidadLabel(linea.unidad)}, una unidad incompatible con la del insumo (${unidadLabel(unidadNativa!)}). Corregí la unidad de esa línea en la fórmula antes de producir.`,
-      }
-    }
-    const cantidadConsumida = cantidadConvertida * factorEfectivo * multiplicadorCantidadItem
-
+  for (const imputado of produccion.insumosImputados) {
     const ajuste = await aplicarAjusteAtomico({
       itemTipo: 'insumo',
-      itemId: linea.insumoId,
-      delta: -cantidadConsumida,
+      itemId: imputado.insumoId,
+      delta: -imputado.cantidad,
       clienteId,
     })
     if (!ajuste.ok) {
       return {
         ok: false,
-        error: `El lote quedó registrado, pero falló el descuento de un insumo de la fórmula: ${ajuste.error}. Revisá el stock manualmente antes de seguir produciendo -- puede haber quedado a mitad de camino.`,
+        error: `El lote quedó como borrador, pero falló el descuento de "${imputado.nombre}": ${ajuste.error}. Revisá el stock manualmente antes de reintentar confirmar -- puede haber quedado a mitad de camino.`,
       }
     }
 
@@ -2989,7 +3070,7 @@ export async function registrarProduccionConfirmada(
       tipo: 'egreso',
       itemTipo: itemTipoEfectivo,
       itemId: itemIdEfectivo,
-      cantidad: cantidadConsumida,
+      cantidad: imputado.cantidad,
       nota: notas,
       fecha,
       origen: 'formula',
@@ -3006,14 +3087,14 @@ export async function registrarProduccionConfirmada(
   if (!esAMedida) {
     const ajusteProducto = await aplicarAjusteAtomico({
       itemTipo: 'producto',
-      itemId: formula.productoId,
-      delta: cantidadRealProducida,
+      itemId: produccion.productoId,
+      delta: produccion.cantidadRealProducida,
       clienteId,
     })
     if (!ajusteProducto.ok) {
       return {
         ok: false,
-        error: `El lote se registró y se descontaron los insumos, pero falló sumar el stock del producto terminado: ${ajusteProducto.error}. Revisá el stock manualmente.`,
+        error: `Se descontaron los insumos, pero falló sumar el stock del producto terminado: ${ajusteProducto.error}. Revisá el stock manualmente.`,
       }
     }
     productoIdsAfectados.add(ajusteProducto.data.itemIdEfectivo)
@@ -3024,8 +3105,8 @@ export async function registrarProduccionConfirmada(
       id: uid(),
       tipo: 'ingreso',
       itemTipo: 'producto',
-      itemId: formula.productoId,
-      cantidad: cantidadRealProducida,
+      itemId: produccion.productoId,
+      cantidad: produccion.cantidadRealProducida,
       nota: notas,
       fecha,
       origen: 'formula',
@@ -3042,8 +3123,19 @@ export async function registrarProduccionConfirmada(
     if (errMovs) {
       return {
         ok: false,
-        error: `El lote se registró y el stock se actualizó, pero no se pudieron guardar los movimientos del Kardex: ${errMovs.message}. El historial puede quedar incompleto.`,
+        error: `El stock se actualizó, pero no se pudieron guardar los movimientos del Kardex: ${errMovs.message}. El historial puede quedar incompleto.`,
       }
+    }
+  }
+
+  const { error: errEstado } = await supabase
+    .from('producciones')
+    .update({ estado: 'confirmada' })
+    .eq('id', loteId)
+  if (errEstado) {
+    return {
+      ok: false,
+      error: `El stock ya se movió, pero no se pudo marcar el lote como confirmado: ${errEstado.message}. Avisá antes de seguir -- el lote puede figurar como borrador aunque el stock ya esté descontado.`,
     }
   }
 
@@ -3057,11 +3149,109 @@ export async function registrarProduccionConfirmada(
   // genérico), avanza el estado de esa Orden a 'terminado' -- así el
   // vendedor no tiene que ir a Órdenes a mano después de producir. Ver
   // intentarCerrarOrdenAMedida más abajo para el criterio exacto.
-  if (fichaItem) {
-    await intentarCerrarOrdenAMedida(fichaItem.id, clienteId)
+  if (fichaItemId) {
+    await intentarCerrarOrdenAMedida(fichaItemId, clienteId)
   }
 
-  return { ok: true, data: { produccion: nuevaProduccion, productos, insumos, movimientos } }
+  return {
+    ok: true,
+    data: { produccion: { ...produccion, estado: 'confirmada' }, productos, insumos, movimientos },
+  }
+}
+
+/**
+ * Fase 47: confirma un lote que quedó guardado como 'borrador' -- lo relee
+ * de la base (por si se abrió esta pantalla en otra pestaña/dispositivo) y
+ * ejecuta el consumo real. Es el botón "Confirmar producción" de la UI.
+ */
+export async function confirmarProduccion(
+  loteId: string,
+  clienteId: string,
+): Promise<ResultadoGuardado<{
+  produccion: Produccion
+  productos: Producto[]
+  insumos: Insumo[]
+  movimientos: MovimientoStock[]
+}>> {
+  const { data: row, error: errFetch } = await supabase
+    .from('producciones')
+    .select('*')
+    .eq('id', loteId)
+    .eq('cliente_id', clienteId)
+    .single()
+  if (errFetch || !row) {
+    return { ok: false, error: `No se encontró el lote a confirmar: ${errFetch?.message ?? 'no existe'}` }
+  }
+  if (row.estado !== 'borrador') {
+    return { ok: false, error: `Este lote ya está "${row.estado}" -- no hace falta (ni se puede) confirmarlo de nuevo.` }
+  }
+
+  const produccion: Produccion = {
+    id: row.id,
+    formulaId: row.formula_id,
+    productoId: row.producto_id,
+    factor: Number(row.factor),
+    cantidadTeorica: Number(row.cantidad_teorica),
+    cantidadRealProducida: Number(row.cantidad_real_producida),
+    fecha: row.fecha,
+    notas: row.notas ?? undefined,
+    createdAt: (row.created_at ?? '').slice(0, 10),
+    fichaItemId: row.ficha_item_id ?? undefined,
+    estado: row.estado,
+    insumosImputados: (row.insumos_imputados ?? []) as InsumoImputado[],
+  }
+
+  return ejecutarConsumoYConfirmar(produccion, clienteId)
+}
+
+/**
+ * Fase 47: borra un borrador que no se va a confirmar. Solo funciona sobre
+ * 'borrador' -- nunca tocó stock, así que no hay nada que revertir. Un
+ * lote 'confirmada' NO se puede borrar por acá (tiene movimientos de stock
+ * reales asociados; anularlo es un problema aparte, no de esta fase).
+ */
+export async function eliminarProduccionBorrador(
+  loteId: string,
+  clienteId: string,
+): Promise<ResultadoGuardado<null>> {
+  const { error, count } = await supabase
+    .from('producciones')
+    .delete({ count: 'exact' })
+    .eq('id', loteId)
+    .eq('cliente_id', clienteId)
+    .eq('estado', 'borrador')
+  if (error) {
+    return { ok: false, error: `No se pudo eliminar el borrador: ${error.message}` }
+  }
+  if (!count) {
+    return { ok: false, error: 'El lote no existe o ya no está en borrador (puede que ya se haya confirmado).' }
+  }
+  return { ok: true, data: null }
+}
+
+/**
+ * Fase 9 (cierre) / Fase 47 (23/08): ejecuta una Fórmula como un lote real
+ * de punta a punta -- crea el borrador y lo confirma en el mismo llamado.
+ * Se mantiene con esta firma para el flujo de "Producción a medida" (Fase
+ * 41), que sigue queriendo todo en un solo paso (el operador ya vio el
+ * preview de cantidades en pantalla antes de tocar el botón, no hace falta
+ * un borrador intermedio ahí). El flujo de depósito (Producción, botón
+ * "Registrar producción") pasó a usar crearProduccionBorrador +
+ * confirmarProduccion por separado -- ver Produccion.tsx.
+ */
+export async function registrarProduccionConfirmada(
+  params: Parameters<typeof crearProduccionBorrador>[0],
+  formula: Formula,
+  clienteId: string,
+): Promise<ResultadoGuardado<{
+  produccion: Produccion
+  productos: Producto[]
+  insumos: Insumo[]
+  movimientos: MovimientoStock[]
+}>> {
+  const borrador = await crearProduccionBorrador(params, formula, clienteId)
+  if (!borrador.ok) return borrador
+  return ejecutarConsumoYConfirmar(borrador.data.produccion, clienteId)
 }
 
 /**

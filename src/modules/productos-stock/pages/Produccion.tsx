@@ -19,12 +19,15 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle, ClipboardCheck, ShoppingCart } from 'lucide-react'
+import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle, ClipboardCheck, ShoppingCart, FileDown, CheckCircle2, Trash2, FileClock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   useProductosStock,
   registrarProduccionConfirmada,
+  crearProduccionBorrador,
+  confirmarProduccion,
+  eliminarProduccionBorrador,
   fetchPedidosAMedidaPendientes,
   type PedidoAMedidaPendiente,
 } from '../data/store'
@@ -38,8 +41,11 @@ import {
   calcularCantidadesAMedida,
   calcularNecesidadInsumos,
   type InsumoParaNecesidad,
+  type Produccion,
+  type InsumoImputado,
 } from '../types'
 import { guardarColaOcBorrador, type OcBorrador } from '@/modules/compras/types'
+import { generarInsumosProduccionPdf } from '../lib/generarInsumosProduccionPdf'
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -74,6 +80,18 @@ export default function Produccion() {
   const [notas, setNotas] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
+  // Fase 47 (23/08, pedido de Carlos -- Charcutería): "Registrar
+  // producción" ahora deja el lote como 'borrador' (sin tocar stock) --
+  // este es el borrador recién creado, que se muestra con sus Acciones
+  // (Confirmar/Descargar PDF/Eliminar) hasta que se confirme o se
+  // descarte. null = no hay ningún borrador "activo" en pantalla ahora
+  // mismo (podés seguir viendo/actuando sobre cualquier otro borrador
+  // directo desde la tabla de Historial, más abajo).
+  const [loteBorrador, setLoteBorrador] = useState<Produccion | null>(null)
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
+  const [eliminandoId, setEliminandoId] = useState<string | null>(null)
+  const [descargandoId, setDescargandoId] = useState<string | null>(null)
+  const [errorAccionLote, setErrorAccionLote] = useState('')
 
   const formulaSeleccionada = useMemo(
     () => state.formulas.find((f) => f.productoId === selectedProductoId) ?? null,
@@ -226,7 +244,10 @@ export default function Produccion() {
 
     setErrorGuardado('')
     setGuardando(true)
-    const res = await registrarProduccionConfirmada(
+    // Fase 47: ya no ejecuta el consumo de una -- crea el lote como
+    // 'borrador' (sin tocar stock) y lo deja acá mismo, con sus Acciones,
+    // para confirmar (recién ahí se mueve stock) o descartar.
+    const res = await crearProduccionBorrador(
       {
         formulaId: formulaSeleccionada.id,
         factor,
@@ -242,7 +263,8 @@ export default function Produccion() {
       setErrorGuardado(res.error)
       return
     }
-    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: { produccion: res.data.produccion } })
+    setLoteBorrador(res.data.produccion)
 
     setSelectedProductoId('')
     setFactor(1)
@@ -252,6 +274,119 @@ export default function Produccion() {
     setModoUnidad('primaria')
     setFecha(todayISO())
     setNotas('')
+  }
+
+  // Fase 47: "Confirmar producción" -- recién acá se descuentan los
+  // insumos y se suma el producto terminado. Sirve tanto para el borrador
+  // recién creado en este panel como para cualquier borrador viejo que se
+  // confirme directo desde la tabla de Historial (mismo botón/lógica).
+  async function handleConfirmarLote(loteId: string) {
+    if (!cliente?.id || confirmandoId) return
+    setErrorAccionLote('')
+    setConfirmandoId(loteId)
+    const res = await confirmarProduccion(loteId, cliente.id)
+    setConfirmandoId(null)
+    if (!res.ok) {
+      setErrorAccionLote(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
+    if (loteBorrador?.id === loteId) setLoteBorrador(null)
+  }
+
+  // Fase 47: descarta un borrador que no se va a confirmar -- nunca tocó
+  // stock, no hay nada que revertir.
+  async function handleEliminarBorrador(loteId: string) {
+    if (!cliente?.id || eliminandoId) return
+    setErrorAccionLote('')
+    setEliminandoId(loteId)
+    const res = await eliminarProduccionBorrador(loteId, cliente.id)
+    setEliminandoId(null)
+    if (!res.ok) {
+      setErrorAccionLote(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_DELETE_PRODUCCION', payload: loteId })
+    if (loteBorrador?.id === loteId) setLoteBorrador(null)
+  }
+
+  // Fase 47: PDF de insumos imputados a un lote YA guardado (borrador o
+  // confirmada) -- usa el snapshot congelado en insumosImputados, nunca
+  // recalcula de la fórmula.
+  async function handleDescargarPdfLote(p: Produccion) {
+    if (!cliente || descargandoId) return
+    setDescargandoId(p.id)
+    try {
+      const producto = productosMap.get(p.productoId)
+      const formula = formulasMap.get(p.formulaId)
+      await generarInsumosProduccionPdf(
+        {
+          nombre: cliente.nombre,
+          cuit: cliente.cuit,
+          direccion: cliente.direccion,
+          telefono: cliente.telefono,
+          logoUrl: cliente.logo_url,
+          colorMarca: cliente.color_marca,
+        },
+        {
+          productoNombre: producto?.nombre ?? '(producto eliminado)',
+          factor: p.factor,
+          cantidadTeorica: p.cantidadTeorica,
+          cantidadRealProducida: p.cantidadRealProducida,
+          unidadProducida: formula?.unidadProducida ?? 'unidad',
+          fecha: p.fecha,
+          notas: p.notas,
+          estado: p.estado,
+          insumosImputados: p.insumosImputados,
+        },
+        `Produccion_${(producto?.nombre ?? 'lote').replace(/\s+/g, '_')}_${p.fecha}`,
+      )
+    } finally {
+      setDescargandoId(null)
+    }
+  }
+
+  // Fase 47: PDF "preview" ANTES de guardar nada -- se arma directo desde
+  // el chequeo de disponibilidad que ya está en pantalla (necesidadesOrdenadas),
+  // para poder bajar/imprimir la lista de insumos a procesar sin tener que
+  // registrar el lote todavía.
+  async function handleDescargarPreviewPdf() {
+    if (!cliente || !formulaSeleccionada || descargandoId) return
+    setDescargandoId('preview')
+    try {
+      const insumosImputados: InsumoImputado[] = necesidadesOrdenadas.map((n) => ({
+        insumoId: n.insumoId,
+        nombre: n.nombre,
+        cantidad: n.cantidadNecesaria,
+        unidad: n.unidadNativa,
+        costoUnitario: n.costoUnitario,
+      }))
+      const productoNombre = productosConFormula.find((p) => p.id === selectedProductoId)?.nombre ?? ''
+      await generarInsumosProduccionPdf(
+        {
+          nombre: cliente.nombre,
+          cuit: cliente.cuit,
+          direccion: cliente.direccion,
+          telefono: cliente.telefono,
+          logoUrl: cliente.logo_url,
+          colorMarca: cliente.color_marca,
+        },
+        {
+          productoNombre,
+          factor,
+          cantidadTeorica,
+          cantidadRealProducida: cantidadRealEnUnidadProducida,
+          unidadProducida: formulaSeleccionada.unidadProducida,
+          fecha,
+          notas: notas || undefined,
+          estado: 'borrador',
+          insumosImputados,
+        },
+        `Produccion_${productoNombre.replace(/\s+/g, '_')}_${fecha}_preview`,
+      )
+    } finally {
+      setDescargandoId(null)
+    }
   }
 
   // ── Pedidos a medida (Fase 41) ────────────────────────────────────────
@@ -600,6 +735,22 @@ export default function Produccion() {
                           Faltan {faltantes.length} insumo{faltantes.length === 1 ? '' : 's'}
                         </span>
                       )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-xs"
+                        onClick={handleDescargarPreviewPdf}
+                        disabled={descargandoId === 'preview'}
+                        title="Descargar el listado completo de insumos a procesar (todos, no solo los visibles)"
+                      >
+                        {descargandoId === 'preview' ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <FileDown className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        Descargar listado
+                      </Button>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
                       <table className="w-full text-xs">
@@ -670,6 +821,72 @@ export default function Produccion() {
               </Button>
             </div>
           </>
+        )}
+
+        {/* Fase 47: Acciones del borrador recién creado -- el stock TODAVÍA
+            no se movió, queda a la espera de Confirmar (o Eliminar). */}
+        {loteBorrador && (
+          <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900 px-3 py-3">
+            <div className="flex items-center gap-2 mb-1">
+              <FileClock className="h-4 w-4 text-amber-600" />
+              <span className="text-sm font-semibold text-amber-800 dark:text-amber-400">
+                Lote registrado como borrador -- el stock todavía no se movió
+              </span>
+            </div>
+            <p className="text-xs text-amber-700/80 dark:text-amber-400/70 mb-3">
+              {productosMap.get(loteBorrador.productoId)?.nombre ?? 'Producto'} · Factor{' '}
+              {loteBorrador.factor} · {formatDate(loteBorrador.fecha)}. Descontá los insumos y
+              sumá el producto terminado recién cuando lo confirmes -- o eliminalo si fue de
+              prueba.
+            </p>
+            {errorAccionLote && (
+              <p className="text-xs text-red-600 mb-2">{errorAccionLote}</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handleConfirmarLote(loteBorrador.id)}
+                disabled={confirmandoId === loteBorrador.id}
+              >
+                {confirmandoId === loteBorrador.id ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Confirmar producción
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleDescargarPdfLote(loteBorrador)}
+                disabled={descargandoId === loteBorrador.id}
+              >
+                {descargandoId === loteBorrador.id ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <FileDown className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Descargar PDF
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="text-red-600 hover:text-red-700"
+                onClick={() => handleEliminarBorrador(loteBorrador.id)}
+                disabled={eliminandoId === loteBorrador.id}
+              >
+                {eliminandoId === loteBorrador.id ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Eliminar borrador
+              </Button>
+            </div>
+          </div>
         )}
       </div>
 
@@ -843,6 +1060,8 @@ export default function Produccion() {
                 <th className="px-4 py-3 font-medium text-right">Teórico</th>
                 <th className="px-4 py-3 font-medium text-right">Real producido</th>
                 <th className="px-4 py-3 font-medium">Notas</th>
+                <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3 font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -850,6 +1069,7 @@ export default function Produccion() {
                 const producto = productosMap.get(p.productoId)
                 const formula = formulasMap.get(p.formulaId)
                 const unidad = formula ? unidadAbrev(formula.unidadProducida) : ''
+                const esBorrador = p.estado === 'borrador'
                 return (
                   <tr key={p.id} className="border-b last:border-0">
                     <td className="px-4 py-3 tabular-nums">{formatDate(p.fecha)}</td>
@@ -868,11 +1088,81 @@ export default function Produccion() {
                       ) : null}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{p.notas || '-'}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={cn(
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+                          esBorrador
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400'
+                            : p.estado === 'anulada'
+                              ? 'bg-gray-100 text-gray-500'
+                              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400',
+                        )}
+                      >
+                        {esBorrador ? 'Borrador' : p.estado === 'anulada' ? 'Anulada' : 'Confirmada'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        {esBorrador && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-emerald-600 hover:text-emerald-700"
+                            title="Confirmar producción (descuenta insumos y suma el producto)"
+                            onClick={() => handleConfirmarLote(p.id)}
+                            disabled={confirmandoId === p.id}
+                          >
+                            {confirmandoId === p.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          title="Descargar PDF de insumos imputados"
+                          onClick={() => handleDescargarPdfLote(p)}
+                          disabled={descargandoId === p.id}
+                        >
+                          {descargandoId === p.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <FileDown className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                        {esBorrador && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-red-600"
+                            title="Eliminar borrador (no tocó stock)"
+                            onClick={() => handleEliminarBorrador(p.id)}
+                            disabled={eliminandoId === p.id}
+                          >
+                            {eliminandoId === p.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
+        )}
+        {errorAccionLote && (
+          <div className="px-4 py-2 border-t text-xs text-red-600">{errorAccionLote}</div>
         )}
       </div>
     </div>
