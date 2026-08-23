@@ -9,6 +9,7 @@
 import { jsPDF } from 'jspdf'
 import {
   type EmpresaParaPdf,
+  colorLegibleSobreBlanco,
   dibujarEncabezado,
   dibujarPie,
   imprimirOGuardarPdf,
@@ -88,7 +89,11 @@ export async function generarInsumosProduccionPdf(
   // ─── Tabla de insumos ───────────────────────────────────────────
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(9.5)
-  doc.setTextColor(color)
+  // Fase 47 (23/08, mismo caso que el header -- Charcutería, colorMarca
+  // claro): acá el color de marca va DIRECTO sobre fondo blanco, no sobre
+  // la banda -- si es muy claro (ej. #fbe6d5) queda casi invisible. Mismo
+  // criterio que ya usa el título del esquema técnico de Ficha de medida.
+  doc.setTextColor(colorLegibleSobreBlanco(color))
   doc.text('Insumos a procesar', marginX, y)
   y += 6
 
