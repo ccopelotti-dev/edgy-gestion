@@ -390,19 +390,19 @@ export default function Comprobantes() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500">
-                <th className="px-4 py-3 font-medium w-8" />
-                <th className="px-4 py-3 font-medium">Numero</th>
-                <th className="px-4 py-3 font-medium">Tipo</th>
-                <th className="px-4 py-3 font-medium">Proveedor</th>
-                <th className="px-4 py-3 font-medium">Fecha</th>
-                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Subtotal</th>
-                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">IVA</th>
-                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Total</th>
-                <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Pendiente</th>
-                <th className="px-4 py-3 font-medium w-[104px]">Estado</th>
-                <th className="px-4 py-3 font-medium w-[132px]">Pago</th>
-                <th className="px-4 py-3 w-10" />
-                <th className="px-4 py-3 font-medium">Acciones</th>
+                <th className="px-2 py-3 font-medium w-8" />
+                <th className="px-3 py-3 font-medium">Numero</th>
+                <th className="px-3 py-3 font-medium">Tipo</th>
+                <th className="px-3 py-3 font-medium max-w-[140px]">Proveedor</th>
+                <th className="px-3 py-3 font-medium">Fecha</th>
+                <th className="px-3 py-3 text-right font-medium min-w-[6rem]">Subtotal</th>
+                <th className="px-3 py-3 text-right font-medium min-w-[6rem]">IVA</th>
+                <th className="px-3 py-3 text-right font-medium min-w-[6rem]">Total</th>
+                <th className="px-3 py-3 text-right font-medium min-w-[6rem]">Pendiente</th>
+                <th className="px-2 py-3 font-medium w-[96px]">Estado</th>
+                <th className="px-2 py-3 font-medium w-[110px]">Pago</th>
+                <th className="px-2 py-3 w-9" />
+                <th className="px-2 py-3 font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -417,26 +417,26 @@ export default function Comprobantes() {
                       className="border-t border-gray-100 hover:bg-gray-50/50 cursor-pointer"
                       onClick={() => setExpandedId(isExpanded ? null : comp.id)}
                     >
-                      <td className="px-4 py-3 text-gray-400">
+                      <td className="px-2 py-3 text-gray-400">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs" title={comp.numeroComprobanteProveedor ? 'Nro. de comprobante del proveedor' : 'Sin nro. del proveedor cargado -- se muestra el correlativo interno'}>
+                      <td className="px-3 py-3 font-mono text-xs whitespace-nowrap" title={comp.numeroComprobanteProveedor ? 'Nro. de comprobante del proveedor' : 'Sin nro. del proveedor cargado -- se muestra el correlativo interno'}>
                         {formatNumeroComprobanteCompra(comp.tipo, comp.numero, comp.numeroComprobanteProveedor)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 whitespace-nowrap">
                         <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
                           {TIPO_COMPROBANTE_COMPRA_LABEL[comp.tipo]}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-900">{nombreProveedor(comp.proveedorId)}</td>
-                      <td className="px-4 py-3 text-xs text-gray-600">{formatDate(comp.fecha)}</td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.subtotal} size="xs" /></td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.montoIva} size="xs" /></td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.total} size="xs" /></td>
-                      <td className="px-4 py-3 text-right"><Amount value={comp.saldoPendiente} size="xs" /></td>
-                      <td className="px-4 py-3 w-[104px]"><EstadoComprobanteBadge estado={comp.estado} /></td>
-                      <td className="px-4 py-3 w-[132px]"><MedioPagoBadge medio={comp.medioPago} /></td>
-                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-3 text-xs text-gray-900 max-w-[140px] truncate" title={nombreProveedor(comp.proveedorId)}>{nombreProveedor(comp.proveedorId)}</td>
+                      <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(comp.fecha)}</td>
+                      <td className="px-3 py-3 text-right"><Amount value={comp.subtotal} size="xs" /></td>
+                      <td className="px-3 py-3 text-right"><Amount value={comp.montoIva} size="xs" /></td>
+                      <td className="px-3 py-3 text-right"><Amount value={comp.total} size="xs" /></td>
+                      <td className="px-3 py-3 text-right"><Amount value={comp.saldoPendiente} size="xs" /></td>
+                      <td className="px-2 py-3 w-[96px]"><EstadoComprobanteBadge estado={comp.estado} /></td>
+                      <td className="px-2 py-3 w-[110px]"><MedioPagoBadge medio={comp.medioPago} /></td>
+                      <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => handleDescargarPdf(comp)}
                           disabled={generandoPdfId === comp.id}
@@ -450,7 +450,7 @@ export default function Comprobantes() {
                           )}
                         </button>
                       </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           {comp.stockActualizado ? (
                             <span
