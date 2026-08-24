@@ -1246,6 +1246,7 @@ function insumoDocumentoToRow(d: InsumoDocumento, insumoId: string) {
     descripcion: d.descripcion || null,
     path: d.path || null,
     url: d.url || null,
+    contenido: d.contenido || null,
   }
 }
 
@@ -2244,6 +2245,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
       descripcion: r.descripcion ?? undefined,
       path: r.path ?? undefined,
       url: r.url ?? undefined,
+      contenido: r.contenido ?? undefined,
       createdAt: (r.created_at ?? '').slice(0, 10),
     })
     documentosByInsumo.set(r.insumo_id, arr)
@@ -2822,6 +2824,7 @@ async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
       descripcion: r.descripcion ?? undefined,
       path: r.path ?? undefined,
       url: r.url ?? undefined,
+      contenido: r.contenido ?? undefined,
       createdAt: (r.created_at ?? '').slice(0, 10),
     })
     documentosByInsumo.set(r.insumo_id, arr)

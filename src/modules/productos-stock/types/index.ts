@@ -738,13 +738,16 @@ export interface Insumo {
   createdAt: string
 }
 
-/** Fase 48c: un documento del catálogo técnico de un Insumo. `tipo` define
- * qué campo tiene el contenido real: 'pdf'/'imagen' -> `path` (bucket
- * privado "archivos-cliente", igual que utilidades/lib/archivos.ts --
- * fichas técnicas y hojas de seguridad suelen ser información del
+/** Fase 48c/48d: un documento del catálogo técnico de un Insumo. `tipo`
+ * define qué campo tiene el contenido real: 'pdf'/'imagen' -> `path`
+ * (bucket privado "archivos-cliente", igual que utilidades/lib/archivos.ts
+ * -- fichas técnicas y hojas de seguridad suelen ser información del
  * proveedor que no tiene sentido dejar pública); 'video' -> `url` (link
- * externo, ej. YouTube -- no se aloja el video, solo se referencia). */
-export type TipoDocumentoInsumo = 'pdf' | 'imagen' | 'video'
+ * externo, ej. YouTube -- no se aloja el video, solo se referencia);
+ * 'texto' -> `contenido` (Fase 48d, a pedido de Carlos: especificación
+ * técnica escrita directo en el sistema, sin subir ningún archivo -- ej.
+ * pegar la ficha del proveedor tal cual). */
+export type TipoDocumentoInsumo = 'pdf' | 'imagen' | 'video' | 'texto'
 
 export interface InsumoDocumento {
   id: string
@@ -761,6 +764,9 @@ export interface InsumoDocumento {
   path?: string
   /** Solo para tipo 'video': URL externa (ej. YouTube, Vimeo, Drive). */
   url?: string
+  /** Fase 48d: solo para tipo 'texto' -- el contenido en sí, escrito
+   * directo en el sistema (especificación técnica en texto plano). */
+  contenido?: string
   createdAt: string
 }
 

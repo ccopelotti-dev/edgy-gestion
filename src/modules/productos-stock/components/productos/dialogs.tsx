@@ -23,6 +23,9 @@ import {
   Video,
   Link2,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Type,
 } from 'lucide-react'
 import { formatARS } from '../../lib/format'
 import { todayISO } from '../../lib/format'
@@ -1323,6 +1326,14 @@ export function InsumoDialog({
   const [mostrarNuevoVideo, setMostrarNuevoVideo] = useState(false)
   const [nuevoVideoTitulo, setNuevoVideoTitulo] = useState('')
   const [nuevoVideoUrl, setNuevoVideoUrl] = useState('')
+  // Fase 48d: texto libre -- especificación técnica escrita directo en el
+  // sistema, sin subir archivo. `textosExpandidos` recuerda qué filas de
+  // tipo 'texto' están mostrando su contenido en este momento (se edita
+  // in-line, no hace falta abrir nada aparte).
+  const [mostrarNuevoTexto, setMostrarNuevoTexto] = useState(false)
+  const [nuevoTextoTitulo, setNuevoTextoTitulo] = useState('')
+  const [nuevoTextoContenido, setNuevoTextoContenido] = useState('')
+  const [textosExpandidos, setTextosExpandidos] = useState<Set<string>>(new Set())
 
   // Fase 45h (Etapa 2 del split de OC): proveedores (catálogo de Compras)
   // para el select de "Proveedor habitual" -- mismo criterio directo-a-
@@ -1371,6 +1382,10 @@ export function InsumoDialog({
       setMostrarNuevoVideo(false)
       setNuevoVideoTitulo('')
       setNuevoVideoUrl('')
+      setMostrarNuevoTexto(false)
+      setNuevoTextoTitulo('')
+      setNuevoTextoContenido('')
+      setTextosExpandidos(new Set())
       if (editData) {
         const { id, stock, createdAt, productoVinculadoId, ...rest } = editData
         setForm({ ...rest, documentos: rest.documentos ?? [] })
@@ -1507,6 +1522,39 @@ export function InsumoDialog({
     )
   }
 
+  // Fase 48d: texto libre -- se edita in-line, el contenido vive en el
+  // propio form.documentos (sin subir nada a ningún lado).
+  function handleAgregarTexto() {
+    const titulo = nuevoTextoTitulo.trim()
+    const contenido = nuevoTextoContenido.trim()
+    if (!titulo || !contenido) return
+    const id = crypto.randomUUID()
+    update('documentos', [
+      ...form.documentos,
+      { id, tipo: 'texto', titulo, contenido, createdAt: todayISO() },
+    ])
+    setTextosExpandidos((prev) => new Set(prev).add(id))
+    setNuevoTextoTitulo('')
+    setNuevoTextoContenido('')
+    setMostrarNuevoTexto(false)
+  }
+
+  function handleActualizarContenidoTexto(id: string, contenido: string) {
+    update(
+      'documentos',
+      form.documentos.map((d) => (d.id === id ? { ...d, contenido } : d)),
+    )
+  }
+
+  function handleToggleTextoExpandido(id: string) {
+    setTextosExpandidos((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   function handleQuitarDocumento(id: string) {
     const doc = form.documentos.find((d) => d.id === id)
     if (doc?.path && documentosSubidosEnEstaSesionRef.current.has(doc.path)) {
@@ -1520,6 +1568,10 @@ export function InsumoDialog({
   }
 
   async function handleVerDocumento(doc: InsumoDocumento) {
+    if (doc.tipo === 'texto') {
+      handleToggleTextoExpandido(doc.id)
+      return
+    }
     if (doc.tipo === 'video') {
       if (doc.url) window.open(doc.url, '_blank', 'noopener,noreferrer')
       return
@@ -1566,8 +1618,11 @@ export function InsumoDialog({
       }))
     // Documentos sin título (ej. un link de video a medio cargar que nunca
     // se confirmó con el botón "Agregar") se descartan en silencio, mismo
-    // criterio que las presentaciones.
-    const documentos = form.documentos.filter((d) => d.titulo.trim())
+    // criterio que las presentaciones. Un texto libre que el usuario dejó
+    // vacío al editarlo in-line tampoco se guarda.
+    const documentos = form.documentos.filter(
+      (d) => d.titulo.trim() && (d.tipo !== 'texto' || d.contenido?.trim()),
+    )
     setGuardando(true)
     const errorGuardar = await onSave({
       ...form,
@@ -1914,40 +1969,70 @@ export function InsumoDialog({
 
             {form.documentos.length > 0 && (
               <div className="grid gap-2 mt-1">
-                {form.documentos.map((d) => (
-                  <div key={d.id} className="flex items-center gap-2">
-                    <span className="shrink-0 text-muted-foreground" title={d.tipo}>
-                      {d.tipo === 'pdf' && <FileText className="h-4 w-4" />}
-                      {d.tipo === 'imagen' && <ImagePlus className="h-4 w-4" />}
-                      {d.tipo === 'video' && <Video className="h-4 w-4" />}
-                    </span>
-                    <input
-                      className={`${inputClass} flex-1`}
-                      placeholder="Título (ej. Ficha técnica)"
-                      value={d.titulo}
-                      onChange={(e) => handleActualizarTituloDoc(d.id, e.target.value)}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
-                      title={d.tipo === 'video' ? 'Abrir video' : 'Ver / descargar'}
-                      onClick={() => handleVerDocumento(d)}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-red-500 shrink-0"
-                      onClick={() => handleQuitarDocumento(d.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
+                {form.documentos.map((d) => {
+                  const expandido = d.tipo === 'texto' && textosExpandidos.has(d.id)
+                  return (
+                    <div key={d.id} className="grid gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="shrink-0 text-muted-foreground" title={d.tipo}>
+                          {d.tipo === 'pdf' && <FileText className="h-4 w-4" />}
+                          {d.tipo === 'imagen' && <ImagePlus className="h-4 w-4" />}
+                          {d.tipo === 'video' && <Video className="h-4 w-4" />}
+                          {d.tipo === 'texto' && <Type className="h-4 w-4" />}
+                        </span>
+                        <input
+                          className={`${inputClass} flex-1`}
+                          placeholder="Título (ej. Ficha técnica)"
+                          value={d.titulo}
+                          onChange={(e) => handleActualizarTituloDoc(d.id, e.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
+                          title={
+                            d.tipo === 'video'
+                              ? 'Abrir video'
+                              : d.tipo === 'texto'
+                                ? expandido
+                                  ? 'Ocultar texto'
+                                  : 'Ver texto'
+                                : 'Ver / descargar'
+                          }
+                          onClick={() => handleVerDocumento(d)}
+                        >
+                          {d.tipo === 'texto' ? (
+                            expandido ? (
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            )
+                          ) : (
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-red-500 shrink-0"
+                          onClick={() => handleQuitarDocumento(d.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      {expandido && (
+                        <textarea
+                          className={`${inputClass} h-28 resize-y`}
+                          value={d.contenido ?? ''}
+                          onChange={(e) => handleActualizarContenidoTexto(d.id, e.target.value)}
+                          placeholder="Especificación técnica..."
+                        />
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
 
@@ -1990,6 +2075,48 @@ export function InsumoDialog({
               </div>
             )}
 
+            {mostrarNuevoTexto && (
+              <div className="grid gap-1.5 mt-1">
+                <div className="flex items-center gap-2">
+                  <Type className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <input
+                    className={`${inputClass} flex-1`}
+                    placeholder="Título (ej. Especificación técnica)"
+                    value={nuevoTextoTitulo}
+                    onChange={(e) => setNuevoTextoTitulo(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground shrink-0"
+                    onClick={() => {
+                      setMostrarNuevoTexto(false)
+                      setNuevoTextoTitulo('')
+                      setNuevoTextoContenido('')
+                    }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <textarea
+                  className={`${inputClass} h-28 resize-y`}
+                  placeholder="Pegá o escribí acá la especificación técnica..."
+                  value={nuevoTextoContenido}
+                  onChange={(e) => setNuevoTextoContenido(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="justify-self-start"
+                  onClick={handleAgregarTexto}
+                  disabled={!nuevoTextoTitulo.trim() || !nuevoTextoContenido.trim()}
+                >
+                  Agregar
+                </Button>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2 mt-1">
               <Button
                 type="button"
@@ -2014,6 +2141,17 @@ export function InsumoDialog({
                 >
                   <Link2 className="h-3.5 w-3.5 mr-1" />
                   Agregar link de video
+                </Button>
+              )}
+              {!mostrarNuevoTexto && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMostrarNuevoTexto(true)}
+                >
+                  <Type className="h-3.5 w-3.5 mr-1" />
+                  Agregar texto libre
                 </Button>
               )}
             </div>
