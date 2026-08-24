@@ -10,7 +10,20 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2, ImagePlus, X, Loader2, Star, Wand2, Lock } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  ImagePlus,
+  X,
+  Loader2,
+  Star,
+  Wand2,
+  Lock,
+  FileText,
+  Video,
+  Link2,
+  ExternalLink,
+} from 'lucide-react'
 import { formatARS } from '../../lib/format'
 import { todayISO } from '../../lib/format'
 import {
@@ -19,6 +32,8 @@ import {
   ACCEPT_IMAGENES,
 } from '../../lib/imagenes'
 import { generarCodigoInterno } from '../../lib/etiqueta'
+import { useClienteId } from '../../data/useClienteId'
+import { subirArchivo, obtenerUrlDescarga, eliminarArchivo } from '@/modules/utilidades/lib/archivos'
 import { supabase } from '@/lib/supabase'
 import { sanitizarDecimal, sanitizarDecimalConSigno, parsearDecimal, decimalATexto } from '@/lib/decimal'
 import type {
@@ -26,6 +41,8 @@ import type {
   ProductoVariante,
   TipoProducto,
   Insumo,
+  InsumoDocumento,
+  TipoDocumentoInsumo,
   Rubro,
   SubRubro,
   Marca,
@@ -1249,6 +1266,7 @@ const emptyInsumo: InsumoFormData = {
   costo: 0,
   esComercializable: false,
   presentaciones: [],
+  documentos: [],
 }
 
 /** Fase 48b: fila de edición local para una presentación -- el contenido
@@ -1280,6 +1298,31 @@ export function InsumoDialog({
   const [presentacionesForm, setPresentacionesForm] = useState<PresentacionForm[]>([])
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
+
+  // Fase 48c: foto de referencia -- mismo patrón que la galería de
+  // ProductoDialog, pero con UN solo archivo (ver comentario en
+  // Insumo.imagenUrl). Reusa el mismo bucket público "productos-imagenes".
+  const fileInputImagenRef = useRef<HTMLInputElement>(null)
+  const carpetaIdRef = useRef<string>('')
+  // URL subida en ESTA apertura del diálogo que todavía no es parte del
+  // insumo guardado -- si se cancela o se reemplaza, se borra del bucket
+  // (mismo criterio que subidasEnEstaSesionRef en ProductoDialog).
+  const imagenSubidaEnEstaSesionRef = useRef<string | null>(null)
+  const [subiendoImagen, setSubiendoImagen] = useState(false)
+  const [errorImagen, setErrorImagen] = useState('')
+
+  // Fase 48c: Catálogo Técnico -- documentos del insumo (PDF/imagen vía
+  // bucket privado "archivos-cliente", o link de video). Necesita el
+  // cliente_id del usuario logueado para el path del bucket privado -- ver
+  // convención en utilidades/lib/archivos.ts.
+  const { clienteId } = useClienteId()
+  const fileInputDocRef = useRef<HTMLInputElement>(null)
+  const documentosSubidosEnEstaSesionRef = useRef<Set<string>>(new Set())
+  const [subiendoDoc, setSubiendoDoc] = useState(false)
+  const [errorDoc, setErrorDoc] = useState('')
+  const [mostrarNuevoVideo, setMostrarNuevoVideo] = useState(false)
+  const [nuevoVideoTitulo, setNuevoVideoTitulo] = useState('')
+  const [nuevoVideoUrl, setNuevoVideoUrl] = useState('')
 
   // Fase 45h (Etapa 2 del split de OC): proveedores (catálogo de Compras)
   // para el select de "Proveedor habitual" -- mismo criterio directo-a-
@@ -1316,9 +1359,21 @@ export function InsumoDialog({
     if (open) {
       setGuardando(false)
       setErrorGuardado('')
+      // Fase 48c: carpeta estable para la foto (id real si ya existe, o un
+      // id temporal si el insumo se está creando) y limpieza de refs de
+      // "subido en esta sesión" -- mismo criterio que ProductoDialog.
+      carpetaIdRef.current =
+        editData?.id ?? `nuevo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      imagenSubidaEnEstaSesionRef.current = null
+      documentosSubidosEnEstaSesionRef.current = new Set()
+      setErrorImagen('')
+      setErrorDoc('')
+      setMostrarNuevoVideo(false)
+      setNuevoVideoTitulo('')
+      setNuevoVideoUrl('')
       if (editData) {
         const { id, stock, createdAt, productoVinculadoId, ...rest } = editData
-        setForm(rest)
+        setForm({ ...rest, documentos: rest.documentos ?? [] })
         setStockMinimoTexto(decimalATexto(rest.stockMinimo))
         setCostoTexto(decimalATexto(rest.costo))
         setAnchoRolloTexto(rest.anchoRollo != null ? decimalATexto(rest.anchoRollo) : '')
@@ -1370,6 +1425,130 @@ export function InsumoDialog({
     })
   }
 
+  // Fase 48c: foto de referencia -- ver handleFilesSelected/handleRemoveImagen
+  // en ProductoDialog, adaptado a un solo archivo en vez de una galería.
+  async function handleImagenSelected(files: FileList | null) {
+    const file = files?.[0]
+    if (!file) return
+    setErrorImagen('')
+    setSubiendoImagen(true)
+    try {
+      const { url } = await subirImagenProducto(file, carpetaIdRef.current)
+      // Si ya había una foto subida en esta misma sesión de edición (el
+      // usuario la está reemplazando sin haber guardado todavía), se borra
+      // la vieja para no dejar basura huérfana en el bucket.
+      if (imagenSubidaEnEstaSesionRef.current) {
+        void eliminarImagenProducto(imagenSubidaEnEstaSesionRef.current)
+      }
+      imagenSubidaEnEstaSesionRef.current = url
+      update('imagenUrl', url)
+    } catch (err) {
+      setErrorImagen(err instanceof Error ? err.message : 'No se pudo subir la foto.')
+    } finally {
+      setSubiendoImagen(false)
+      if (fileInputImagenRef.current) fileInputImagenRef.current.value = ''
+    }
+  }
+
+  function handleRemoveImagen() {
+    if (form.imagenUrl && imagenSubidaEnEstaSesionRef.current === form.imagenUrl) {
+      imagenSubidaEnEstaSesionRef.current = null
+      void eliminarImagenProducto(form.imagenUrl)
+    }
+    update('imagenUrl', undefined)
+  }
+
+  // Fase 48c: Catálogo Técnico -- ver comentario en Insumo.documentos
+  // (types/index.ts) sobre por qué el título es obligatorio.
+  async function handleDocArchivoSeleccionado(files: FileList | null) {
+    const file = files?.[0]
+    if (!file) return
+    setErrorDoc('')
+    if (!clienteId) {
+      setErrorDoc('Esperá un segundo, todavía estamos cargando tus datos -- probá de nuevo.')
+      return
+    }
+    setSubiendoDoc(true)
+    try {
+      const docId = crypto.randomUUID()
+      const { path } = await subirArchivo(file, clienteId, docId)
+      documentosSubidosEnEstaSesionRef.current.add(path)
+      const tipo: TipoDocumentoInsumo = file.type === 'application/pdf' ? 'pdf' : 'imagen'
+      const tituloDefault = file.name.replace(/\.[^./\\]+$/, '')
+      update('documentos', [
+        ...form.documentos,
+        { id: docId, tipo, titulo: tituloDefault, path, createdAt: todayISO() },
+      ])
+    } catch (err) {
+      setErrorDoc(err instanceof Error ? err.message : 'No se pudo subir el archivo.')
+    } finally {
+      setSubiendoDoc(false)
+      if (fileInputDocRef.current) fileInputDocRef.current.value = ''
+    }
+  }
+
+  function handleAgregarVideo() {
+    const titulo = nuevoVideoTitulo.trim()
+    const url = nuevoVideoUrl.trim()
+    if (!titulo || !url) return
+    update('documentos', [
+      ...form.documentos,
+      { id: crypto.randomUUID(), tipo: 'video', titulo, url, createdAt: todayISO() },
+    ])
+    setNuevoVideoTitulo('')
+    setNuevoVideoUrl('')
+    setMostrarNuevoVideo(false)
+  }
+
+  function handleActualizarTituloDoc(id: string, titulo: string) {
+    update(
+      'documentos',
+      form.documentos.map((d) => (d.id === id ? { ...d, titulo } : d)),
+    )
+  }
+
+  function handleQuitarDocumento(id: string) {
+    const doc = form.documentos.find((d) => d.id === id)
+    if (doc?.path && documentosSubidosEnEstaSesionRef.current.has(doc.path)) {
+      documentosSubidosEnEstaSesionRef.current.delete(doc.path)
+      void eliminarArchivo(doc.path)
+    }
+    update(
+      'documentos',
+      form.documentos.filter((d) => d.id !== id),
+    )
+  }
+
+  async function handleVerDocumento(doc: InsumoDocumento) {
+    if (doc.tipo === 'video') {
+      if (doc.url) window.open(doc.url, '_blank', 'noopener,noreferrer')
+      return
+    }
+    if (!doc.path) return
+    setErrorDoc('')
+    try {
+      const url = await obtenerUrlDescarga(doc.path)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch {
+      setErrorDoc('No pudimos generar el link de descarga -- probá de nuevo.')
+    }
+  }
+
+  function handleCancelar() {
+    if (guardando) return
+    // Limpia foto y documentos subidos en esta sesión que no se llegaron a
+    // guardar -- mismo criterio que handleCancelar en ProductoDialog.
+    if (imagenSubidaEnEstaSesionRef.current) {
+      void eliminarImagenProducto(imagenSubidaEnEstaSesionRef.current)
+    }
+    imagenSubidaEnEstaSesionRef.current = null
+    for (const path of documentosSubidosEnEstaSesionRef.current) {
+      void eliminarArchivo(path)
+    }
+    documentosSubidosEnEstaSesionRef.current = new Set()
+    onOpenChange(false)
+  }
+
   async function handleSave() {
     if (!form.nombre.trim()) return
     if (guardando) return
@@ -1385,17 +1564,24 @@ export function InsumoDialog({
         contenido: parsearDecimal(p.contenidoTexto),
         esDefault: p.esDefault,
       }))
+    // Documentos sin título (ej. un link de video a medio cargar que nunca
+    // se confirmó con el botón "Agregar") se descartan en silencio, mismo
+    // criterio que las presentaciones.
+    const documentos = form.documentos.filter((d) => d.titulo.trim())
     setGuardando(true)
     const errorGuardar = await onSave({
       ...form,
       subRubroId: form.subRubroId || undefined,
       presentaciones,
+      documentos,
     })
     setGuardando(false)
     if (errorGuardar) {
       setErrorGuardado(errorGuardar)
       return
     }
+    imagenSubidaEnEstaSesionRef.current = null
+    documentosSubidosEnEstaSesionRef.current = new Set()
     onOpenChange(false)
   }
 
@@ -1403,7 +1589,13 @@ export function InsumoDialog({
   const subRubrosFiltrados = subRubros.filter((sr) => sr.rubroId === form.rubroId)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) handleCancelar()
+        else onOpenChange(v)
+      }}
+    >
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editData ? 'Editar insumo' : 'Nuevo insumo'}</DialogTitle>
@@ -1415,6 +1607,54 @@ export function InsumoDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
+          {/* Fase 48c: foto de referencia -- una sola, no galería (ver
+              comentario en Insumo.imagenUrl). */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Foto de referencia</label>
+            <div className="flex items-center gap-3">
+              {form.imagenUrl ? (
+                <div className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted">
+                  <img src={form.imagenUrl} alt="" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    title="Quitar foto"
+                    onClick={handleRemoveImagen}
+                    className="absolute inset-0 hidden items-center justify-center bg-black/50 group-hover:flex"
+                  >
+                    <X className="h-4 w-4 text-white" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputImagenRef.current?.click()}
+                  disabled={subiendoImagen}
+                  className="flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed text-muted-foreground hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+                >
+                  {subiendoImagen ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>
+                      <ImagePlus className="h-5 w-5" />
+                      <span className="text-[10px]">Agregar</span>
+                    </>
+                  )}
+                </button>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Opcional. JPG, PNG o WEBP, hasta 5 MB.
+              </p>
+            </div>
+            <input
+              ref={fileInputImagenRef}
+              type="file"
+              accept={ACCEPT_IMAGENES}
+              className="hidden"
+              onChange={(e) => handleImagenSelected(e.target.files)}
+            />
+            {errorImagen && <p className="text-xs text-red-500">{errorImagen}</p>}
+          </div>
+
           {vinculado && (
             <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-300">
               <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -1659,6 +1899,134 @@ export function InsumoDialog({
             )}
           </div>
 
+          {/* Fase 48c: Catálogo Técnico -- ver comentario en
+              Insumo.documentos (types/index.ts). Pensado para que en el
+              futuro un agente de IA o una automatización pueda encontrar
+              esta documentación, por eso cada documento pide un título
+              claro. */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Catálogo Técnico</label>
+            <p className="text-xs text-muted-foreground">
+              Fichas técnicas, hojas de seguridad, instructivos de dosificación o videos de uso
+              de este insumo -- quedan a mano acá para consultarlos rápido (y, a futuro, para que
+              un agente de IA los use como referencia).
+            </p>
+
+            {form.documentos.length > 0 && (
+              <div className="grid gap-2 mt-1">
+                {form.documentos.map((d) => (
+                  <div key={d.id} className="flex items-center gap-2">
+                    <span className="shrink-0 text-muted-foreground" title={d.tipo}>
+                      {d.tipo === 'pdf' && <FileText className="h-4 w-4" />}
+                      {d.tipo === 'imagen' && <ImagePlus className="h-4 w-4" />}
+                      {d.tipo === 'video' && <Video className="h-4 w-4" />}
+                    </span>
+                    <input
+                      className={`${inputClass} flex-1`}
+                      placeholder="Título (ej. Ficha técnica)"
+                      value={d.titulo}
+                      onChange={(e) => handleActualizarTituloDoc(d.id, e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
+                      title={d.tipo === 'video' ? 'Abrir video' : 'Ver / descargar'}
+                      onClick={() => handleVerDocumento(d)}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-red-500 shrink-0"
+                      onClick={() => handleQuitarDocumento(d.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {mostrarNuevoVideo && (
+              <div className="flex items-center gap-2 mt-1">
+                <Video className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <input
+                  className={`${inputClass} flex-1`}
+                  placeholder="Título (ej. Video: dosificación)"
+                  value={nuevoVideoTitulo}
+                  onChange={(e) => setNuevoVideoTitulo(e.target.value)}
+                />
+                <input
+                  className={`${inputClass} flex-1`}
+                  placeholder="Link (YouTube, Drive, etc.)"
+                  value={nuevoVideoUrl}
+                  onChange={(e) => setNuevoVideoUrl(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleAgregarVideo}
+                  disabled={!nuevoVideoTitulo.trim() || !nuevoVideoUrl.trim()}
+                >
+                  Agregar
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground shrink-0"
+                  onClick={() => {
+                    setMostrarNuevoVideo(false)
+                    setNuevoVideoTitulo('')
+                    setNuevoVideoUrl('')
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 mt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputDocRef.current?.click()}
+                disabled={subiendoDoc}
+              >
+                {subiendoDoc ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5 mr-1" />
+                )}
+                Subir PDF o imagen
+              </Button>
+              {!mostrarNuevoVideo && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMostrarNuevoVideo(true)}
+                >
+                  <Link2 className="h-3.5 w-3.5 mr-1" />
+                  Agregar link de video
+                </Button>
+              )}
+            </div>
+            <input
+              ref={fileInputDocRef}
+              type="file"
+              accept="application/pdf,image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => handleDocArchivoSeleccionado(e.target.files)}
+            />
+            {errorDoc && <p className="text-xs text-red-500">{errorDoc}</p>}
+          </div>
+
           {/* Comercializable */}
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -1674,7 +2042,7 @@ export function InsumoDialog({
         {errorGuardado && <p className="text-sm text-red-500 px-6">{errorGuardado}</p>}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={guardando}>
+          <Button variant="outline" onClick={handleCancelar} disabled={guardando}>
             Cancelar
           </Button>
           <Button onClick={handleSave} disabled={!form.nombre.trim() || guardando}>

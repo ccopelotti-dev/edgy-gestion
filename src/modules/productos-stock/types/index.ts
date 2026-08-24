@@ -718,6 +718,49 @@ export interface Insumo {
    * insumos existentes). Una puede marcarse `esDefault` -- ver
    * InsumoPresentacion. */
   presentaciones: InsumoPresentacion[]
+  /** Fase 48c (24/08, a pedido de Carlos): foto de referencia del insumo --
+   * URL pública (Supabase Storage, bucket "productos-imagenes", mismo
+   * bucket que Producto.imagenes). A diferencia de Producto, acá alcanza
+   * con UNA sola foto (es un insumo, no un ítem de catálogo visual) --
+   * simplifica la UI y evita el overhead de una galería completa.
+   * undefined = sin foto cargada (default, sin cambios para insumos
+   * existentes). */
+  imagenUrl?: string
+  /** Fase 48c: repositorio de documentación técnica del insumo (fichas
+   * técnicas, hojas de seguridad, instructivos de dosificación, videos de
+   * uso) -- a pedido de Carlos, pensado explícitamente para que en el
+   * futuro un agente de IA o una automatización pueda encontrar y leer
+   * esta información (por eso cada documento tiene `titulo` obligatorio:
+   * es lo que un agente va a usar para decidir qué documento abrir, sin
+   * depender del nombre de archivo). Lista vacía = sin documentos
+   * cargados (default). Ver InsumoDocumento. */
+  documentos: InsumoDocumento[]
+  createdAt: string
+}
+
+/** Fase 48c: un documento del catálogo técnico de un Insumo. `tipo` define
+ * qué campo tiene el contenido real: 'pdf'/'imagen' -> `path` (bucket
+ * privado "archivos-cliente", igual que utilidades/lib/archivos.ts --
+ * fichas técnicas y hojas de seguridad suelen ser información del
+ * proveedor que no tiene sentido dejar pública); 'video' -> `url` (link
+ * externo, ej. YouTube -- no se aloja el video, solo se referencia). */
+export type TipoDocumentoInsumo = 'pdf' | 'imagen' | 'video'
+
+export interface InsumoDocumento {
+  id: string
+  tipo: TipoDocumentoInsumo
+  /** Título descriptivo obligatorio (ej. "Ficha técnica M-CULTURE RS 103",
+   * "Hoja de seguridad", "Video: dosificación correcta") -- ver comentario
+   * en Insumo.documentos sobre por qué es clave para uso futuro por IA. */
+  titulo: string
+  /** Notas libres opcionales (ej. "Dosis: 40 g cada 200 kg de masa"). */
+  descripcion?: string
+  /** Solo para tipo 'pdf'/'imagen': path del objeto en el bucket privado
+   * "archivos-cliente" (ver subirArchivo en utilidades/lib/archivos.ts).
+   * Se resuelve a URL firmada temporal recién al momento de ver/descargar. */
+  path?: string
+  /** Solo para tipo 'video': URL externa (ej. YouTube, Vimeo, Drive). */
+  url?: string
   createdAt: string
 }
 

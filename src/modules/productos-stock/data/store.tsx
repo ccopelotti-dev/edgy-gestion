@@ -73,6 +73,7 @@ import type {
   ProductoVariante,
   Insumo,
   InsumoPresentacion,
+  InsumoDocumento,
   Rubro,
   SubRubro,
   Marca,
@@ -1222,6 +1223,7 @@ function insumoToRow(i: Insumo, clienteId: string) {
     producto_vinculado_id: i.productoVinculadoId || null,
     ancho_rollo: i.anchoRollo ?? null,
     proveedor_id: i.proveedorId || null,
+    imagen_url: i.imagenUrl || null,
   }
 }
 
@@ -1232,6 +1234,18 @@ function insumoPresentacionToRow(p: InsumoPresentacion, insumoId: string) {
     nombre: p.nombre || null,
     contenido: p.contenido,
     es_default: p.esDefault,
+  }
+}
+
+function insumoDocumentoToRow(d: InsumoDocumento, insumoId: string) {
+  return {
+    id: d.id,
+    insumo_id: insumoId,
+    tipo: d.tipo,
+    titulo: d.titulo,
+    descripcion: d.descripcion || null,
+    path: d.path || null,
+    url: d.url || null,
   }
 }
 
@@ -1321,6 +1335,7 @@ function sincronizarInsumoDeProducto(producto: Producto, insumos: Insumo[]): Ins
       productoVinculadoId: producto.id,
       anchoRollo: producto.anchoRollo,
       presentaciones: [],
+      documentos: [],
       createdAt: todayISO(),
     }
     return [...insumos, nuevo]
@@ -1580,6 +1595,12 @@ async function syncToSupabase(
               .insert(i.presentaciones.map((p) => insumoPresentacionToRow(p, i.id)))
               .then(logErr('presentaciones de insumo'))
           }
+          if (!res.error && i.documentos.length) {
+            supabase
+              .from('insumo_documentos')
+              .insert(i.documentos.map((d) => insumoDocumentoToRow(d, i.id)))
+              .then(logErr('documentos de insumo'))
+          }
         })
       return
     }
@@ -1592,6 +1613,14 @@ async function syncToSupabase(
             .from('insumo_presentaciones')
             .insert(i.presentaciones.map((p) => insumoPresentacionToRow(p, i.id)))
             .then(logErr('presentaciones de insumo'))
+        }
+      })
+      supabase.from('insumo_documentos').delete().eq('insumo_id', i.id).then(() => {
+        if (i.documentos.length) {
+          supabase
+            .from('insumo_documentos')
+            .insert(i.documentos.map((d) => insumoDocumentoToRow(d, i.id)))
+            .then(logErr('documentos de insumo'))
         }
       })
       return
@@ -2094,6 +2123,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     productoVariantesRes,
     insumosRes,
     insumoPresentacionesRes,
+    insumoDocumentosRes,
     rubrosRes,
     subRubrosRes,
     marcasRes,
@@ -2118,6 +2148,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('producto_variantes').select('*').order('orden'),
     supabase.from('insumos').select('*').order('created_at'),
     supabase.from('insumo_presentaciones').select('*'),
+    supabase.from('insumo_documentos').select('*').order('created_at'),
     supabase.from('rubros').select('*').order('created_at'),
     supabase.from('sub_rubros').select('*').order('created_at'),
     supabase.from('marcas').select('*').order('nombre'),
@@ -2201,6 +2232,23 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     presentacionesByInsumo.set(r.insumo_id, arr)
   }
 
+  // Fase 48c: documentos del catálogo técnico, agrupados por insumo --
+  // mismo patrón que presentacionesByInsumo.
+  const documentosByInsumo = new Map<string, InsumoDocumento[]>()
+  for (const r of insumoDocumentosRes.data ?? []) {
+    const arr = documentosByInsumo.get(r.insumo_id) ?? []
+    arr.push({
+      id: r.id,
+      tipo: r.tipo as InsumoDocumento['tipo'],
+      titulo: r.titulo,
+      descripcion: r.descripcion ?? undefined,
+      path: r.path ?? undefined,
+      url: r.url ?? undefined,
+      createdAt: (r.created_at ?? '').slice(0, 10),
+    })
+    documentosByInsumo.set(r.insumo_id, arr)
+  }
+
   const insumos: Insumo[] = (insumosRes.data ?? []).map((r: any) => ({
     id: r.id,
     nombre: r.nombre,
@@ -2215,6 +2263,8 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     proveedorId: r.proveedor_id ?? undefined,
     presentaciones: presentacionesByInsumo.get(r.id) ?? [],
+    imagenUrl: r.imagen_url ?? undefined,
+    documentos: documentosByInsumo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -2541,6 +2591,14 @@ export async function crearInsumoConfirmado(
       .insert(nuevo.presentaciones.map((p) => insumoPresentacionToRow(p, nuevo.id)))
     if (presErr) return { ok: false, error: presErr.message }
   }
+  // Fase 48c: mismo criterio -- documentos del catálogo técnico después
+  // de que el insumo padre confirmó.
+  if (nuevo.documentos.length) {
+    const { error: docErr } = await supabase
+      .from('insumo_documentos')
+      .insert(nuevo.documentos.map((d) => insumoDocumentoToRow(d, nuevo.id)))
+    if (docErr) return { ok: false, error: docErr.message }
+  }
   return { ok: true, data: nuevo }
 }
 
@@ -2570,6 +2628,16 @@ export async function actualizarInsumoConfirmado(
       .from('insumo_presentaciones')
       .insert(i.presentaciones.map((p) => insumoPresentacionToRow(p, i.id)))
     if (presErr) return { ok: false, error: presErr.message }
+  }
+  // Fase 48c: mismo criterio -- borra y reinserta los documentos del
+  // catálogo técnico (lista chica, más simple que un diff).
+  const { error: delDocErr } = await supabase.from('insumo_documentos').delete().eq('insumo_id', i.id)
+  if (delDocErr) return { ok: false, error: delDocErr.message }
+  if (i.documentos.length) {
+    const { error: docErr } = await supabase
+      .from('insumo_documentos')
+      .insert(i.documentos.map((d) => insumoDocumentoToRow(d, i.id)))
+    if (docErr) return { ok: false, error: docErr.message }
   }
   return { ok: true, data: i }
 }
@@ -2728,9 +2796,10 @@ async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
 async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
   const uniqueIds = Array.from(new Set(ids))
   if (!uniqueIds.length) return []
-  const [{ data }, { data: presentacionesData }] = await Promise.all([
+  const [{ data }, { data: presentacionesData }, { data: documentosData }] = await Promise.all([
     supabase.from('insumos').select('*').in('id', uniqueIds),
     supabase.from('insumo_presentaciones').select('*').in('insumo_id', uniqueIds),
+    supabase.from('insumo_documentos').select('*').in('insumo_id', uniqueIds),
   ])
   const presentacionesByInsumo = new Map<string, InsumoPresentacion[]>()
   for (const r of presentacionesData ?? []) {
@@ -2742,6 +2811,20 @@ async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
       esDefault: r.es_default,
     })
     presentacionesByInsumo.set(r.insumo_id, arr)
+  }
+  const documentosByInsumo = new Map<string, InsumoDocumento[]>()
+  for (const r of documentosData ?? []) {
+    const arr = documentosByInsumo.get(r.insumo_id) ?? []
+    arr.push({
+      id: r.id,
+      tipo: r.tipo as InsumoDocumento['tipo'],
+      titulo: r.titulo,
+      descripcion: r.descripcion ?? undefined,
+      path: r.path ?? undefined,
+      url: r.url ?? undefined,
+      createdAt: (r.created_at ?? '').slice(0, 10),
+    })
+    documentosByInsumo.set(r.insumo_id, arr)
   }
   return (data ?? []).map((r: any) => ({
     id: r.id,
@@ -2757,6 +2840,8 @@ async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
     anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     proveedorId: r.proveedor_id ?? undefined,
     presentaciones: presentacionesByInsumo.get(r.id) ?? [],
+    imagenUrl: r.imagen_url ?? undefined,
+    documentos: documentosByInsumo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 }
