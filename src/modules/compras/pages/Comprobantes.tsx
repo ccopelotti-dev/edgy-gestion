@@ -399,8 +399,8 @@ export default function Comprobantes() {
                 <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">IVA</th>
                 <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Total</th>
                 <th className="px-4 py-3 text-right font-medium min-w-[8.5rem]">Pendiente</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 font-medium">Pago</th>
+                <th className="px-4 py-3 font-medium w-[104px]">Estado</th>
+                <th className="px-4 py-3 font-medium w-[132px]">Pago</th>
                 <th className="px-4 py-3 w-10" />
                 <th className="px-4 py-3 font-medium">Acciones</th>
               </tr>
@@ -434,8 +434,8 @@ export default function Comprobantes() {
                       <td className="px-4 py-3 text-right"><Amount value={comp.montoIva} size="xs" /></td>
                       <td className="px-4 py-3 text-right"><Amount value={comp.total} size="xs" /></td>
                       <td className="px-4 py-3 text-right"><Amount value={comp.saldoPendiente} size="xs" /></td>
-                      <td className="px-4 py-3"><EstadoComprobanteBadge estado={comp.estado} /></td>
-                      <td className="px-4 py-3"><MedioPagoBadge medio={comp.medioPago} /></td>
+                      <td className="px-4 py-3 w-[104px]"><EstadoComprobanteBadge estado={comp.estado} /></td>
+                      <td className="px-4 py-3 w-[132px]"><MedioPagoBadge medio={comp.medioPago} /></td>
                       <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => handleDescargarPdf(comp)}
