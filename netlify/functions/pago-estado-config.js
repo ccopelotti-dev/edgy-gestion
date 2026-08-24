@@ -54,7 +54,7 @@ export default async (req) => {
 
   const { data: config, error: configError } = await supabaseAdmin
     .from('clientes_pago_config')
-    .select('proveedor, modo, habilitado, access_token, webhook_secret')
+    .select('proveedor, modo, habilitado, access_token, webhook_secret, merchant_id')
     .eq('cliente_id', clienteId)
     .eq('proveedor', proveedor)
     .maybeSingle()
@@ -77,6 +77,10 @@ export default async (req) => {
       modo: config.modo,
       tieneAccessToken: Boolean(config.access_token),
       tieneWebhookSecret: Boolean(config.webhook_secret),
+      // merchant_id no es un secreto (es el identificador público de
+      // cuenta que Talo espera en el body al crear un pago) -- se
+      // devuelve el valor real para no obligar a recargarlo cada vez.
+      merchantId: config.merchant_id || undefined,
     }),
     { status: 200 },
   )

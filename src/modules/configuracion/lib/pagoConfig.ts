@@ -15,7 +15,9 @@
 
 import { supabase } from '@/lib/supabase'
 
-export type ProveedorPago = 'mercadopago'
+// Fase 12b: Talo se suma como segundo proveedor (transferencias
+// bancarias, docs.talo.com.ar) sobre la misma arquitectura factorizada.
+export type ProveedorPago = 'mercadopago' | 'talo'
 
 export interface EstadoPago {
   configurado: boolean
@@ -24,6 +26,9 @@ export interface EstadoPago {
   modo?: 'test' | 'produccion'
   tieneAccessToken?: boolean
   tieneWebhookSecret?: boolean
+  // Identificador público de cuenta (Talo lo llama `user_id`) -- no es
+  // un secreto, así que viaja el valor real, no solo un booleano.
+  merchantId?: string
 }
 
 export interface GuardarConfigPagoInput {
@@ -33,6 +38,7 @@ export interface GuardarConfigPagoInput {
   habilitado: boolean
   accessToken?: string
   webhookSecret?: string
+  merchantId?: string
 }
 
 async function tokenSesion(): Promise<string> {

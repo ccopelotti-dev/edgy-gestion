@@ -221,6 +221,26 @@ const FORM_PAGO_VACIO: FormPago = {
   webhookSecret: '',
 }
 
+// Fase 12b: Talo (transferencias bancarias, docs.talo.com.ar) -- segundo
+// proveedor sobre la misma clientes_pago_config. A diferencia de MP,
+// Talo separa un identificador PÚBLICO de cuenta (merchantId, viaja en
+// el body al crear un pago, sin auth) de un token PRIVADO (Bearer, solo
+// hace falta para consultar/confirmar un pago). Todavía no tiene firma
+// de webhook (ver talo-webhook.js), por eso no hay campo de secreto acá.
+interface FormPagoTalo {
+  modo: 'test' | 'produccion'
+  habilitado: boolean
+  merchantId: string
+  accessToken: string
+}
+
+const FORM_PAGO_TALO_VACIO: FormPagoTalo = {
+  modo: 'test',
+  habilitado: false,
+  merchantId: '',
+  accessToken: '',
+}
+
 export default function Empresa() {
   const { empresa, cargando, guardando, error, guardar } = useEmpresa()
   const [form, setForm] = useState<FormEmpresa>(FORM_VACIO)
@@ -261,6 +281,12 @@ export default function Empresa() {
   const [guardandoPago, setGuardandoPago] = useState(false)
   const [mensajePago, setMensajePago] = useState<string | null>(null)
   const [errorPago, setErrorPago] = useState<string | null>(null)
+
+  const [pagoTaloEstado, setPagoTaloEstado] = useState<EstadoPago | null>(null)
+  const [formPagoTalo, setFormPagoTalo] = useState<FormPagoTalo>(FORM_PAGO_TALO_VACIO)
+  const [guardandoPagoTalo, setGuardandoPagoTalo] = useState(false)
+  const [mensajePagoTalo, setMensajePagoTalo] = useState<string | null>(null)
+  const [errorPagoTalo, setErrorPagoTalo] = useState<string | null>(null)
 
   // Precarga el formulario con los datos nativos de creación del
   // cliente (wizard) + lo que ya se haya completado en Configuración.
@@ -340,6 +366,30 @@ export default function Empresa() {
     }
   }, [empresa?.id])
 
+  // Carga el estado de Talo (no sensible) -- mismo criterio que Mercado
+  // Pago arriba, pidiendo el proveedor 'talo' aparte.
+  useEffect(() => {
+    if (!empresa) return
+    let activo = true
+    obtenerEstadoPago(empresa.id, 'talo')
+      .then((estado) => {
+        if (!activo) return
+        setPagoTaloEstado(estado)
+        setFormPagoTalo((prev) => ({
+          ...prev,
+          modo: estado.modo ?? 'test',
+          habilitado: estado.habilitado ?? false,
+          merchantId: estado.merchantId ?? '',
+        }))
+      })
+      .catch((err) => {
+        if (activo) setErrorPagoTalo(err instanceof Error ? err.message : 'No se pudo cargar el estado de Talo')
+      })
+    return () => {
+      activo = false
+    }
+  }, [empresa?.id])
+
   async function handleGuardarPago() {
     if (!empresa) return
     setMensajePago(null)
@@ -365,6 +415,35 @@ export default function Empresa() {
       setErrorPago(err instanceof Error ? err.message : 'No se pudo guardar la configuración de Cobro Online')
     } finally {
       setGuardandoPago(false)
+    }
+  }
+
+  // Fase 12b: mismo patrón que handleGuardarPago, para Talo. merchantId
+  // no es secreto -- viene precargado del estado (a diferencia de
+  // accessToken, que nunca vuelve del backend).
+  async function handleGuardarPagoTalo() {
+    if (!empresa) return
+    setMensajePagoTalo(null)
+    setErrorPagoTalo(null)
+
+    setGuardandoPagoTalo(true)
+    try {
+      await guardarConfigPago({
+        clienteId: empresa.id,
+        proveedor: 'talo',
+        modo: formPagoTalo.modo,
+        habilitado: formPagoTalo.habilitado,
+        merchantId: formPagoTalo.merchantId || undefined,
+        accessToken: formPagoTalo.accessToken || undefined,
+      })
+      const estadoNuevo = await obtenerEstadoPago(empresa.id, 'talo')
+      setPagoTaloEstado(estadoNuevo)
+      setFormPagoTalo((prev) => ({ ...prev, accessToken: '' }))
+      setMensajePagoTalo('Configuración de Talo guardada.')
+    } catch (err) {
+      setErrorPagoTalo(err instanceof Error ? err.message : 'No se pudo guardar la configuración de Talo')
+    } finally {
+      setGuardandoPagoTalo(false)
     }
   }
 
@@ -1194,6 +1273,88 @@ export default function Empresa() {
           </Button>
           {mensajePago && <span className="text-sm text-green-600">{mensajePago}</span>}
           {errorPago && <span className="text-sm text-red-500">{errorPago}</span>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="text-muted-foreground h-4 w-4" />
+            Cobro online (Talo)
+          </CardTitle>
+          <CardDescription>
+            Fase 12b — segundo proveedor de cobro online, por transferencia bancaria. Creá tu cuenta
+            en talo.com.ar/signup (empezá en modo Test/sandbox) y copiá acá tu User ID (identificador
+            de cuenta) y tu API Key/token. Si habilitás Talo y Mercado Pago al mismo tiempo, el Menú
+            Público usa Mercado Pago.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label>Modo</Label>
+            <Select
+              value={formPagoTalo.modo}
+              onValueChange={(v) => setFormPagoTalo({ ...formPagoTalo, modo: v as FormPagoTalo['modo'] })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="test">Test (sandbox de Talo)</SelectItem>
+                <SelectItem value="produccion">Producción (cobros reales)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div />
+
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="taloMerchantId">User ID</Label>
+            <Input
+              id="taloMerchantId"
+              placeholder="Identificador de cuenta que te da Talo al crearla"
+              value={formPagoTalo.merchantId}
+              onChange={(e) => setFormPagoTalo({ ...formPagoTalo, merchantId: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="taloAccessToken">API Key / Token</Label>
+            <Input
+              id="taloAccessToken"
+              type="password"
+              placeholder={
+                pagoTaloEstado?.tieneAccessToken
+                  ? 'Ya hay un token cargado — pegá uno nuevo solo si lo querés reemplazar'
+                  : 'Token privado del panel de Talo'
+              }
+              value={formPagoTalo.accessToken}
+              onChange={(e) => setFormPagoTalo({ ...formPagoTalo, accessToken: e.target.value })}
+            />
+            <p className="text-muted-foreground text-xs">
+              Nunca se vuelve a mostrar una vez guardado — solo se puede reemplazar.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <input
+              id="pagoTaloHabilitado"
+              type="checkbox"
+              checked={formPagoTalo.habilitado}
+              onChange={(e) => setFormPagoTalo({ ...formPagoTalo, habilitado: e.target.checked })}
+            />
+            <Label htmlFor="pagoTaloHabilitado">Habilitar cobro con Talo para este negocio</Label>
+          </div>
+        </CardContent>
+        <CardContent className="flex items-center gap-3 pt-0">
+          <Button onClick={handleGuardarPagoTalo} disabled={guardandoPagoTalo} variant="outline">
+            {guardandoPagoTalo ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            Guardar configuración de Talo
+          </Button>
+          {mensajePagoTalo && <span className="text-sm text-green-600">{mensajePagoTalo}</span>}
+          {errorPagoTalo && <span className="text-sm text-red-500">{errorPagoTalo}</span>}
         </CardContent>
       </Card>
 

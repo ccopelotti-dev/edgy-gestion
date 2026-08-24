@@ -36,7 +36,7 @@ export default async (req) => {
   }
 
   const proveedor = String(body.proveedor || 'mercadopago')
-  if (!['mercadopago'].includes(proveedor)) {
+  if (!['mercadopago', 'talo'].includes(proveedor)) {
     return new Response(JSON.stringify({ ok: false, error: 'Proveedor de pago no soportado' }), { status: 400 })
   }
 
@@ -78,9 +78,9 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: false, error: 'Modo inválido' }), { status: 400 })
   }
 
-  // 4) Upsert -- access_token/webhook_secret solo se pisan si vienen
-  // en el body (así se puede cambiar modo/habilitado sin tener que
-  // volver a pegar las credenciales cada vez).
+  // 4) Upsert -- access_token/webhook_secret/merchant_id solo se pisan
+  // si vienen en el body (así se puede cambiar modo/habilitado sin
+  // tener que volver a pegar las credenciales cada vez).
   const fila = {
     cliente_id: clienteId,
     proveedor,
@@ -93,6 +93,11 @@ export default async (req) => {
   }
   if (typeof body.webhookSecret === 'string' && body.webhookSecret.trim()) {
     fila.webhook_secret = body.webhookSecret.trim()
+  }
+  // merchant_id: solo lo usa Talo por ahora (su `user_id` -- público,
+  // no es un secreto, ver 0094_fase12b_talo_pago_online.sql).
+  if (typeof body.merchantId === 'string' && body.merchantId.trim()) {
+    fila.merchant_id = body.merchantId.trim()
   }
 
   const { error: upsertError } = await supabaseAdmin

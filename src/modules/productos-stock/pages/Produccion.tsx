@@ -163,6 +163,13 @@ export default function Produccion() {
     () => necesidadesOrdenadas.filter((n) => !n.alcanza),
     [necesidadesOrdenadas],
   )
+  // Fase 49 (24/08, a pedido de Carlos -- "no podemos hacer un todo si
+  // faltan partes"): antes este panel era solo informativo, el botón de
+  // abajo seguía habilitado igual. store.tsx (crearProduccionBorrador) ya
+  // rechaza el lote a nivel de datos si falta stock, pero acá se bloquea
+  // el botón directamente para que el operador no llene todo el
+  // formulario y recién se entere del error al final.
+  const bloqueadoPorInsumos = !!(necesidadesResult && !necesidadesResult.ok) || faltantes.length > 0
   // Fase 45h (Etapa 2 del split de OC): clave de agrupamiento de UN
   // faltante -- si el insumo tiene proveedor habitual cargado, agrupa por
   // ESE proveedor real (`prov:<id>`); si no, cae al agrupado por rubro de
@@ -833,8 +840,16 @@ export default function Produccion() {
               </div>
             )}
 
-            <div className="flex justify-end">
-              <Button onClick={handleRegistrar} disabled={!formulaSeleccionada || guardando}>
+            <div className="flex items-center justify-end gap-3">
+              {bloqueadoPorInsumos && (
+                <span className="text-xs text-red-600">
+                  No se puede registrar -- falta stock de insumos (revisá la tabla de arriba).
+                </span>
+              )}
+              <Button
+                onClick={handleRegistrar}
+                disabled={!formulaSeleccionada || guardando || bloqueadoPorInsumos}
+              >
                 {guardando ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (

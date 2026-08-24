@@ -3117,11 +3117,14 @@ export async function crearProduccionBorrador(
   const insumoIdsFormula = formula.lineas
     .filter((l) => l.tipo === 'insumo' && l.insumoId)
     .map((l) => l.insumoId as string)
-  const datosInsumos = new Map<string, { unidad: UnidadMedida; anchoRollo?: number; nombre: string; costo: number }>()
+  const datosInsumos = new Map<
+    string,
+    { unidad: UnidadMedida; anchoRollo?: number; nombre: string; costo: number; stock: number }
+  >()
   if (insumoIdsFormula.length > 0) {
     const { data: insumosRows, error: errInsumos } = await supabase
       .from('insumos')
-      .select('id, unidad, ancho_rollo, nombre, costo')
+      .select('id, unidad, ancho_rollo, nombre, costo, stock')
       .in('id', insumoIdsFormula)
     if (errInsumos) {
       return { ok: false, error: `No se pudieron verificar las unidades de los insumos: ${errInsumos.message}` }
@@ -3132,6 +3135,7 @@ export async function crearProduccionBorrador(
         anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
         nombre: r.nombre as string,
         costo: Number(r.costo ?? 0),
+        stock: Number(r.stock ?? 0),
       })
     }
   }
@@ -3180,6 +3184,40 @@ export async function crearProduccionBorrador(
       ok: false,
       error:
         'No se pudo calcular el detalle de insumos de este lote (la fórmula tiene líneas de insumo pero el cálculo dio vacío). Probá recargar la página y registrar de nuevo -- si vuelve a pasar, avisá a soporte.',
+    }
+  }
+
+  // Fase 49 (24/08, a pedido de Carlos -- "no podemos hacer un todo si
+  // faltan partes"): bloquea el lote si algún insumo no alcanza en stock,
+  // en vez de dejarlo pasar y que quede negativo recién al confirmar (caso
+  // real: Sal y Vino tinto quedaron en negativo porque se produjo igual
+  // sin tener el insumo cargado). Se chequea acá, al nivel de datos --no
+  // solo en la UI de Producción-- porque este mismo cálculo también lo usa
+  // el flujo "a medida" (registrarProduccionConfirmada llama a esta
+  // función), que no tiene el panel de disponibilidad. Si un insumo de
+  // verdad viene prestado de un tercero, hay que cargarlo a stock primero
+  // (Ajuste manual o Recepción) -- nunca se descuenta "de la nada".
+  // Se suma por insumoId porque una fórmula puede tener más de una línea
+  // del mismo insumo (ej. una parte al principio del proceso y otra al
+  // final) -- el chequeo tiene que ser contra el consumo TOTAL del lote,
+  // no línea por línea.
+  const consumoPorInsumo = new Map<string, number>()
+  for (const imp of insumosImputados) {
+    consumoPorInsumo.set(imp.insumoId, (consumoPorInsumo.get(imp.insumoId) ?? 0) + imp.cantidad)
+  }
+  const faltantes: string[] = []
+  for (const [insumoId, cantidadNecesaria] of consumoPorInsumo) {
+    const datos = datosInsumos.get(insumoId)
+    if (!datos) continue
+    if (cantidadNecesaria > datos.stock) {
+      const falta = cantidadNecesaria - datos.stock
+      faltantes.push(`${datos.nombre} (faltan ${falta.toFixed(2)} ${unidadLabel(datos.unidad)})`)
+    }
+  }
+  if (faltantes.length > 0) {
+    return {
+      ok: false,
+      error: `No alcanza el stock para producir este lote -- ${faltantes.join(', ')}. Cargá el stock que falta (Recepción o Ajuste manual) antes de producir.`,
     }
   }
 
