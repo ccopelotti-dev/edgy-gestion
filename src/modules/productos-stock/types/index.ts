@@ -258,6 +258,10 @@ export interface InsumoParaNecesidad {
   /** Fase 45h (Etapa 2 del split de OC): proveedor habitual del insumo,
    * ver Insumo.proveedorId. undefined = sin cargar. */
   proveedorId?: string
+  /** Fase 48b: presentaciones de compra, ver Insumo.presentaciones -- se
+   * usan para redondear la cantidad sugerida en la OC generada desde
+   * faltantes (ver handleGenerarOC en Produccion.tsx). */
+  presentaciones: InsumoPresentacion[]
 }
 
 export interface NecesidadInsumo {
@@ -705,14 +709,36 @@ export interface Insumo {
    * faltantes en una OC por proveedor real en vez de por rubro -- ver
    * `agruparFaltantesPorOC` más abajo. */
   proveedorId?: string
-  /** Fase 48 (24/08, a pedido de Carlos -- Charcutería, caso Starter que
-   * viene en sachet de 40 g): cuánto pesa/contiene UN envase de compra de
-   * este insumo, en la unidad nativa (`unidad`). Opcional -- undefined =
-   * no aplica (default, sin cambios para insumos existentes). Por ahora
-   * solo dato + ayuda visual (listado de Insumos y Recepción); no afecta
-   * el cálculo de faltantes/OC todavía. */
-  pesoEnvase?: number
+  /** Fase 48b (24/08, a pedido de Carlos -- Charcutería, caso Starter que
+   * viene en sachets de 20 g Y de 40 g): presentaciones de compra de este
+   * insumo -- reemplaza al campo único `pesoEnvase` de la Fase 48 (mismo
+   * día, sin datos cargados todavía -- se pisó antes de usarse en serio)
+   * porque un insumo puede tener MÁS de una presentación real. Lista
+   * vacía = no hay presentaciones cargadas (default, sin cambios para
+   * insumos existentes). Una puede marcarse `esDefault` -- ver
+   * InsumoPresentacion. */
+  presentaciones: InsumoPresentacion[]
   createdAt: string
+}
+
+/** Fase 48b: una presentación de compra de un Insumo (ej. "Sachet 40 g").
+ * `contenido` está en la unidad nativa del insumo (`Insumo.unidad`).
+ * `esDefault` marca cuál usa el sistema para sugerir/redondear cantidades
+ * automáticamente (OC generada desde faltantes de Producción) -- a lo
+ * sumo una por insumo (garantizado por índice único parcial en la
+ * migración). Las demás quedan disponibles para elegir a mano. */
+export interface InsumoPresentacion {
+  id: string
+  nombre?: string
+  contenido: number
+  esDefault: boolean
+}
+
+/** Devuelve la presentación de compra a usar para sugerir/redondear
+ * cantidades: la marcada `esDefault`, o si no hay ninguna marcada, la
+ * primera de la lista (mejor una referencia aproximada que ninguna). */
+export function presentacionDefault(presentaciones: InsumoPresentacion[]): InsumoPresentacion | undefined {
+  return presentaciones.find((p) => p.esDefault) ?? presentaciones[0]
 }
 
 // ─── Formular Producto ──────────────────────────────────────────────────────────

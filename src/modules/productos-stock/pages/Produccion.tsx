@@ -40,6 +40,7 @@ import {
   unidadAbrev,
   calcularCantidadesAMedida,
   calcularNecesidadInsumos,
+  presentacionDefault,
   type InsumoParaNecesidad,
   type Produccion,
   type InsumoImputado,
@@ -137,6 +138,7 @@ export default function Produccion() {
         rubroId: i.rubroId,
         costo: i.costo,
         proveedorId: i.proveedorId,
+        presentaciones: i.presentaciones,
       })
     }
     return m
@@ -201,13 +203,34 @@ export default function Produccion() {
       productoNombre,
       proveedorId,
       rubroNombre: rubroId ? (rubrosMap.get(rubroId) ?? 'Sin rubro') : undefined,
-      items: items.map((n) => ({
-        insumoId: n.insumoId,
-        descripcion: n.nombre,
-        cantidad: Math.round(n.faltante * 100) / 100,
-        unidad: n.unidadNativa,
-        precioUnitario: n.costoUnitario,
-      })),
+      items: items.map((n) => {
+        const faltanteReal = Math.round(n.faltante * 100) / 100
+        // Fase 48b (a pedido de Carlos): si el insumo tiene una
+        // presentación de compra habitual cargada, no tiene sentido pedir
+        // "6,3 g" -- ningún proveedor vende así. Se redondea hacia arriba
+        // al múltiplo de envase más cercano, y se deja explícito en la
+        // descripción cuántos envases son (la cantidad real la sigue
+        // viendo Carlos en el chequeo de Disponibilidad de esta pantalla).
+        const pres = presentacionDefault(insumosPorId.get(n.insumoId)?.presentaciones ?? [])
+        if (!pres) {
+          return {
+            insumoId: n.insumoId,
+            descripcion: n.nombre,
+            cantidad: faltanteReal,
+            unidad: n.unidadNativa,
+            precioUnitario: n.costoUnitario,
+          }
+        }
+        const envases = Math.ceil(faltanteReal / pres.contenido)
+        const cantidadRedondeada = envases * pres.contenido
+        return {
+          insumoId: n.insumoId,
+          descripcion: `${n.nombre} -- ${envases} ${envases === 1 ? 'envase' : 'envases'}${pres.nombre ? ` (${pres.nombre})` : ''}`,
+          cantidad: cantidadRedondeada,
+          unidad: n.unidadNativa,
+          precioUnitario: n.costoUnitario,
+        }
+      }),
     }))
 
     guardarColaOcBorrador(cola)

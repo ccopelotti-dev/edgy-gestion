@@ -41,7 +41,7 @@ import {
 import { InsumoDialog, AjusteStockDialog } from '../components/productos/dialogs'
 import { DuplicadosDialog, detectarDuplicados } from '../components/productos/duplicados-dialog'
 import { formatARS } from '../lib/format'
-import { unidadAbrev } from '../types'
+import { unidadAbrev, presentacionDefault } from '../types'
 import type { Insumo, MotivoAjuste } from '../types'
 
 // ─── Input class ──────────────────────────────────────────────────────────────
@@ -495,11 +495,17 @@ export default function Insumos() {
                         vinculado a producto
                       </span>
                     )}
-                    {i.pesoEnvase != null && (
-                      <div className="text-[11px] font-normal text-gray-400">
-                        Envase: {i.pesoEnvase} {unidadAbrev(i.unidad)}
-                      </div>
-                    )}
+                    {(() => {
+                      const def = presentacionDefault(i.presentaciones)
+                      if (!def) return null
+                      return (
+                        <div className="text-[11px] font-normal text-gray-400">
+                          {def.nombre ? `${def.nombre}: ` : 'Envase: '}
+                          {def.contenido} {unidadAbrev(i.unidad)}
+                          {i.presentaciones.length > 1 && ` (+${i.presentaciones.length - 1})`}
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {(() => {

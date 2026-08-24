@@ -72,6 +72,7 @@ import type {
   Producto,
   ProductoVariante,
   Insumo,
+  InsumoPresentacion,
   Rubro,
   SubRubro,
   Marca,
@@ -1221,7 +1222,16 @@ function insumoToRow(i: Insumo, clienteId: string) {
     producto_vinculado_id: i.productoVinculadoId || null,
     ancho_rollo: i.anchoRollo ?? null,
     proveedor_id: i.proveedorId || null,
-    peso_envase: i.pesoEnvase ?? null,
+  }
+}
+
+function insumoPresentacionToRow(p: InsumoPresentacion, insumoId: string) {
+  return {
+    id: p.id,
+    insumo_id: insumoId,
+    nombre: p.nombre || null,
+    contenido: p.contenido,
+    es_default: p.esDefault,
   }
 }
 
@@ -1310,6 +1320,7 @@ function sincronizarInsumoDeProducto(producto: Producto, insumos: Insumo[]): Ins
       esComercializable: true,
       productoVinculadoId: producto.id,
       anchoRollo: producto.anchoRollo,
+      presentaciones: [],
       createdAt: todayISO(),
     }
     return [...insumos, nuevo]
@@ -1553,14 +1564,40 @@ async function syncToSupabase(
       return
 
     case 'ADD_INSUMO': {
+      // Fase 48b: mismo patrón que ADD_FORMULA -- las presentaciones se
+      // insertan DESPUÉS de que el insumo padre haya confirmado, para que
+      // la política RLS de insumo_presentaciones (que exige que exista un
+      // insumo con ese id) no evalúe antes de tiempo.
       const i = nextState.insumos[nextState.insumos.length - 1]
-      supabase.from('insumos').insert(insumoToRow(i, clienteId)).then(logErr('alta de insumo'))
+      supabase
+        .from('insumos')
+        .insert(insumoToRow(i, clienteId))
+        .then((res) => {
+          logErr('alta de insumo')(res)
+          if (!res.error && i.presentaciones.length) {
+            supabase
+              .from('insumo_presentaciones')
+              .insert(i.presentaciones.map((p) => insumoPresentacionToRow(p, i.id)))
+              .then(logErr('presentaciones de insumo'))
+          }
+        })
       return
     }
-    case 'UPDATE_INSUMO':
-      supabase.from('insumos').update(insumoToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de insumo'))
+    case 'UPDATE_INSUMO': {
+      const i = action.payload
+      supabase.from('insumos').update(insumoToRow(i, clienteId)).eq('id', i.id).then(logErr('edición de insumo'))
+      supabase.from('insumo_presentaciones').delete().eq('insumo_id', i.id).then(() => {
+        if (i.presentaciones.length) {
+          supabase
+            .from('insumo_presentaciones')
+            .insert(i.presentaciones.map((p) => insumoPresentacionToRow(p, i.id)))
+            .then(logErr('presentaciones de insumo'))
+        }
+      })
       return
+    }
     case 'DELETE_INSUMO':
+      // insumo_presentaciones tiene ON DELETE CASCADE en la migración.
       supabase.from('insumos').delete().eq('id', action.payload).then(logErr('borrado de insumo'))
       return
 
@@ -2056,6 +2093,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     productosRes,
     productoVariantesRes,
     insumosRes,
+    insumoPresentacionesRes,
     rubrosRes,
     subRubrosRes,
     marcasRes,
@@ -2079,6 +2117,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     supabase.from('productos').select('*').order('created_at'),
     supabase.from('producto_variantes').select('*').order('orden'),
     supabase.from('insumos').select('*').order('created_at'),
+    supabase.from('insumo_presentaciones').select('*'),
     supabase.from('rubros').select('*').order('created_at'),
     supabase.from('sub_rubros').select('*').order('created_at'),
     supabase.from('marcas').select('*').order('nombre'),
@@ -2148,6 +2187,20 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
+  // Fase 48b: presentaciones de compra, agrupadas por insumo -- mismo
+  // patrón que formulaLineasByFormula.
+  const presentacionesByInsumo = new Map<string, InsumoPresentacion[]>()
+  for (const r of insumoPresentacionesRes.data ?? []) {
+    const arr = presentacionesByInsumo.get(r.insumo_id) ?? []
+    arr.push({
+      id: r.id,
+      nombre: r.nombre ?? undefined,
+      contenido: Number(r.contenido),
+      esDefault: r.es_default,
+    })
+    presentacionesByInsumo.set(r.insumo_id, arr)
+  }
+
   const insumos: Insumo[] = (insumosRes.data ?? []).map((r: any) => ({
     id: r.id,
     nombre: r.nombre,
@@ -2161,7 +2214,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     productoVinculadoId: r.producto_vinculado_id ?? undefined,
     anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     proveedorId: r.proveedor_id ?? undefined,
-    pesoEnvase: r.peso_envase != null ? Number(r.peso_envase) : undefined,
+    presentaciones: presentacionesByInsumo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 
@@ -2480,6 +2533,14 @@ export async function crearInsumoConfirmado(
   const nuevo: Insumo = { ...data, id: uid(), createdAt: todayISO() }
   const { error } = await supabase.from('insumos').insert(insumoToRow(nuevo, clienteId))
   if (error) return { ok: false, error: error.message }
+  // Fase 48b: mismo criterio que guardarFormulaConfirmada -- las
+  // presentaciones se insertan DESPUÉS de que el insumo padre confirmó.
+  if (nuevo.presentaciones.length) {
+    const { error: presErr } = await supabase
+      .from('insumo_presentaciones')
+      .insert(nuevo.presentaciones.map((p) => insumoPresentacionToRow(p, nuevo.id)))
+    if (presErr) return { ok: false, error: presErr.message }
+  }
   return { ok: true, data: nuevo }
 }
 
@@ -2499,6 +2560,16 @@ export async function actualizarInsumoConfirmado(
       error:
         'No se encontró este insumo en la base -- puede que nunca se haya guardado. Probá crearlo de nuevo.',
     }
+  }
+  // Fase 48b: mismo criterio que guardarFormulaConfirmada -- borra y
+  // reinserta las presentaciones (lista chica, más simple que un diff).
+  const { error: delPresErr } = await supabase.from('insumo_presentaciones').delete().eq('insumo_id', i.id)
+  if (delPresErr) return { ok: false, error: delPresErr.message }
+  if (i.presentaciones.length) {
+    const { error: presErr } = await supabase
+      .from('insumo_presentaciones')
+      .insert(i.presentaciones.map((p) => insumoPresentacionToRow(p, i.id)))
+    if (presErr) return { ok: false, error: presErr.message }
   }
   return { ok: true, data: i }
 }
@@ -2657,7 +2728,21 @@ async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
 async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
   const uniqueIds = Array.from(new Set(ids))
   if (!uniqueIds.length) return []
-  const { data } = await supabase.from('insumos').select('*').in('id', uniqueIds)
+  const [{ data }, { data: presentacionesData }] = await Promise.all([
+    supabase.from('insumos').select('*').in('id', uniqueIds),
+    supabase.from('insumo_presentaciones').select('*').in('insumo_id', uniqueIds),
+  ])
+  const presentacionesByInsumo = new Map<string, InsumoPresentacion[]>()
+  for (const r of presentacionesData ?? []) {
+    const arr = presentacionesByInsumo.get(r.insumo_id) ?? []
+    arr.push({
+      id: r.id,
+      nombre: r.nombre ?? undefined,
+      contenido: Number(r.contenido),
+      esDefault: r.es_default,
+    })
+    presentacionesByInsumo.set(r.insumo_id, arr)
+  }
   return (data ?? []).map((r: any) => ({
     id: r.id,
     nombre: r.nombre,
@@ -2671,7 +2756,7 @@ async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
     productoVinculadoId: r.producto_vinculado_id ?? undefined,
     anchoRollo: r.ancho_rollo != null ? Number(r.ancho_rollo) : undefined,
     proveedorId: r.proveedor_id ?? undefined,
-    pesoEnvase: r.peso_envase != null ? Number(r.peso_envase) : undefined,
+    presentaciones: presentacionesByInsumo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),
   }))
 }

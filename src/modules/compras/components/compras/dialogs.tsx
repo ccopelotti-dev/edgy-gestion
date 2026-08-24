@@ -37,7 +37,7 @@ import { esCuitValido } from '@/lib/validarCuit';
 import { TIPOS_COMPROBANTE_ARCA } from '@/modules/impuestos/lib/arcaReferencia';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { UNIDADES, unidadAbrev, type UnidadMedida } from '@/modules/productos-stock/types';
+import { UNIDADES, unidadAbrev, presentacionDefault, type UnidadMedida, type InsumoPresentacion } from '@/modules/productos-stock/types';
 
 // ─── Shared styles ───────────────────────────────────────────
 
@@ -366,7 +366,10 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
       const [insumosRes, productosRes] = await Promise.all([
         supabase
           .from('insumos')
-          .select('id, nombre, unidad, costo, stock')
+          // Fase 48b: nested select trae las presentaciones de compra en la
+          // misma consulta (PostgREST resuelve la FK insumo_presentaciones
+          // -> insumos sola, sin join manual).
+          .select('id, nombre, unidad, costo, stock, insumo_presentaciones(id, nombre, contenido, es_default)')
           .eq('cliente_id', clienteTenant!.id)
           .order('nombre'),
         supabase
@@ -385,6 +388,12 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
           unidad: i.unidad as UnidadMedida,
           costo: Number(i.costo),
           stock: Number(i.stock),
+          presentaciones: ((i.insumo_presentaciones ?? []) as any[]).map((p) => ({
+            id: p.id,
+            nombre: p.nombre ?? undefined,
+            contenido: Number(p.contenido),
+            esDefault: p.es_default,
+          })),
         })),
       );
       setProductosCatalogo(
@@ -632,6 +641,18 @@ export function CotizacionDialog({ open, onOpenChange, proveedores, cotizacion, 
                           </td>
                           <td className="px-2 py-1.5">
                             <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" type="number" min={0} step={0.01} value={item.cantidad || ''} onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))} />
+                            {(() => {
+                              // Fase 48b: ayuda "≈ N envases" -- mismo criterio que en
+                              // Recepción, solo referencia, no cambia el valor real cargado.
+                              const insumo = item.insumoId ? insumosCatalogo.find((i) => i.id === item.insumoId) : undefined;
+                              const pres = insumo ? presentacionDefault(insumo.presentaciones ?? []) : undefined;
+                              if (!pres || !item.cantidad) return null;
+                              return (
+                                <p className="text-[10px] text-muted-foreground leading-tight text-right">
+                                  ≈ {(item.cantidad / pres.contenido).toFixed(2).replace('.', ',')} env.
+                                </p>
+                              );
+                            })()}
                           </td>
                           <td className="px-2 py-1.5">
                             <select
@@ -758,6 +779,9 @@ interface InsumoCatalogoCompra {
   unidad: UnidadMedida;
   costo: number;
   stock: number;
+  // Fase 48b: presentaciones de compra (ver Insumo.presentaciones en
+  // productos-stock/types) -- para la ayuda "N envases" al cargar Cantidad.
+  presentaciones?: InsumoPresentacion[];
 }
 
 interface ProductoCatalogoCompra {
@@ -884,7 +908,10 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
       const [insumosRes, productosRes] = await Promise.all([
         supabase
           .from('insumos')
-          .select('id, nombre, unidad, costo, stock')
+          // Fase 48b: nested select trae las presentaciones de compra en la
+          // misma consulta (PostgREST resuelve la FK insumo_presentaciones
+          // -> insumos sola, sin join manual).
+          .select('id, nombre, unidad, costo, stock, insumo_presentaciones(id, nombre, contenido, es_default)')
           .eq('cliente_id', clienteTenant!.id)
           .order('nombre'),
         supabase
@@ -903,6 +930,12 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
           unidad: i.unidad as UnidadMedida,
           costo: Number(i.costo),
           stock: Number(i.stock),
+          presentaciones: ((i.insumo_presentaciones ?? []) as any[]).map((p) => ({
+            id: p.id,
+            nombre: p.nombre ?? undefined,
+            contenido: Number(p.contenido),
+            esDefault: p.es_default,
+          })),
         })),
       );
       setProductosCatalogo(
@@ -1281,6 +1314,17 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
                               value={item.cantidad || ''}
                               onChange={(e) => updateItem(idx, 'cantidad', Number(e.target.value))}
                             />
+                            {(() => {
+                              // Fase 48b: ayuda "≈ N envases" -- ver mismo bloque en CotizacionDialog.
+                              const insumo = item.insumoId ? insumosCatalogo.find((i) => i.id === item.insumoId) : undefined;
+                              const pres = insumo ? presentacionDefault(insumo.presentaciones ?? []) : undefined;
+                              if (!pres || !item.cantidad) return null;
+                              return (
+                                <p className="text-[10px] text-muted-foreground leading-tight text-right">
+                                  ≈ {(item.cantidad / pres.contenido).toFixed(2).replace('.', ',')} env.
+                                </p>
+                              );
+                            })()}
                           </td>
                           <td className="px-2 py-1.5">
                             <select

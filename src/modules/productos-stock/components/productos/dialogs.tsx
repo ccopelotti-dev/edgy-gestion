@@ -45,6 +45,8 @@ import {
   DIA_SEMANA_LABEL,
   DIAS_SEMANA_ORDEN,
   unidadLabel,
+  unidadAbrev,
+  presentacionDefault,
 } from '../../types'
 
 // ─── Shared input class ───────────────────────────────────────────────────────
@@ -1246,6 +1248,17 @@ const emptyInsumo: InsumoFormData = {
   stockMinimo: 0,
   costo: 0,
   esComercializable: false,
+  presentaciones: [],
+}
+
+/** Fase 48b: fila de edición local para una presentación -- el contenido
+ * se edita como texto (mismo criterio que costoTexto/stockMinimoTexto) y
+ * recién se parsea a número al guardar. */
+interface PresentacionForm {
+  id: string
+  nombre: string
+  contenidoTexto: string
+  esDefault: boolean
 }
 
 export function InsumoDialog({
@@ -1263,8 +1276,8 @@ export function InsumoDialog({
   const [costoTexto, setCostoTexto] = useState('')
   // Fase 41.7: ver comentario de Insumo.anchoRollo en types/index.ts.
   const [anchoRolloTexto, setAnchoRolloTexto] = useState('')
-  // Fase 48: ver comentario de Insumo.pesoEnvase en types/index.ts.
-  const [pesoEnvaseTexto, setPesoEnvaseTexto] = useState('')
+  // Fase 48b: ver comentario de Insumo.presentaciones en types/index.ts.
+  const [presentacionesForm, setPresentacionesForm] = useState<PresentacionForm[]>([])
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
 
@@ -1309,13 +1322,20 @@ export function InsumoDialog({
         setStockMinimoTexto(decimalATexto(rest.stockMinimo))
         setCostoTexto(decimalATexto(rest.costo))
         setAnchoRolloTexto(rest.anchoRollo != null ? decimalATexto(rest.anchoRollo) : '')
-        setPesoEnvaseTexto(rest.pesoEnvase != null ? decimalATexto(rest.pesoEnvase) : '')
+        setPresentacionesForm(
+          rest.presentaciones.map((p) => ({
+            id: p.id,
+            nombre: p.nombre ?? '',
+            contenidoTexto: decimalATexto(p.contenido),
+            esDefault: p.esDefault,
+          })),
+        )
       } else {
         setForm(emptyInsumo)
         setStockMinimoTexto('')
         setCostoTexto('')
         setAnchoRolloTexto('')
-        setPesoEnvaseTexto('')
+        setPresentacionesForm([])
       }
     }
   }, [open, editData])
@@ -1324,12 +1344,53 @@ export function InsumoDialog({
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  // Fase 48b: helpers de la lista de presentaciones.
+  function agregarPresentacion() {
+    setPresentacionesForm((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), nombre: '', contenidoTexto: '', esDefault: prev.length === 0 },
+    ])
+  }
+  function actualizarPresentacion(idx: number, patch: Partial<PresentacionForm>) {
+    setPresentacionesForm((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)))
+  }
+  function marcarDefault(idx: number) {
+    setPresentacionesForm((prev) => prev.map((p, i) => ({ ...p, esDefault: i === idx })))
+  }
+  function quitarPresentacion(idx: number) {
+    setPresentacionesForm((prev) => {
+      const quitada = prev[idx]
+      const resto = prev.filter((_, i) => i !== idx)
+      // Si se quitó la que era default y quedan otras, la primera pasa a serlo
+      // -- nunca queda la lista sin ninguna marcada si hay al menos una fila.
+      if (quitada?.esDefault && resto.length > 0 && !resto.some((p) => p.esDefault)) {
+        resto[0] = { ...resto[0], esDefault: true }
+      }
+      return resto
+    })
+  }
+
   async function handleSave() {
     if (!form.nombre.trim()) return
     if (guardando) return
     setErrorGuardado('')
+    // Presentaciones con contenido vacío o inválido se descartan en
+    // silencio (fila a medio cargar, no vale la pena bloquear el guardado
+    // del insumo por eso -- el usuario puede volver a completarla después).
+    const presentaciones = presentacionesForm
+      .filter((p) => p.contenidoTexto.trim() && parsearDecimal(p.contenidoTexto) > 0)
+      .map((p) => ({
+        id: p.id,
+        nombre: p.nombre.trim() || undefined,
+        contenido: parsearDecimal(p.contenidoTexto),
+        esDefault: p.esDefault,
+      }))
     setGuardando(true)
-    const errorGuardar = await onSave({ ...form, subRubroId: form.subRubroId || undefined })
+    const errorGuardar = await onSave({
+      ...form,
+      subRubroId: form.subRubroId || undefined,
+      presentaciones,
+    })
     setGuardando(false)
     if (errorGuardar) {
       setErrorGuardado(errorGuardar)
@@ -1537,26 +1598,65 @@ export function InsumoDialog({
             </div>
           </div>
 
-          {/* Fase 48: contenido del envase de compra -- ver Insumo.pesoEnvase. */}
+          {/* Fase 48b: presentaciones de compra -- ver Insumo.presentaciones. */}
           <div className="grid gap-1.5">
-            <label className="text-sm font-medium">Contenido del envase</label>
-            <input
-              className={inputClass}
-              type="text"
-              inputMode="decimal"
-              placeholder={`Ej. 40 (en ${unidadLabel(form.unidad)})`}
-              value={pesoEnvaseTexto}
-              onChange={(e) => {
-                const texto = sanitizarDecimal(e.target.value)
-                setPesoEnvaseTexto(texto)
-                update('pesoEnvase', texto.trim() ? parsearDecimal(texto) : undefined)
-              }}
-            />
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Presentaciones de compra</label>
+              <Button type="button" variant="outline" size="sm" onClick={agregarPresentacion}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Agregar
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
-              Opcional -- cuánto trae UN envase de compra (sachet, bolsa, balde), en la misma
-              unidad del insumo. Ej. 40 si el Starter viene en sachets de 40 g. Se usa como
-              referencia al cargar Recepciones -- dejalo vacío si no aplica.
+              Opcional -- cómo se compra realmente este insumo (sachet, bolsa, balde), en la
+              misma unidad de arriba ({unidadLabel(form.unidad)}). Ej. "Sachet 40 g" con
+              contenido 40. Si cargás más de una, marcá con el punto cuál es la habitual --
+              esa es la que se usa para sugerir/redondear cantidades.
             </p>
+            {presentacionesForm.length > 0 && (
+              <div className="grid gap-2 mt-1">
+                {presentacionesForm.map((p, idx) => (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => marcarDefault(idx)}
+                      title={p.esDefault ? 'Presentación habitual' : 'Marcar como habitual'}
+                      className={`h-4 w-4 shrink-0 rounded-full border ${
+                        p.esDefault ? 'bg-primary border-primary' : 'border-muted-foreground/40'
+                      }`}
+                    />
+                    <input
+                      className={`${inputClass} flex-1`}
+                      placeholder="Nombre (ej. Sachet chico)"
+                      value={p.nombre}
+                      onChange={(e) => actualizarPresentacion(idx, { nombre: e.target.value })}
+                    />
+                    <input
+                      className={`${inputClass} w-28`}
+                      type="text"
+                      inputMode="decimal"
+                      placeholder={`Ej. 40`}
+                      value={p.contenidoTexto}
+                      onChange={(e) =>
+                        actualizarPresentacion(idx, { contenidoTexto: sanitizarDecimal(e.target.value) })
+                      }
+                    />
+                    <span className="text-xs text-muted-foreground w-14 shrink-0">
+                      {unidadAbrev(form.unidad)}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-red-500 shrink-0"
+                      onClick={() => quitarPresentacion(idx)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Comercializable */}
@@ -1962,12 +2062,16 @@ export function RecepcionDialog({
                           updateLinea(idx, { cantidadTexto: texto, cantidad: parsearDecimal(texto) })
                         }}
                       />
-                      {insumoSeleccionado?.pesoEnvase && linea.cantidad > 0 && (
-                        <p className="text-[10px] text-muted-foreground leading-tight">
-                          ≈ {(linea.cantidad / insumoSeleccionado.pesoEnvase).toFixed(2).replace('.', ',')}{' '}
-                          envases
-                        </p>
-                      )}
+                      {(() => {
+                        const pres = insumoSeleccionado ? presentacionDefault(insumoSeleccionado.presentaciones) : undefined
+                        if (!pres || linea.cantidad <= 0) return null
+                        return (
+                          <p className="text-[10px] text-muted-foreground leading-tight">
+                            ≈ {(linea.cantidad / pres.contenido).toFixed(2).replace('.', ',')} envases
+                            {pres.nombre ? ` (${pres.nombre})` : ''}
+                          </p>
+                        )
+                      })()}
                     </div>
 
                     {/* Costo unitario */}
