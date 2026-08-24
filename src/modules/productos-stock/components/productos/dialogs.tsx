@@ -3025,6 +3025,20 @@ export function AjusteStockDialog({
     setCantidad(parsearDecimal(texto))
   }
 
+  // Completa la Cantidad con el negativo EXACTO del stock actual -- para
+  // casos como residuos de coma flotante (ej. 1.249999999999997 en vez de
+  // 1.25, que se van acumulando con restas sucesivas) donde tipear el
+  // ajuste a mano es tedioso y fácil de errar un dígito. Usa item.stock
+  // directo (no lo que esté tipeado en el texto), así resta ese mismo
+  // número consigo mismo y el resultado da 0 exacto, sin importar cuántos
+  // decimales de basura tenga.
+  function handleLlevarACero() {
+    const cant = -item.stock
+    setCantidad(cant)
+    setCantidadTexto(decimalATexto(cant))
+    setMotivo('conteo_fisico')
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -3038,9 +3052,22 @@ export function AjusteStockDialog({
         <div className="grid gap-4 py-4">
           {/* Stock actual */}
           <div className="rounded-md bg-muted px-4 py-3">
-            <div className="flex justify-between text-sm">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Stock actual</span>
-              <span className="font-medium">{item.stock}</span>
+              <div className="flex items-center gap-3">
+                <span className="font-medium">{item.stock}</span>
+                {item.stock !== 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={handleLlevarACero}
+                  >
+                    Llevar a 0
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
