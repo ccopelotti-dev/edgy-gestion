@@ -495,6 +495,11 @@ export default function Insumos() {
                         vinculado a producto
                       </span>
                     )}
+                    {i.pesoEnvase != null && (
+                      <div className="text-[11px] font-normal text-gray-400">
+                        Envase: {i.pesoEnvase} {unidadAbrev(i.unidad)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {(() => {

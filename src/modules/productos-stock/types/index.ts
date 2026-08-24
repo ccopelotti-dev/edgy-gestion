@@ -705,6 +705,13 @@ export interface Insumo {
    * faltantes en una OC por proveedor real en vez de por rubro -- ver
    * `agruparFaltantesPorOC` más abajo. */
   proveedorId?: string
+  /** Fase 48 (24/08, a pedido de Carlos -- Charcutería, caso Starter que
+   * viene en sachet de 40 g): cuánto pesa/contiene UN envase de compra de
+   * este insumo, en la unidad nativa (`unidad`). Opcional -- undefined =
+   * no aplica (default, sin cambios para insumos existentes). Por ahora
+   * solo dato + ayuda visual (listado de Insumos y Recepción); no afecta
+   * el cálculo de faltantes/OC todavía. */
+  pesoEnvase?: number
   createdAt: string
 }
 

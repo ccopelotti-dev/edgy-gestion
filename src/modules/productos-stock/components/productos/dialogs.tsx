@@ -44,6 +44,7 @@ import {
   MAX_IMAGENES_PRODUCTO,
   DIA_SEMANA_LABEL,
   DIAS_SEMANA_ORDEN,
+  unidadLabel,
 } from '../../types'
 
 // ─── Shared input class ───────────────────────────────────────────────────────
@@ -1262,6 +1263,8 @@ export function InsumoDialog({
   const [costoTexto, setCostoTexto] = useState('')
   // Fase 41.7: ver comentario de Insumo.anchoRollo en types/index.ts.
   const [anchoRolloTexto, setAnchoRolloTexto] = useState('')
+  // Fase 48: ver comentario de Insumo.pesoEnvase en types/index.ts.
+  const [pesoEnvaseTexto, setPesoEnvaseTexto] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [errorGuardado, setErrorGuardado] = useState('')
 
@@ -1306,11 +1309,13 @@ export function InsumoDialog({
         setStockMinimoTexto(decimalATexto(rest.stockMinimo))
         setCostoTexto(decimalATexto(rest.costo))
         setAnchoRolloTexto(rest.anchoRollo != null ? decimalATexto(rest.anchoRollo) : '')
+        setPesoEnvaseTexto(rest.pesoEnvase != null ? decimalATexto(rest.pesoEnvase) : '')
       } else {
         setForm(emptyInsumo)
         setStockMinimoTexto('')
         setCostoTexto('')
         setAnchoRolloTexto('')
+        setPesoEnvaseTexto('')
       }
     }
   }, [open, editData])
@@ -1530,6 +1535,28 @@ export function InsumoDialog({
                 disabled={vinculado}
               />
             </div>
+          </div>
+
+          {/* Fase 48: contenido del envase de compra -- ver Insumo.pesoEnvase. */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Contenido del envase</label>
+            <input
+              className={inputClass}
+              type="text"
+              inputMode="decimal"
+              placeholder={`Ej. 40 (en ${unidadLabel(form.unidad)})`}
+              value={pesoEnvaseTexto}
+              onChange={(e) => {
+                const texto = sanitizarDecimal(e.target.value)
+                setPesoEnvaseTexto(texto)
+                update('pesoEnvase', texto.trim() ? parsearDecimal(texto) : undefined)
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Opcional -- cuánto trae UN envase de compra (sachet, bolsa, balde), en la misma
+              unidad del insumo. Ej. 40 si el Starter viene en sachets de 40 g. Se usa como
+              referencia al cargar Recepciones -- dejalo vacío si no aplica.
+            </p>
           </div>
 
           {/* Comercializable */}
@@ -1870,6 +1897,13 @@ export function RecepcionDialog({
                   : undefined
               const tieneVariantes =
                 productoSeleccionado?.tipo === 'con_variantes'
+              // Fase 48: ayuda visual "≈ N envases" -- ver Insumo.pesoEnvase.
+              // Solo un texto de referencia, no cambia cómo se carga la
+              // cantidad (que sigue siempre en la unidad nativa del insumo).
+              const insumoSeleccionado =
+                linea.itemTipo === 'insumo'
+                  ? insumos.find((ins) => ins.id === linea.itemId)
+                  : undefined
 
               return (
                 <div
@@ -1928,6 +1962,12 @@ export function RecepcionDialog({
                           updateLinea(idx, { cantidadTexto: texto, cantidad: parsearDecimal(texto) })
                         }}
                       />
+                      {insumoSeleccionado?.pesoEnvase && linea.cantidad > 0 && (
+                        <p className="text-[10px] text-muted-foreground leading-tight">
+                          ≈ {(linea.cantidad / insumoSeleccionado.pesoEnvase).toFixed(2).replace('.', ',')}{' '}
+                          envases
+                        </p>
+                      )}
                     </div>
 
                     {/* Costo unitario */}
