@@ -73,7 +73,7 @@ import type {
   ProductoVariante,
   Insumo,
   InsumoPresentacion,
-  InsumoDocumento,
+  DocumentoTecnico,
   Rubro,
   SubRubro,
   Marca,
@@ -1237,10 +1237,25 @@ function insumoPresentacionToRow(p: InsumoPresentacion, insumoId: string) {
   }
 }
 
-function insumoDocumentoToRow(d: InsumoDocumento, insumoId: string) {
+function insumoDocumentoToRow(d: DocumentoTecnico, insumoId: string) {
   return {
     id: d.id,
     insumo_id: insumoId,
+    tipo: d.tipo,
+    titulo: d.titulo,
+    descripcion: d.descripcion || null,
+    path: d.path || null,
+    url: d.url || null,
+    contenido: d.contenido || null,
+  }
+}
+
+// Fase 48e: mismo Catálogo Técnico que Insumo, ahora para Producto -- ver
+// comentario en Producto.documentos (types/index.ts).
+function productoDocumentoToRow(d: DocumentoTecnico, productoId: string) {
+  return {
+    id: d.id,
+    producto_id: productoId,
     tipo: d.tipo,
     titulo: d.titulo,
     descripcion: d.descripcion || null,
@@ -1561,6 +1576,14 @@ async function syncToSupabase(
           .insert(p.variantes.map((v, idx) => productoVarianteToRow(v, p.id, idx)))
           .then(logErr('variantes de producto'))
       }
+      // Fase 48e: mismo patrón que ADD_INSUMO -- los documentos se
+      // insertan después de que el producto padre haya confirmado.
+      if (p.documentos.length) {
+        supabase
+          .from('producto_documentos')
+          .insert(p.documentos.map((d) => productoDocumentoToRow(d, p.id)))
+          .then(logErr('documentos de producto'))
+      }
       persistirInsumosVinculados(prevState, nextState, clienteId)
       return
     }
@@ -1568,6 +1591,14 @@ async function syncToSupabase(
       const p = action.payload
       supabase.from('productos').update(productoToRow(p, clienteId)).eq('id', p.id).then(logErr('edición de producto'))
       syncProductoVariantes(p.id, p.tipo === 'con_variantes' ? p.variantes : [])
+      supabase.from('producto_documentos').delete().eq('producto_id', p.id).then(() => {
+        if (p.documentos.length) {
+          supabase
+            .from('producto_documentos')
+            .insert(p.documentos.map((d) => productoDocumentoToRow(d, p.id)))
+            .then(logErr('documentos de producto'))
+        }
+      })
       persistirInsumosVinculados(prevState, nextState, clienteId)
       return
     }
@@ -2122,6 +2153,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
   const [
     productosRes,
     productoVariantesRes,
+    productoDocumentosRes,
     insumosRes,
     insumoPresentacionesRes,
     insumoDocumentosRes,
@@ -2147,6 +2179,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
   ] = await Promise.all([
     supabase.from('productos').select('*').order('created_at'),
     supabase.from('producto_variantes').select('*').order('orden'),
+    supabase.from('producto_documentos').select('*').order('created_at'),
     supabase.from('insumos').select('*').order('created_at'),
     supabase.from('insumo_presentaciones').select('*'),
     supabase.from('insumo_documentos').select('*').order('created_at'),
@@ -2184,6 +2217,24 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     variantesByProducto.set(r.producto_id, arr)
   }
 
+  // Fase 48e: documentos del catálogo técnico, agrupados por producto --
+  // mismo patrón que documentosByInsumo más abajo.
+  const documentosByProducto = new Map<string, DocumentoTecnico[]>()
+  for (const r of productoDocumentosRes.data ?? []) {
+    const arr = documentosByProducto.get(r.producto_id) ?? []
+    arr.push({
+      id: r.id,
+      tipo: r.tipo as DocumentoTecnico['tipo'],
+      titulo: r.titulo,
+      descripcion: r.descripcion ?? undefined,
+      path: r.path ?? undefined,
+      url: r.url ?? undefined,
+      contenido: r.contenido ?? undefined,
+      createdAt: (r.created_at ?? '').slice(0, 10),
+    })
+    documentosByProducto.set(r.producto_id, arr)
+  }
+
   const productos: Producto[] = (productosRes.data ?? []).map((r: any) => ({
     id: r.id,
     codigo: r.codigo ?? '',
@@ -2202,6 +2253,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     estado: r.estado,
     tieneFormula: r.tiene_formula,
     imagenes: r.imagenes ?? [],
+    documentos: documentosByProducto.get(r.id) ?? [],
     codigoBarras: r.codigo_barras ?? undefined,
     marcaId: r.marca_id ?? undefined,
     proveedorId: r.proveedor_id ?? undefined,
@@ -2235,12 +2287,12 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
 
   // Fase 48c: documentos del catálogo técnico, agrupados por insumo --
   // mismo patrón que presentacionesByInsumo.
-  const documentosByInsumo = new Map<string, InsumoDocumento[]>()
+  const documentosByInsumo = new Map<string, DocumentoTecnico[]>()
   for (const r of insumoDocumentosRes.data ?? []) {
     const arr = documentosByInsumo.get(r.insumo_id) ?? []
     arr.push({
       id: r.id,
-      tipo: r.tipo as InsumoDocumento['tipo'],
+      tipo: r.tipo as DocumentoTecnico['tipo'],
       titulo: r.titulo,
       descripcion: r.descripcion ?? undefined,
       path: r.path ?? undefined,
@@ -2540,6 +2592,14 @@ export async function crearProductoConfirmado(
   const nuevo: Producto = { ...data, id: uid(), createdAt: todayISO() }
   const { error } = await supabase.from('productos').insert(productoToRow(nuevo, clienteId))
   if (error) return { ok: false, error: error.message }
+  // Fase 48e: mismo criterio que crearInsumoConfirmado -- documentos del
+  // catálogo técnico después de que el producto padre confirmó.
+  if (nuevo.documentos.length) {
+    const { error: docErr } = await supabase
+      .from('producto_documentos')
+      .insert(nuevo.documentos.map((d) => productoDocumentoToRow(d, nuevo.id)))
+    if (docErr) return { ok: false, error: docErr.message }
+  }
   return { ok: true, data: nuevo }
 }
 
@@ -2559,6 +2619,13 @@ export async function actualizarProductoConfirmado(
       error:
         'No se encontró este producto en la base -- puede que nunca se haya guardado. Probá crearlo de nuevo.',
     }
+  }
+  const { error: delDocErr } = await supabase.from('producto_documentos').delete().eq('producto_id', p.id)
+  if (!delDocErr && p.documentos.length) {
+    await supabase
+      .from('producto_documentos')
+      .insert(p.documentos.map((d) => productoDocumentoToRow(d, p.id)))
+      .then(logErr('documentos de producto'))
   }
   return { ok: true, data: p }
 }
@@ -2743,9 +2810,10 @@ export async function guardarFormulaConfirmada(
 async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
   const uniqueIds = Array.from(new Set(ids))
   if (!uniqueIds.length) return []
-  const [productosRes, variantesRes] = await Promise.all([
+  const [productosRes, variantesRes, productoDocumentosRes] = await Promise.all([
     supabase.from('productos').select('*').in('id', uniqueIds),
     supabase.from('producto_variantes').select('*').in('producto_id', uniqueIds).order('orden'),
+    supabase.from('producto_documentos').select('*').in('producto_id', uniqueIds),
   ])
   const variantesByProducto = new Map<string, ProductoVariante[]>()
   for (const r of variantesRes.data ?? []) {
@@ -2758,6 +2826,21 @@ async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
       stock: Number(r.stock),
     })
     variantesByProducto.set(r.producto_id, arr)
+  }
+  const documentosByProducto = new Map<string, DocumentoTecnico[]>()
+  for (const r of productoDocumentosRes.data ?? []) {
+    const arr = documentosByProducto.get(r.producto_id) ?? []
+    arr.push({
+      id: r.id,
+      tipo: r.tipo as DocumentoTecnico['tipo'],
+      titulo: r.titulo,
+      descripcion: r.descripcion ?? undefined,
+      path: r.path ?? undefined,
+      url: r.url ?? undefined,
+      contenido: r.contenido ?? undefined,
+      createdAt: (r.created_at ?? '').slice(0, 10),
+    })
+    documentosByProducto.set(r.producto_id, arr)
   }
   return (productosRes.data ?? []).map((r: any) => ({
     id: r.id,
@@ -2777,6 +2860,7 @@ async function fetchProductosPorId(ids: string[]): Promise<Producto[]> {
     estado: r.estado,
     tieneFormula: r.tiene_formula,
     imagenes: r.imagenes ?? [],
+    documentos: documentosByProducto.get(r.id) ?? [],
     codigoBarras: r.codigo_barras ?? undefined,
     marcaId: r.marca_id ?? undefined,
     proveedorId: r.proveedor_id ?? undefined,
@@ -2814,12 +2898,12 @@ async function fetchInsumosPorId(ids: string[]): Promise<Insumo[]> {
     })
     presentacionesByInsumo.set(r.insumo_id, arr)
   }
-  const documentosByInsumo = new Map<string, InsumoDocumento[]>()
+  const documentosByInsumo = new Map<string, DocumentoTecnico[]>()
   for (const r of documentosData ?? []) {
     const arr = documentosByInsumo.get(r.insumo_id) ?? []
     arr.push({
       id: r.id,
-      tipo: r.tipo as InsumoDocumento['tipo'],
+      tipo: r.tipo as DocumentoTecnico['tipo'],
       titulo: r.titulo,
       descripcion: r.descripcion ?? undefined,
       path: r.path ?? undefined,

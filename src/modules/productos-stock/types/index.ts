@@ -575,6 +575,15 @@ export interface Producto {
    * El primer elemento es la foto principal.
    */
   imagenes: string[]
+  /** Fase 48e (24/08, a pedido de Carlos): repositorio de documentación
+   * técnica del producto (manual de instalación, ficha técnica del
+   * fabricante, certificado de garantía, video de uso) -- mismo
+   * Catálogo Técnico que ya tiene Insumo (Fase 48c/48d), aplicado acá.
+   * No reemplaza ni se mezcla con `imagenes` (esa es la galería
+   * pública del catálogo visual; esto es un repositorio interno, en
+   * bucket privado o por texto/link). Lista vacía = sin documentos
+   * cargados (default). Ver DocumentoTecnico. */
+  documentos: DocumentoTecnico[]
   /**
    * Código que lee el lector (de fábrica: EAN-13/UPC-A: 8-14 dígitos, o
    * interno: generado por Edgy para productos propios sin código de fábrica).
@@ -733,25 +742,27 @@ export interface Insumo {
    * esta información (por eso cada documento tiene `titulo` obligatorio:
    * es lo que un agente va a usar para decidir qué documento abrir, sin
    * depender del nombre de archivo). Lista vacía = sin documentos
-   * cargados (default). Ver InsumoDocumento. */
-  documentos: InsumoDocumento[]
+   * cargados (default). Ver DocumentoTecnico. */
+  documentos: DocumentoTecnico[]
   createdAt: string
 }
 
-/** Fase 48c/48d: un documento del catálogo técnico de un Insumo. `tipo`
- * define qué campo tiene el contenido real: 'pdf'/'imagen' -> `path`
- * (bucket privado "archivos-cliente", igual que utilidades/lib/archivos.ts
- * -- fichas técnicas y hojas de seguridad suelen ser información del
- * proveedor que no tiene sentido dejar pública); 'video' -> `url` (link
- * externo, ej. YouTube -- no se aloja el video, solo se referencia);
- * 'texto' -> `contenido` (Fase 48d, a pedido de Carlos: especificación
- * técnica escrita directo en el sistema, sin subir ningún archivo -- ej.
- * pegar la ficha del proveedor tal cual). */
-export type TipoDocumentoInsumo = 'pdf' | 'imagen' | 'video' | 'texto'
+/** Fase 48c/48d/48e: un documento del catálogo técnico de un Insumo o de
+ * un Producto (mismo tipo, reutilizado -- ver Producto.documentos e
+ * Insumo.documentos). `tipo` define qué campo tiene el contenido real:
+ * 'pdf'/'imagen' -> `path` (bucket privado "archivos-cliente", igual que
+ * utilidades/lib/archivos.ts -- fichas técnicas y hojas de seguridad
+ * suelen ser información del proveedor/fabricante que no tiene sentido
+ * dejar pública); 'video' -> `url` (link externo, ej. YouTube -- no se
+ * aloja el video, solo se referencia); 'texto' -> `contenido` (Fase 48d,
+ * a pedido de Carlos: especificación técnica escrita directo en el
+ * sistema, sin subir ningún archivo -- ej. pegar la ficha del proveedor
+ * tal cual). */
+export type TipoDocumentoTecnico = 'pdf' | 'imagen' | 'video' | 'texto'
 
-export interface InsumoDocumento {
+export interface DocumentoTecnico {
   id: string
-  tipo: TipoDocumentoInsumo
+  tipo: TipoDocumentoTecnico
   /** Título descriptivo obligatorio (ej. "Ficha técnica M-CULTURE RS 103",
    * "Hoja de seguridad", "Video: dosificación correcta") -- ver comentario
    * en Insumo.documentos sobre por qué es clave para uso futuro por IA. */
