@@ -17,7 +17,9 @@ import { supabase } from '@/lib/supabase'
 
 // Fase 12b: Talo se suma como segundo proveedor (transferencias
 // bancarias, docs.talo.com.ar) sobre la misma arquitectura factorizada.
-export type ProveedorPago = 'mercadopago' | 'talo'
+// Fase 12d: Getnet se suma como tercero (Get Checkout, cobro online --
+// docs.globalgetnet.com; la terminal física de Getnet queda afuera).
+export type ProveedorPago = 'mercadopago' | 'talo' | 'getnet'
 
 export interface EstadoPago {
   configurado: boolean
@@ -38,6 +40,13 @@ export interface EstadoPago {
   pointStoreId?: string
   pointPosId?: string
   pointTieneWebhookSecret?: boolean
+  // Fase 12d: Getnet Get Checkout -- client_id/client_secret son
+  // secretos (solo booleano si están cargados); seller_id no lo es
+  // (identificador de cuenta), así que viaja el valor real.
+  getnetTieneClientId?: boolean
+  getnetTieneClientSecret?: boolean
+  getnetSellerId?: string
+  getnetConfigTecnicaOk?: boolean
 }
 
 export interface TerminalPoint {
@@ -88,6 +97,26 @@ export async function obtenerEstadoPago(clienteId: string, proveedor: ProveedorP
 
 export async function guardarConfigPago(input: GuardarConfigPagoInput): Promise<void> {
   await llamarFuncion('pago-guardar-config', input)
+}
+
+// ── Fase 12d: Getnet Get Checkout ─────────────────────────────
+// Función aparte de guardarConfigPago() porque, a diferencia de MP/
+// Talo, guardar credenciales de Getnet dispara una llamada real a la
+// API de Getnet (configuración técnica del webhook) -- getnet-guardar-
+// config.js puede devolver `advertencia` si esa llamada falló aunque
+// las credenciales sí se hayan guardado (ver comentarios en esa función).
+
+export interface GuardarConfigGetnetInput {
+  clienteId: string
+  modo: 'test' | 'produccion'
+  habilitado: boolean
+  clientId?: string
+  clientSecret?: string
+  sellerId?: string
+}
+
+export async function guardarConfigGetnet(input: GuardarConfigGetnetInput): Promise<{ advertencia?: string }> {
+  return llamarFuncion<{ advertencia?: string }>('getnet-guardar-config', input)
 }
 
 // ── Fase 12c: Mercado Pago Point ──────────────────────────────

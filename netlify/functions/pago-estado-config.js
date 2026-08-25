@@ -56,7 +56,8 @@ export default async (req) => {
     .from('clientes_pago_config')
     .select(
       'proveedor, modo, habilitado, access_token, webhook_secret, merchant_id, ' +
-        'point_habilitado, point_terminal_id, point_terminal_label, point_store_id, point_pos_id, point_webhook_secret',
+        'point_habilitado, point_terminal_id, point_terminal_label, point_store_id, point_pos_id, point_webhook_secret, ' +
+        'getnet_client_id, getnet_client_secret, getnet_seller_id, getnet_config_tecnica_ok',
     )
     .eq('cliente_id', clienteId)
     .eq('proveedor', proveedor)
@@ -93,6 +94,13 @@ export default async (req) => {
       pointStoreId: config.point_store_id || undefined,
       pointPosId: config.point_pos_id || undefined,
       pointTieneWebhookSecret: Boolean(config.point_webhook_secret),
+      // Fase 12d: estado de Getnet -- seller_id no es secreto (es un
+      // identificador de cuenta, no una credencial), se devuelve el
+      // valor real para no obligar a recargarlo cada vez.
+      getnetTieneClientId: Boolean(config.getnet_client_id),
+      getnetTieneClientSecret: Boolean(config.getnet_client_secret),
+      getnetSellerId: config.getnet_seller_id || undefined,
+      getnetConfigTecnicaOk: Boolean(config.getnet_config_tecnica_ok),
     }),
     { status: 200 },
   )

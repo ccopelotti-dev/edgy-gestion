@@ -40,6 +40,7 @@ import { useEmpresa } from '../data/useEmpresa'
 import {
   obtenerEstadoPago,
   guardarConfigPago,
+  guardarConfigGetnet,
   listarTerminalesPoint,
   vincularTerminalPoint,
   type EstadoPago,
@@ -86,6 +87,29 @@ const FORM_PAGO_TALO_VACIO: FormPagoTalo = {
   accessToken: '',
 }
 
+// Fase 12d: Getnet Get Checkout (docs.globalgetnet.com) -- tercer
+// proveedor. A diferencia de MP/Talo usa OAuth2 client_credentials
+// (client_id + client_secret, sin token de larga duración para
+// guardar) y necesita además un Seller ID (UUID que asigna Getnet al
+// dar de alta la cuenta) para poder configurar el webhook la primera
+// vez -- ver getnet-guardar-config.js, que hace esa llamada a Getnet
+// al guardar.
+interface FormPagoGetnet {
+  modo: 'test' | 'produccion'
+  habilitado: boolean
+  sellerId: string
+  clientId: string
+  clientSecret: string
+}
+
+const FORM_PAGO_GETNET_VACIO: FormPagoGetnet = {
+  modo: 'test',
+  habilitado: false,
+  sellerId: '',
+  clientId: '',
+  clientSecret: '',
+}
+
 // Resumen de estado -- una fila por proveedor, para el vistazo rápido
 // de arriba de la pantalla.
 function FilaEstado({ nombre, estado }: { nombre: string; estado: 'no_configurado' | 'test' | 'produccion' }) {
@@ -118,6 +142,12 @@ export default function ProveedoresPago() {
   const [guardandoPagoTalo, setGuardandoPagoTalo] = useState(false)
   const [mensajePagoTalo, setMensajePagoTalo] = useState<string | null>(null)
   const [errorPagoTalo, setErrorPagoTalo] = useState<string | null>(null)
+
+  const [pagoGetnetEstado, setPagoGetnetEstado] = useState<EstadoPago | null>(null)
+  const [formPagoGetnet, setFormPagoGetnet] = useState<FormPagoGetnet>(FORM_PAGO_GETNET_VACIO)
+  const [guardandoPagoGetnet, setGuardandoPagoGetnet] = useState(false)
+  const [mensajePagoGetnet, setMensajePagoGetnet] = useState<string | null>(null)
+  const [errorPagoGetnet, setErrorPagoGetnet] = useState<string | null>(null)
 
   // Fase 12c: Mercado Pago Point (cobro presencial) -- vive sobre el
   // mismo pagoEstado de arriba (proveedor 'mercadopago'), no hace
@@ -178,6 +208,30 @@ export default function ProveedoresPago() {
     }
   }, [empresa?.id])
 
+  // Carga el estado de Getnet (no sensible) -- mismo criterio, pidiendo
+  // el proveedor 'getnet' aparte.
+  useEffect(() => {
+    if (!empresa) return
+    let activo = true
+    obtenerEstadoPago(empresa.id, 'getnet')
+      .then((estado) => {
+        if (!activo) return
+        setPagoGetnetEstado(estado)
+        setFormPagoGetnet((prev) => ({
+          ...prev,
+          modo: estado.modo ?? 'test',
+          habilitado: estado.habilitado ?? false,
+          sellerId: estado.getnetSellerId ?? '',
+        }))
+      })
+      .catch((err) => {
+        if (activo) setErrorPagoGetnet(err instanceof Error ? err.message : 'No se pudo cargar el estado de Getnet')
+      })
+    return () => {
+      activo = false
+    }
+  }, [empresa?.id])
+
   async function handleGuardarPago() {
     if (!empresa) return
     setMensajePago(null)
@@ -232,6 +286,40 @@ export default function ProveedoresPago() {
       setErrorPagoTalo(err instanceof Error ? err.message : 'No se pudo guardar la configuración de Talo')
     } finally {
       setGuardandoPagoTalo(false)
+    }
+  }
+
+  // Fase 12d: mismo patrón que handleGuardarPagoTalo, para Getnet.
+  // sellerId no es secreto -- viene precargado del estado. La función
+  // puede devolver `advertencia` si las credenciales se guardaron pero
+  // Getnet rechazó la configuración del webhook (ver getnet-guardar-config.js).
+  async function handleGuardarPagoGetnet() {
+    if (!empresa) return
+    setMensajePagoGetnet(null)
+    setErrorPagoGetnet(null)
+
+    setGuardandoPagoGetnet(true)
+    try {
+      const resultado = await guardarConfigGetnet({
+        clienteId: empresa.id,
+        modo: formPagoGetnet.modo,
+        habilitado: formPagoGetnet.habilitado,
+        sellerId: formPagoGetnet.sellerId || undefined,
+        clientId: formPagoGetnet.clientId || undefined,
+        clientSecret: formPagoGetnet.clientSecret || undefined,
+      })
+      const estadoNuevo = await obtenerEstadoPago(empresa.id, 'getnet')
+      setPagoGetnetEstado(estadoNuevo)
+      setFormPagoGetnet((prev) => ({ ...prev, clientId: '', clientSecret: '' }))
+      if (resultado.advertencia) {
+        setErrorPagoGetnet(resultado.advertencia)
+      } else {
+        setMensajePagoGetnet('Configuración de Getnet guardada.')
+      }
+    } catch (err) {
+      setErrorPagoGetnet(err instanceof Error ? err.message : 'No se pudo guardar la configuración de Getnet')
+    } finally {
+      setGuardandoPagoGetnet(false)
     }
   }
 
@@ -323,6 +411,11 @@ export default function ProveedoresPago() {
       ? 'produccion'
       : 'test'
     : 'no_configurado'
+  const estadoResumenGetnet: 'no_configurado' | 'test' | 'produccion' = !pagoGetnetEstado?.habilitado
+    ? 'no_configurado'
+    : pagoGetnetEstado.modo === 'produccion'
+      ? 'produccion'
+      : 'test'
 
   return (
     <div className="flex flex-col gap-6">
@@ -337,10 +430,11 @@ export default function ProveedoresPago() {
             alta una cuenta nueva.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-3">
+        <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <FilaEstado nombre="Mercado Pago (Checkout online)" estado={estadoResumenPago} />
           <FilaEstado nombre="Talo (transferencias)" estado={estadoResumenTalo} />
           <FilaEstado nombre="Mercado Pago Point (presencial)" estado={estadoResumenPoint} />
+          <FilaEstado nombre="Getnet (Get Checkout)" estado={estadoResumenGetnet} />
         </CardContent>
       </Card>
 
@@ -510,6 +604,114 @@ export default function ProveedoresPago() {
           </Button>
           {mensajePagoTalo && <span className="text-sm text-green-600">{mensajePagoTalo}</span>}
           {errorPagoTalo && <span className="text-sm text-red-500">{errorPagoTalo}</span>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="text-muted-foreground h-4 w-4" />
+            Cobro online (Getnet)
+          </CardTitle>
+          <CardDescription>
+            Fase 12d — tercer proveedor de cobro online (Get Checkout, docs.globalgetnet.com).
+            Necesitás tu Seller ID y un Client ID / Client Secret (se generan desde el Merchant
+            Portal de Getnet, sección Integraciones). Al guardar, Edgy Gestión le avisa a Getnet
+            automáticamente adónde mandar las notificaciones de pago -- no hace falta configurar
+            nada manualmente del lado de Getnet. Empezá en modo Test hasta confirmar que el link de
+            pago funciona.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label>Modo</Label>
+            <Select
+              value={formPagoGetnet.modo}
+              onValueChange={(v) => setFormPagoGetnet({ ...formPagoGetnet, modo: v as FormPagoGetnet['modo'] })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="test">Test (sandbox de Getnet)</SelectItem>
+                <SelectItem value="produccion">Producción (cobros reales)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div />
+
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="getnetSellerId">Seller ID</Label>
+            <Input
+              id="getnetSellerId"
+              placeholder="UUID que te da Getnet al dar de alta la cuenta"
+              value={formPagoGetnet.sellerId}
+              onChange={(e) => setFormPagoGetnet({ ...formPagoGetnet, sellerId: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="getnetClientId">Client ID</Label>
+            <Input
+              id="getnetClientId"
+              type="password"
+              placeholder={
+                pagoGetnetEstado?.getnetTieneClientId
+                  ? 'Ya hay uno cargado — pegá uno nuevo solo si lo querés reemplazar'
+                  : 'Generado en Merchant Portal > Integraciones'
+              }
+              value={formPagoGetnet.clientId}
+              onChange={(e) => setFormPagoGetnet({ ...formPagoGetnet, clientId: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="getnetClientSecret">Client Secret</Label>
+            <Input
+              id="getnetClientSecret"
+              type="password"
+              placeholder={
+                pagoGetnetEstado?.getnetTieneClientSecret
+                  ? 'Ya hay uno cargado — pegá uno nuevo solo si lo querés reemplazar'
+                  : 'Generado junto con el Client ID'
+              }
+              value={formPagoGetnet.clientSecret}
+              onChange={(e) => setFormPagoGetnet({ ...formPagoGetnet, clientSecret: e.target.value })}
+            />
+          </div>
+          <p className="text-muted-foreground text-xs sm:col-span-2">
+            Client ID y Client Secret nunca se vuelven a mostrar una vez guardados — solo se pueden
+            reemplazar. Si cambiás cualquiera de los tres campos de arriba, se vuelve a configurar el
+            webhook automáticamente contra Getnet.
+          </p>
+
+          {pagoGetnetEstado?.habilitado && (
+            <p className={`text-xs sm:col-span-2 ${pagoGetnetEstado.getnetConfigTecnicaOk ? 'text-green-600' : 'text-amber-600'}`}>
+              {pagoGetnetEstado.getnetConfigTecnicaOk
+                ? 'Configuración técnica con Getnet: OK -- ya puede recibir pagos.'
+                : 'Configuración técnica con Getnet: pendiente -- reintentá guardar (revisá el Seller ID).'}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <input
+              id="pagoGetnetHabilitado"
+              type="checkbox"
+              checked={formPagoGetnet.habilitado}
+              onChange={(e) => setFormPagoGetnet({ ...formPagoGetnet, habilitado: e.target.checked })}
+            />
+            <Label htmlFor="pagoGetnetHabilitado">Habilitar cobro con Getnet para este negocio</Label>
+          </div>
+        </CardContent>
+        <CardContent className="flex items-center gap-3 pt-0">
+          <Button onClick={handleGuardarPagoGetnet} disabled={guardandoPagoGetnet} variant="outline">
+            {guardandoPagoGetnet ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            Guardar configuración de Getnet
+          </Button>
+          {mensajePagoGetnet && <span className="text-sm text-green-600">{mensajePagoGetnet}</span>}
+          {errorPagoGetnet && <span className="text-sm text-red-500">{errorPagoGetnet}</span>}
         </CardContent>
       </Card>
 

@@ -110,10 +110,11 @@ interface MenuPublicoData {
     // "Pagar online" después de confirmar el pedido -- ver
     // netlify/functions/crear-preferencia-pago.js.
     pagoOnlineHabilitado?: boolean
-    // Fase 12b: cuál proveedor está habilitado -- decide a qué Netlify
-    // Function pegarle en pagarOnline() (crear-preferencia-pago para
-    // Mercado Pago, crear-pago-talo para Talo).
-    pagoOnlineProveedor?: 'mercadopago' | 'talo'
+    // Fase 12b/12d: cuál proveedor está habilitado -- decide a qué
+    // Netlify Function pegarle en pagarOnline() (crear-preferencia-pago
+    // para Mercado Pago, crear-pago-talo para Talo, crear-pago-getnet
+    // para Getnet).
+    pagoOnlineProveedor?: 'mercadopago' | 'talo' | 'getnet'
     // Fase 16 (Backlog menor): horario de atención opcional. Si
     // horarioActivo es false (default), el Catálogo acepta pedidos las
     // 24 hs como siempre. horarioDias usa la convención de
@@ -431,10 +432,16 @@ export default function MenuPublico() {
     if (!slug || !ordenIdCreada) return
     setPagandoOnline(true)
     setErrorPago('')
-    // Fase 12b: cuál función pegarle depende del proveedor habilitado
-    // para este negocio (menu_publico() ya resuelve la prioridad si
-    // hubiera más de uno -- ver 0094_fase12b_talo_pago_online.sql).
-    const funcion = data?.cliente?.pagoOnlineProveedor === 'talo' ? 'crear-pago-talo' : 'crear-preferencia-pago'
+    // Fase 12b/12d: cuál función pegarle depende del proveedor
+    // habilitado para este negocio (menu_publico() ya resuelve la
+    // prioridad si hubiera más de uno -- ver
+    // 0097_fase12d_getnet_pago_online.sql).
+    const funcion =
+      data?.cliente?.pagoOnlineProveedor === 'talo'
+        ? 'crear-pago-talo'
+        : data?.cliente?.pagoOnlineProveedor === 'getnet'
+          ? 'crear-pago-getnet'
+          : 'crear-preferencia-pago'
     try {
       const res = await fetch(`/.netlify/functions/${funcion}`, {
         method: 'POST',
