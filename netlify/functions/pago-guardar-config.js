@@ -99,6 +99,14 @@ export default async (req) => {
   if (typeof body.merchantId === 'string' && body.merchantId.trim()) {
     fila.merchant_id = body.merchantId.trim()
   }
+  // point_webhook_secret: Fase 12c -- secreto del Webhook de Orders
+  // API (topic "order"), independiente del webhook_secret de Checkout
+  // Pro. Solo aplica a proveedor='mercadopago' (Point usa la misma
+  // cuenta), se pisa solo si viene en el body (mismo criterio que el
+  // resto de los secretos de esta función).
+  if (typeof body.pointWebhookSecret === 'string' && body.pointWebhookSecret.trim()) {
+    fila.point_webhook_secret = body.pointWebhookSecret.trim()
+  }
 
   const { error: upsertError } = await supabaseAdmin
     .from('clientes_pago_config')

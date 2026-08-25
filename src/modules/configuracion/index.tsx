@@ -10,6 +10,7 @@ import { ConfiguracionLayout } from './ConfiguracionLayout'
 import Empresa from './pages/Empresa'
 import PuntosVenta from './pages/PuntosVenta'
 import Integraciones from './pages/Integraciones'
+import ProveedoresPago from './pages/ProveedoresPago'
 
 export default function ConfiguracionModule() {
   return (
@@ -17,6 +18,7 @@ export default function ConfiguracionModule() {
       <Route element={<ConfiguracionLayout />}>
         <Route index element={<Empresa />} />
         <Route path="puntos-venta" element={<PuntosVenta />} />
+        <Route path="proveedores-pago" element={<ProveedoresPago />} />
         <Route path="integraciones" element={<Integraciones />} />
       </Route>
     </Routes>

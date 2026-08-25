@@ -29,6 +29,23 @@ export interface EstadoPago {
   // Identificador público de cuenta (Talo lo llama `user_id`) -- no es
   // un secreto, así que viaja el valor real, no solo un booleano.
   merchantId?: string
+  // Fase 12c: Mercado Pago Point -- cobro presencial con terminal
+  // física, sobre la misma cuenta que Checkout Pro (proveedor
+  // 'mercadopago'). Ninguno de estos campos es sensible.
+  pointHabilitado?: boolean
+  pointTerminalId?: string
+  pointTerminalLabel?: string
+  pointStoreId?: string
+  pointPosId?: string
+  pointTieneWebhookSecret?: boolean
+}
+
+export interface TerminalPoint {
+  id: string
+  posId?: string
+  storeId?: string
+  externalPosId?: string
+  operatingMode: string
 }
 
 export interface GuardarConfigPagoInput {
@@ -39,6 +56,9 @@ export interface GuardarConfigPagoInput {
   accessToken?: string
   webhookSecret?: string
   merchantId?: string
+  // Fase 12c: se guarda junto con el resto de 'mercadopago' -- ver
+  // point_webhook_secret en clientes_pago_config.
+  pointWebhookSecret?: string
 }
 
 async function tokenSesion(): Promise<string> {
@@ -68,4 +88,23 @@ export async function obtenerEstadoPago(clienteId: string, proveedor: ProveedorP
 
 export async function guardarConfigPago(input: GuardarConfigPagoInput): Promise<void> {
   await llamarFuncion('pago-guardar-config', input)
+}
+
+// ── Fase 12c: Mercado Pago Point ──────────────────────────────
+
+export async function listarTerminalesPoint(clienteId: string): Promise<TerminalPoint[]> {
+  const resultado = await llamarFuncion<{ terminales: TerminalPoint[] }>('point-listar-terminales', { clienteId })
+  return resultado.terminales
+}
+
+export interface VincularTerminalPointInput {
+  clienteId: string
+  terminalId: string
+  terminalLabel?: string
+  storeId?: string
+  posId?: string
+}
+
+export async function vincularTerminalPoint(input: VincularTerminalPointInput): Promise<void> {
+  await llamarFuncion('point-vincular-terminal', input)
 }

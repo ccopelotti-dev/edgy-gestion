@@ -50,14 +50,12 @@ const INTEGRACIONES: Integracion[] = [
     icon: <Globe className="w-5 h-5" />,
     activa: false,
   },
-  {
-    id: 'mercadopago',
-    nombre: 'MercadoPago',
-    descripcion: 'Registrar cobros automáticamente cuando se confirman pagos en MercadoPago.',
-    tipo: 'plataforma',
-    icon: <ShoppingCart className="w-5 h-5" />,
-    activa: false,
-  },
+  // Fase 12c (25/08): la tarjeta 'mercadopago' que estaba acá se sacó
+  // -- era decorativa (nunca se conectó a nada real) y ahora coexistía
+  // de forma confusa con Configuración > Proveedores de Pago, que sí
+  // tiene la integración real de cobro (Mercado Pago Checkout Pro,
+  // Mercado Pago Point y Talo). Esta pestaña queda para integraciones
+  // que todavía no existen (AFIP, MercadoLibre, subsistemas).
   // ─── Verticales / Subsistemas ───────────────────────────
   {
     id: 'gastronomia',

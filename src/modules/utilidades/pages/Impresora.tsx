@@ -45,7 +45,7 @@ function PantallaSinEscritorio() {
       <div className="rounded-lg border bg-card p-5 shadow-sm">
         <div className="mb-3 flex items-center gap-2">
           <Printer className="h-5 w-5 text-muted-foreground" />
-          <p className="font-medium text-sm">Impresión automática</p>
+          <p className="font-medium text-sm">App para Windows</p>
         </div>
         <p className="text-sm text-muted-foreground">
           Para imprimir comprobantes directo en la impresora del mostrador (sin el diálogo de
@@ -56,7 +56,7 @@ function PantallaSinEscritorio() {
         <Button asChild className="mt-4">
           <a href={URL_DESCARGA_INSTALADOR} download>
             <Download className="mr-2 h-4 w-4" />
-            Descargar app de escritorio (Windows)
+            Descargar
           </a>
         </Button>
         <p className="mt-2 text-xs text-muted-foreground">

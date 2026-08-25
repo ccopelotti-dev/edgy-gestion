@@ -13,6 +13,10 @@ import {
   Receipt,
   AlertTriangle,
   ShieldCheck,
+  Wifi,
+  Loader2,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 
 import {
@@ -45,6 +49,7 @@ import { useClienteActual } from '@/hooks/useClienteActual';
 import { descontarStockPorVenta } from '../lib/descontarStockVenta';
 import { activarGarantiasPorVenta, type LineaGarantia } from '../lib/activarGarantiasVenta';
 import { autorizarComprobanteArca } from '../lib/arca';
+import { obtenerEstadoPago } from '@/modules/configuracion/lib/pagoConfig';
 
 // ─── Tipos locales ──────────────────────────────────────────
 
@@ -145,6 +150,20 @@ export default function PuntoDeVenta() {
   const [textoPrecio, setTextoPrecio] = useState<Record<string, string>>({});
   const [textoDescuento, setTextoDescuento] = useState<Record<string, string>>({});
 
+  // Fase 12c: cobro con Mercado Pago Point (terminal física) -- ver
+  // Configuración > Empresa para el alta de la terminal. `puntoPointHabilitado`
+  // se consulta una vez al entrar a la pantalla (no cambia en el medio de
+  // una venta); `pagoPointConfirmado` guarda la orden ya cobrada en la
+  // terminal para que handleFacturar la trate como pago completo, igual
+  // que ya hace con efectivo.
+  const [puntoPointHabilitado, setPuntoPointHabilitado] = useState(false);
+  const [puntoPointAbierto, setPuntoPointAbierto] = useState(false);
+  const [puntoPointCreando, setPuntoPointCreando] = useState(false);
+  const [puntoPointOrden, setPuntoPointOrden] = useState<{ ordenId: string } | null>(null);
+  const [puntoPointEstado, setPuntoPointEstado] = useState<string | null>(null);
+  const [puntoPointError, setPuntoPointError] = useState<string | null>(null);
+  const [pagoPointConfirmado, setPagoPointConfirmado] = useState<{ ordenId: string; medioPago: MedioPago } | null>(null);
+
   // Reloj en vivo
   useEffect(() => {
     const timer = setInterval(() => setAhora(nowISO()), 30_000);
@@ -165,6 +184,81 @@ export default function PuntoDeVenta() {
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Fase 12c: saber si este negocio tiene una terminal Point vinculada
+  // -- se consulta una sola vez al entrar a Mostrador (no hace falta
+  // refrescarlo dentro de la misma sesión de venta).
+  useEffect(() => {
+    if (!clienteTenant?.id) return;
+    let activo = true;
+    obtenerEstadoPago(clienteTenant.id)
+      .then((estado) => {
+        if (activo) setPuntoPointHabilitado(Boolean(estado.pointHabilitado && estado.pointTerminalId));
+      })
+      .catch(() => {
+        // Sin bloquear Mostrador si esto falla -- Point simplemente no
+        // aparece como opción.
+      });
+    return () => {
+      activo = false;
+    };
+  }, [clienteTenant?.id]);
+
+  // Cualquier cambio de medio de pago invalida un cobro con Point ya
+  // confirmado -- evita que quede "pegado" un cobro de una tarjeta
+  // anterior si el operador cambia de opinión sobre cómo cobrar.
+  useEffect(() => {
+    setPagoPointConfirmado(null);
+  }, [medioPago]);
+
+  // Polling del estado de la orden Point mientras el modal está
+  // abierto -- lee edgy_gestion.point_ordenes (nunca la API de
+  // Mercado Pago directo), que el Webhook point-orden-webhook.js va
+  // actualizando en tiempo real. Se corta solo (éxito/error/timeout de
+  // 5 minutos, igual al expiration_time por default de la orden).
+  useEffect(() => {
+    if (!puntoPointAbierto || !puntoPointOrden) return;
+    let activo = true;
+    const inicio = Date.now();
+
+    const intervalo = setInterval(async () => {
+      if (!activo) return;
+      const { data, error } = await supabase
+        .from('point_ordenes')
+        .select('estado, status_detail')
+        .eq('id', puntoPointOrden.ordenId)
+        .maybeSingle();
+
+      if (!activo) return;
+      if (error) return; // se reintenta en el próximo tick
+
+      if (data) setPuntoPointEstado(data.estado);
+
+      if (data?.estado === 'processed') {
+        clearInterval(intervalo);
+        setPagoPointConfirmado({ ordenId: puntoPointOrden.ordenId, medioPago });
+        setPuntoPointAbierto(false);
+      } else if (['canceled', 'failed', 'expired'].includes(data?.estado ?? '')) {
+        clearInterval(intervalo);
+        setPuntoPointError(
+          data?.estado === 'expired'
+            ? 'La orden expiró sin que se cobrara.'
+            : data?.status_detail || 'El cobro no se pudo completar.',
+        );
+      } else if (Date.now() - inicio > 5 * 60_000) {
+        clearInterval(intervalo);
+        setPuntoPointError('Se agotó el tiempo de espera -- revisá la terminal.');
+      }
+    }, 2000);
+
+    return () => {
+      activo = false;
+      clearInterval(intervalo);
+    };
+  }, [puntoPointAbierto, puntoPointOrden, medioPago]);
+
+  // handleCobrarConPoint/handleCancelarPoint quedan definidas más abajo,
+  // después de calcular `total` (useMemo) -- las necesitan tal cual.
 
   // Fase 6c del refactor de Productos: si el cliente configuró una lista
   // de precio para Ventas/Facturación (Productos → Listas de precio →
@@ -296,6 +390,63 @@ export default function PuntoDeVenta() {
     () => calcularTotalConIva(subtotalNeto, config.ivaDefault),
     [subtotalNeto, config.ivaDefault],
   );
+
+  // Fase 12c: recién acá `total` ya está declarado -- estas dos
+  // funciones necesitan el monto final a cobrar en la terminal.
+  const handleCobrarConPoint = useCallback(async () => {
+    if (!clienteTenant?.id || total <= 0) return;
+    setPuntoPointAbierto(true);
+    setPuntoPointCreando(true);
+    setPuntoPointError(null);
+    setPuntoPointEstado(null);
+    setPuntoPointOrden(null);
+    try {
+      const { data: sesion } = await supabase.auth.getSession();
+      const accessToken = sesion.session?.access_token;
+      if (!accessToken) throw new Error('No hay sesión activa');
+
+      const res = await fetch('/.netlify/functions/point-crear-orden', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          clienteId: clienteTenant.id,
+          monto: total,
+          descripcion: `Venta Mostrador -- ${clienteTenant.nombre ?? ''}`.trim(),
+        }),
+      });
+      const resultado = await res.json();
+      if (!res.ok || !resultado.ok) {
+        throw new Error(resultado.error || 'No se pudo crear la orden de cobro');
+      }
+      setPuntoPointOrden({ ordenId: resultado.ordenId });
+      setPuntoPointEstado('created');
+    } catch (err) {
+      setPuntoPointError(err instanceof Error ? err.message : 'No se pudo crear la orden de cobro');
+    } finally {
+      setPuntoPointCreando(false);
+    }
+  }, [clienteTenant, total]);
+
+  async function handleCancelarPoint() {
+    if (puntoPointOrden && clienteTenant?.id) {
+      try {
+        const { data: sesion } = await supabase.auth.getSession();
+        const accessToken = sesion.session?.access_token;
+        if (accessToken) {
+          await fetch('/.netlify/functions/point-cancelar-orden', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+            body: JSON.stringify({ clienteId: clienteTenant.id, ordenId: puntoPointOrden.ordenId }),
+          });
+        }
+      } catch {
+        // Best-effort -- si falla, la orden igual expira sola.
+      }
+    }
+    setPuntoPointAbierto(false);
+    setPuntoPointOrden(null);
+    setPuntoPointError(null);
+  }
 
   // Lista de clientes para el selector (Consumidor Final + activos)
   const opcionesCliente = useMemo(
@@ -518,7 +669,12 @@ export default function PuntoDeVenta() {
     });
 
     const comprobanteId = generarId();
-    const esPagoCompleto = medioPago === 'efectivo';
+    // Fase 12c: un cobro con Point ya confirmado (tarjeta débito/crédito,
+    // ver handleCobrarConPoint) cuenta como pago completo, igual que
+    // efectivo -- el chequeo por medioPago es defensivo, ya se invalida
+    // solo si el operador cambia el medio de pago (ver useEffect de arriba).
+    const cobradoConPoint = pagoPointConfirmado?.medioPago === medioPago;
+    const esPagoCompleto = medioPago === 'efectivo' || cobradoConPoint;
     const numFactura = nextNumeroComprobante.factura;
 
     dispatch({
@@ -544,7 +700,9 @@ export default function PuntoDeVenta() {
       },
     });
 
-    // Si es efectivo, registrar cobro automático
+    // Si es efectivo o ya se cobró con Point, registrar cobro automático
+    // (el medio de pago real es `medioPago` en ambos casos -- antes esto
+    // asumía 'efectivo' a secas porque era el único camino posible).
     if (esPagoCompleto) {
       dispatch({
         type: 'ADD_COBRO',
@@ -553,11 +711,16 @@ export default function PuntoDeVenta() {
           clienteId,
           fecha: hoy,
           monto: total,
-          medioPago: 'efectivo',
+          medioPago,
           imputaciones: [{ comprobanteId, montoImputado: total }],
           createdAt: now,
         },
       });
+    }
+    if (cobradoConPoint) {
+      setPagoPointConfirmado(null);
+      setPuntoPointOrden(null);
+      setPuntoPointEstado(null);
     }
 
     // Descuento de stock (Fase 6c) -- fire-and-forget, ya se validó que
@@ -1017,6 +1180,29 @@ export default function PuntoDeVenta() {
               </select>
             </div>
 
+            {/* Fase 12c: Cobrar con Point -- solo aparece con tarjeta y
+                terminal vinculada (ver Configuración > Empresa). */}
+            {puntoPointHabilitado && (medioPago === 'tarjeta_debito' || medioPago === 'tarjeta_credito') && (
+              <div>
+                {pagoPointConfirmado?.medioPago === medioPago ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Cobrado con Point -- facturá para confirmar la venta.
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCobrarConPoint}
+                    disabled={total <= 0}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                  >
+                    <Wifi className="h-4 w-4" />
+                    Cobrar con Point ({formatARS(total)})
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Modo de emisión */}
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500 uppercase tracking-wide">
@@ -1085,6 +1271,60 @@ export default function PuntoDeVenta() {
           </div>
         </div>
       </div>
+
+      {/* Fase 12c: modal de cobro con Point -- muestra el estado en vivo
+          de la orden mientras se espera que el comprador pague en la
+          terminal (polling de point_ordenes, ver useEffect de arriba). */}
+      {puntoPointAbierto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
+            <h3 className="mb-4 text-center text-base font-bold text-gray-900">Cobrando con Point</h3>
+
+            {puntoPointCreando && (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                <p className="text-sm text-gray-600">Enviando el cobro a la terminal…</p>
+              </div>
+            )}
+
+            {!puntoPointCreando && !puntoPointError && puntoPointOrden && (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                <p className="text-center text-sm text-gray-600">
+                  {puntoPointEstado === 'at_terminal'
+                    ? 'Esperando que el comprador pague en la terminal…'
+                    : 'Esperando confirmación de la terminal…'}
+                </p>
+                <p className="text-lg font-bold text-gray-900">{formatARS(total)}</p>
+              </div>
+            )}
+
+            {puntoPointError && (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <XCircle className="h-8 w-8 text-red-500" />
+                <p className="text-center text-sm font-medium text-red-600">{puntoPointError}</p>
+              </div>
+            )}
+
+            <div className="mt-2 flex justify-center gap-3">
+              {puntoPointError ? (
+                <button
+                  onClick={handleCobrarConPoint}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                >
+                  Reintentar
+                </button>
+              ) : null}
+              <button
+                onClick={handleCancelarPoint}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                {puntoPointError ? 'Cerrar' : 'Cancelar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

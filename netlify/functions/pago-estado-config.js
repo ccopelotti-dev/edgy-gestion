@@ -54,7 +54,10 @@ export default async (req) => {
 
   const { data: config, error: configError } = await supabaseAdmin
     .from('clientes_pago_config')
-    .select('proveedor, modo, habilitado, access_token, webhook_secret, merchant_id')
+    .select(
+      'proveedor, modo, habilitado, access_token, webhook_secret, merchant_id, ' +
+        'point_habilitado, point_terminal_id, point_terminal_label, point_store_id, point_pos_id, point_webhook_secret',
+    )
     .eq('cliente_id', clienteId)
     .eq('proveedor', proveedor)
     .maybeSingle()
@@ -81,6 +84,15 @@ export default async (req) => {
       // cuenta que Talo espera en el body al crear un pago) -- se
       // devuelve el valor real para no obligar a recargarlo cada vez.
       merchantId: config.merchant_id || undefined,
+      // Fase 12c: estado de Mercado Pago Point -- ninguno de estos
+      // campos es sensible (terminal_id/store_id/pos_id son
+      // identificadores públicos de la cuenta, no credenciales).
+      pointHabilitado: config.point_habilitado ?? false,
+      pointTerminalId: config.point_terminal_id || undefined,
+      pointTerminalLabel: config.point_terminal_label || undefined,
+      pointStoreId: config.point_store_id || undefined,
+      pointPosId: config.point_pos_id || undefined,
+      pointTieneWebhookSecret: Boolean(config.point_webhook_secret),
     }),
     { status: 200 },
   )

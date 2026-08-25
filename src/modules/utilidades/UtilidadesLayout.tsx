@@ -10,7 +10,7 @@ export function UtilidadesLayout() {
     { to: base, label: 'Explorador de archivos', icon: FolderOpen, end: true },
     { to: `${base}/importacion`, label: 'Importación masiva', icon: Upload, end: false },
     { to: `${base}/tracking-horas`, label: 'Tracking de horas', icon: Clock, end: false },
-    { to: `${base}/impresora`, label: 'Impresora', icon: Printer, end: false },
+    { to: `${base}/impresora`, label: 'Descargas', icon: Printer, end: false },
   ]
 
   return (
