@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
+import { supabase } from '@/lib/supabase';
 import { descargarOrdenCompraPdf } from '../lib/pdfComprobantes';
 import {
   useOrdenesCompra,
@@ -56,7 +57,40 @@ import {
   tomarSiguienteOcBorrador,
   guardarColaOcBorrador,
 } from '../types';
-import type { UnidadMedida } from '@/modules/productos-stock/types';
+import { UNIDADES, unidadAbrev, presentacionDefault, type UnidadMedida, type InsumoPresentacion } from '@/modules/productos-stock/types';
+
+// Conexión Compras -> Productos y Stock: buscador de insumo/producto real
+// del catálogo, mismo criterio que en CotizacionDialog/ComprobanteCompraDialog
+// (Fase 18/48b) -- este módulo no está montado dentro de
+// ProductosStockProvider, así que se consulta Supabase directo en vez de
+// usar los hooks de productos-stock/data/store.
+interface InsumoCatalogoCompra {
+  id: string;
+  nombre: string;
+  unidad: UnidadMedida;
+  costo: number;
+  stock: number;
+  presentaciones?: InsumoPresentacion[];
+}
+
+interface ProductoCatalogoCompra {
+  id: string;
+  nombre: string;
+  unidad: UnidadMedida;
+  costo: number;
+  stock: number;
+}
+
+type SugerenciaCatalogoCompra =
+  | { tipo: 'insumo'; item: InsumoCatalogoCompra }
+  | { tipo: 'producto'; item: ProductoCatalogoCompra };
+
+/** Una fila de item se considera "vacía" (candidata a reutilizarse al
+ * vincular un insumo/producto desde el buscador) si no tiene descripción
+ * propia ni ya está vinculada a otra cosa. */
+function filaOcVacia(item: { descripcion: string; insumoId?: string; productoId?: string }): boolean {
+  return !item.descripcion.trim() && !item.insumoId && !item.productoId;
+}
 
 // ─── Componente principal ───────────────────────────────────
 
@@ -115,8 +149,107 @@ export default function OrdenesCompra() {
   const [formFechaEntrega, setFormFechaEntrega] = useState('');
   const [formNotas, setFormNotas] = useState('');
   const [formItems, setFormItems] = useState([
-    { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined as string | undefined, unidad: undefined as UnidadMedida | undefined },
+    { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined as string | undefined, productoId: undefined as string | undefined, unidad: undefined as UnidadMedida | undefined },
   ]);
+  // Buscador de insumo/producto real del catálogo (mismo criterio que
+  // Cotizaciones/Comprobantes) -- Carlos pedía que la OC manual también
+  // pueda vincularse al catálogo, en vez de tipear descripción y precio a
+  // mano y quedar en $0 (auditado 27/08). Reutiliza `empresaActual`,
+  // declarado más abajo en el componente (ver PDF) -- se referencia acá
+  // sin volver a llamar useClienteActual().
+  const [insumosCatalogo, setInsumosCatalogo] = useState<InsumoCatalogoCompra[]>([]);
+  const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoCompra[]>([]);
+  const [busquedaCatalogo, setBusquedaCatalogo] = useState('');
+
+  useEffect(() => {
+    if (!showForm || !empresaActual?.id) return;
+    let activo = true;
+
+    async function cargarCatalogo() {
+      const [insumosRes, productosRes] = await Promise.all([
+        supabase
+          .from('insumos')
+          .select('id, nombre, unidad, costo, stock, insumo_presentaciones(id, nombre, contenido, es_default)')
+          .eq('cliente_id', empresaActual!.id)
+          .order('nombre'),
+        supabase
+          .from('productos')
+          .select('id, nombre, unidad_venta, costo, stock')
+          .eq('cliente_id', empresaActual!.id)
+          .eq('estado', 'activo')
+          .order('nombre'),
+      ]);
+      if (!activo) return;
+
+      setInsumosCatalogo(
+        ((insumosRes.data ?? []) as any[]).map((i) => ({
+          id: i.id,
+          nombre: i.nombre,
+          unidad: i.unidad as UnidadMedida,
+          costo: Number(i.costo),
+          stock: Number(i.stock),
+          presentaciones: ((i.insumo_presentaciones ?? []) as any[]).map((p) => ({
+            id: p.id,
+            nombre: p.nombre ?? undefined,
+            contenido: Number(p.contenido),
+            esDefault: p.es_default,
+          })),
+        })),
+      );
+      setProductosCatalogo(
+        ((productosRes.data ?? []) as any[]).map((p) => ({
+          id: p.id,
+          nombre: p.nombre,
+          unidad: p.unidad_venta as UnidadMedida,
+          costo: Number(p.costo),
+          stock: Number(p.stock),
+        })),
+      );
+    }
+
+    cargarCatalogo();
+    return () => {
+      activo = false;
+    };
+  }, [showForm, empresaActual?.id]);
+
+  const sugerenciasCatalogoOC = useMemo<SugerenciaCatalogoCompra[]>(() => {
+    const q = busquedaCatalogo.trim().toLowerCase();
+    if (!q) return [];
+    const insumos: SugerenciaCatalogoCompra[] = insumosCatalogo
+      .filter((i) => i.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'insumo' as const, item }));
+    const productos: SugerenciaCatalogoCompra[] = productosCatalogo
+      .filter((p) => p.nombre.toLowerCase().includes(q))
+      .map((item) => ({ tipo: 'producto' as const, item }));
+    return [...insumos, ...productos].slice(0, 8);
+  }, [busquedaCatalogo, insumosCatalogo, productosCatalogo]);
+
+  const handleAgregarInsumoForm = (insumo: InsumoCatalogoCompra) => {
+    const nuevaLinea = {
+      key: generarId(), descripcion: insumo.nombre, cantidad: 1, precioUnitario: insumo.costo, descuento: 0,
+      insumoId: insumo.id, productoId: undefined as string | undefined, unidad: insumo.unidad,
+    };
+    setFormItems((prev) => {
+      const idxVacia = prev.findIndex(filaOcVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
+    setBusquedaCatalogo('');
+  };
+
+  const handleAgregarProductoForm = (producto: ProductoCatalogoCompra) => {
+    const nuevaLinea = {
+      key: generarId(), descripcion: producto.nombre, cantidad: 1, precioUnitario: producto.costo, descuento: 0,
+      insumoId: undefined as string | undefined, productoId: producto.id, unidad: producto.unidad,
+    };
+    setFormItems((prev) => {
+      const idxVacia = prev.findIndex(filaOcVacia);
+      if (idxVacia !== -1) return prev.map((it, i) => (i === idxVacia ? nuevaLinea : it));
+      return [...prev, nuevaLinea];
+    });
+    setBusquedaCatalogo('');
+  };
   // Fase 44/45g/45h: aviso de que este formulario se precargó desde un
   // borrador de Producción (faltantes de una fórmula) -- solo para
   // mostrarle a Carlos de dónde salió, no cambia el guardado.
@@ -154,6 +287,7 @@ export default function OrdenesCompra() {
         precioUnitario: it.precioUnitario,
         descuento: 0,
         insumoId: it.insumoId,
+        productoId: undefined,
         unidad: it.unidad,
       })),
     );
@@ -288,7 +422,8 @@ export default function OrdenesCompra() {
     setFormFecha(todayISO());
     setFormFechaEntrega('');
     setFormNotas('');
-    setFormItems([{ key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined, unidad: undefined }]);
+    setFormItems([{ key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined, productoId: undefined, unidad: undefined }]);
+    setBusquedaCatalogo('');
     // Fase 45g: "Cancelar" descarta el resto de la cola de borradores
     // (si quedaba alguna OC más por generar del split por rubro) -- así
     // no queda nada pendiente en sessionStorage esperando reaparecer solo
@@ -300,7 +435,7 @@ export default function OrdenesCompra() {
   };
 
   const addFormItem = () => {
-    setFormItems((prev) => [...prev, { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined, unidad: undefined }]);
+    setFormItems((prev) => [...prev, { key: generarId(), descripcion: '', cantidad: 1, precioUnitario: 0, descuento: 0, insumoId: undefined, productoId: undefined, unidad: undefined }]);
   };
 
   const updateFormItem = (index: number, field: string, value: string | number) => {
@@ -323,6 +458,7 @@ export default function OrdenesCompra() {
       descuento: it.descuento,
       subtotal: calcularSubtotalItem(it.cantidad, it.precioUnitario, it.descuento),
       insumoId: it.insumoId,
+      productoId: it.productoId,
       unidad: it.unidad,
     }));
     const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
@@ -585,7 +721,7 @@ export default function OrdenesCompra() {
           </select>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => { if (!showForm) setBusquedaCatalogo(''); setShowForm(!showForm); }}
           className="flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
         >
           <Plus className="h-4 w-4" />
@@ -663,12 +799,69 @@ export default function OrdenesCompra() {
                 <Plus className="h-3.5 w-3.5" /> Agregar
               </button>
             </div>
+            {/* Buscador de insumo/producto real del catálogo -- clic en una
+                sugerencia agrega/completa una fila ya vinculada, con precio
+                y unidad precargados desde Productos y Stock. La carga
+                manual (texto libre) sigue disponible con "Agregar". */}
+            <div className="relative mb-2">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={busquedaCatalogo}
+                onChange={(e) => setBusquedaCatalogo(e.target.value)}
+                placeholder="Vincular a un insumo o producto del catálogo..."
+                className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/20"
+              />
+              {sugerenciasCatalogoOC.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {sugerenciasCatalogoOC.map((s) =>
+                    s.tipo === 'insumo' ? (
+                      <button
+                        key={`insumo-${s.item.id}`}
+                        type="button"
+                        onClick={() => handleAgregarInsumoForm(s.item)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      >
+                        <span className="flex items-center gap-1.5 text-gray-900">
+                          {s.item.nombre}
+                          <span className="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                            Insumo
+                          </span>
+                        </span>
+                        <span className="text-gray-500">
+                          {formatARS(s.item.costo)} / {unidadAbrev(s.item.unidad)}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        key={`producto-${s.item.id}`}
+                        type="button"
+                        onClick={() => handleAgregarProductoForm(s.item)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      >
+                        <span className="flex items-center gap-1.5 text-gray-900">
+                          {s.item.nombre}
+                          <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+                            Producto
+                          </span>
+                        </span>
+                        <span className="text-gray-500">
+                          {formatARS(s.item.costo)} / {unidadAbrev(s.item.unidad)}
+                        </span>
+                      </button>
+                    ),
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="border border-gray-200 rounded-lg overflow-x-auto scroll-shadow-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-gray-600">
                     <th className="text-left px-3 py-2 font-medium">Descripcion</th>
                     <th className="text-right px-3 py-2 font-medium w-20">Cant.</th>
+                    <th className="text-left px-3 py-2 font-medium w-20">UM</th>
                     <th className="text-right px-3 py-2 font-medium w-24">Precio</th>
                     <th className="text-right px-3 py-2 font-medium w-16">Dto.%</th>
                     <th className="text-right px-3 py-2 font-medium w-24">Subtotal</th>
@@ -678,14 +871,33 @@ export default function OrdenesCompra() {
                 <tbody>
                   {formItems.map((item, idx) => {
                     const sub = calcularSubtotalItem(item.cantidad, item.precioUnitario, item.descuento);
+                    const vinculada = Boolean(item.insumoId || item.productoId);
+                    const insumoVinculado = item.insumoId ? insumosCatalogo.find((i) => i.id === item.insumoId) : undefined;
+                    const pres = insumoVinculado ? presentacionDefault(insumoVinculado.presentaciones ?? []) : undefined;
                     return (
                       <tr key={item.key} className="border-t border-gray-100">
                         <td className="px-2 py-1.5">
-                          <input className="w-full border-0 bg-transparent text-sm focus:outline-none" placeholder="Descripcion" value={item.descripcion} onChange={(e) => updateFormItem(idx, 'descripcion', e.target.value)} />
+                          <div className="flex items-center gap-1">
+                            <input className="w-full border-0 bg-transparent text-sm focus:outline-none" placeholder="Descripcion" value={item.descripcion} onChange={(e) => updateFormItem(idx, 'descripcion', e.target.value)} />
+                            {vinculada && (
+                              <span
+                                title={item.insumoId ? 'Vinculada a un insumo' : 'Vinculada a un producto'}
+                                className={`shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${item.insumoId ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}
+                              >
+                                {item.insumoId ? 'Insumo' : 'Producto'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
                           <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={1} value={item.cantidad} onChange={(e) => updateFormItem(idx, 'cantidad', Number(e.target.value))} />
+                          {pres && item.cantidad > 0 && (
+                            <p className="text-[10px] text-gray-400 leading-tight text-right">
+                              ≈ {(item.cantidad / pres.contenido).toFixed(2).replace('.', ',')} env.
+                            </p>
+                          )}
                         </td>
+                        <td className="px-2 py-1.5 text-xs text-gray-600">{item.unidad ? unidadAbrev(item.unidad) : '—'}</td>
                         <td className="px-2 py-1.5">
                           <input className="w-full text-right border-0 bg-transparent text-sm focus:outline-none" type="number" min={0} step={0.01} value={item.precioUnitario} onChange={(e) => updateFormItem(idx, 'precioUnitario', Number(e.target.value))} />
                         </td>
