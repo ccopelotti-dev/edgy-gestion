@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
 
 // Fase 50c -- rama administrativa del agente de WhatsApp (whitelist +
@@ -11,34 +12,52 @@ import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
 //   POST /.netlify/functions/agente-comprobante-recibir
 //   Header: X-Api-Key: <api key del tenant>
 //   Body:   {
-//     "telefono": "5492954610221",     // quién mandó la imagen
-//     "imagenUrl": "https://...",      // URL ya resuelta del lado de n8n
-//                                       // (Evolution entrega el archivo
-//                                       // encriptado -- la decodificación
-//                                       // y el guardado en algún storage
-//                                       // público/firmado es responsabilidad
-//                                       // del flujo de n8n, no de este
-//                                       // endpoint)
-//     "tipo": "factura",                // opcional, texto libre
-//     "datosExtraidos": { ... },        // opcional -- lo que haya sacado
-//                                       // Claude Vision (proveedor, CUIT,
-//                                       // fecha, ítems, total, etc.)
-//     "notas": "..."                    // opcional
+//     "telefono": "5492954610221",       // quién mandó la imagen
+//     "imagenBase64": "iVBORw0KG...",     // base64 crudo (sin el prefijo
+//                                         // data:...;base64,) tal cual lo
+//                                         // devuelve Evolution API en
+//                                         // /chat/getBase64FromMediaMessage
+//     "mimeType": "image/jpeg",           // opcional, default image/jpeg
+//     "tipo": "factura",                  // opcional, texto libre
+//     "datosExtraidos": { ... },          // opcional -- lo que haya sacado
+//                                         // Claude Vision (proveedor, CUIT,
+//                                         // fecha, ítems, total, etc.)
+//     "notas": "..."                      // opcional
 //   }
 //
-// Si el número NO está en la whitelist, igual se deja el registro (con
-// estado 'rechazado_no_autorizado', sin admin_id) para que Carlos vea
-// si alguien intentó mandar algo sin estar autorizado -- pero se le
-// avisa al llamador vía `autorizado: false` para que el flujo de n8n
-// decida qué contestarle a ese número (ej. "no estás autorizado,
-// contactá a Carlos"), sin intentar procesar el documento como si
-// fuera válido.
+// El upload a Supabase Storage se hace ACÁ (con service_role), no del
+// lado de n8n -- así el n8n workflow nunca necesita tener la
+// service_role key de Supabase, solo la X-Api-Key del tenant (mismo
+// criterio de seguridad que el resto de los endpoints /agente-*).
+// Reutiliza el bucket privado "comprobantes-gastos" (mismo patrón que
+// src/modules/gastos-fijos/lib/comprobantesGastos.ts): se guarda el
+// PATH en `comprobantes_recibidos.imagen_url` -- no es una URL pública,
+// hay que resolverla con createSignedUrl cuando se quiera ver (lo mismo
+// que ya hace `obtenerUrlComprobanteGasto`).
+//
+// Si el número NO está en la whitelist, no se sube la imagen (para no
+// gastar storage con intentos no autorizados) pero igual se deja el
+// registro (con estado 'rechazado_no_autorizado', sin admin_id ni
+// imagen) para que Carlos vea si alguien intentó mandar algo sin estar
+// autorizado -- y se le avisa al llamador vía `autorizado: false` para
+// que el flujo de n8n decida qué contestarle a ese número.
 //
 // Todavía NO intenta cargar nada automático en Compras (comprobantes
-// de compra, actualización de stock, etc.) -- eso es responsabilidad
-// de una etapa siguiente, una vez que se perfile en detalle el agente
-// administrativo. Por ahora es solo una bandeja de entrada para que un
-// humano revise.
+// de compra, actualización de stock, etc.) ni corre extracción por
+// Claude Vision -- eso es responsabilidad de una etapa siguiente, una
+// vez que se perfile en detalle el agente administrativo. Por ahora es
+// una bandeja de entrada (con la imagen ya guardada) para que un humano
+// revise.
+
+const BUCKET_COMPROBANTES = 'comprobantes-gastos'
+
+const EXTENSION_POR_MIME = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf',
+}
 
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -59,13 +78,14 @@ export default async (req) => {
   }
 
   const telefono = String(body.telefono || '').trim()
-  const imagenUrl = String(body.imagenUrl || '').trim()
+  const imagenBase64 = String(body.imagenBase64 || '').trim()
+  const mimeType = body.mimeType ? String(body.mimeType).trim() : 'image/jpeg'
   const tipo = body.tipo ? String(body.tipo).trim() : null
   const notas = body.notas ? String(body.notas).trim() : null
   const datosExtraidos = body.datosExtraidos && typeof body.datosExtraidos === 'object' ? body.datosExtraidos : null
 
-  if (!telefono || !imagenUrl) {
-    return new Response(JSON.stringify({ ok: false, error: 'Falta telefono o imagenUrl' }), { status: 400 })
+  if (!telefono || !imagenBase64) {
+    return new Response(JSON.stringify({ ok: false, error: 'Falta telefono o imagenBase64' }), { status: 400 })
   }
 
   const { data: admin, error: adminError } = await supabaseAdmin
@@ -82,6 +102,32 @@ export default async (req) => {
   }
 
   const autorizado = Boolean(admin)
+  let imagenPath = null
+
+  if (autorizado) {
+    let buffer
+    try {
+      buffer = Buffer.from(imagenBase64, 'base64')
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: 'imagenBase64 inválido' }), { status: 400 })
+    }
+    if (!buffer.length) {
+      return new Response(JSON.stringify({ ok: false, error: 'imagenBase64 vacío' }), { status: 400 })
+    }
+
+    const extension = EXTENSION_POR_MIME[mimeType] || 'jpg'
+    const path = `whatsapp-admin/${agente.clienteId}/${randomUUID()}.${extension}`
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from(BUCKET_COMPROBANTES)
+      .upload(path, buffer, { contentType: mimeType, upsert: false })
+
+    if (uploadError) {
+      console.error('agente-comprobante-recibir: error subiendo la imagen', uploadError)
+      return new Response(JSON.stringify({ ok: false, error: 'No se pudo guardar la imagen' }), { status: 500 })
+    }
+    imagenPath = path
+  }
 
   const { data: comprobante, error: insertError } = await supabaseAdmin
     .from('comprobantes_recibidos')
@@ -90,7 +136,7 @@ export default async (req) => {
       numero_whatsapp_remitente: telefono,
       admin_id: admin?.id ?? null,
       tipo,
-      imagen_url: imagenUrl,
+      imagen_url: imagenPath,
       datos_extraidos: datosExtraidos,
       estado: autorizado ? 'pendiente_revision' : 'rechazado_no_autorizado',
       notas,
