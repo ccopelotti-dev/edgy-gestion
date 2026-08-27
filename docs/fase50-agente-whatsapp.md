@@ -1,6 +1,6 @@
 # Fase 50 — Agente WhatsApp / Automatización vía VPS
 
-Estado: **backend construido y verificado, sin commitear todavía.** Se retoma cuando Carlos tenga el VPS armado (n8n + WhatsApp) — "una vez concluida esta etapa".
+Estado (27/08): **en producción para La Charcutería** (Ventas, "solo consultas", workflow de n8n ya publicado). Sumando **Punto Tex** como segundo tenant y la rama administrativa (whitelist + documentos recibidos, Fase 50c) -- ver sección "Estado" más abajo.
 
 ## Idea original (esquema de Carlos, 26/08)
 
@@ -14,7 +14,7 @@ Un agente de IA corriendo en un VPS (orquestado con n8n) opera edgy-gestion por 
 ## Decisiones confirmadas por Carlos
 
 - El pedido que crea el agente usa siempre un **cliente identificado** (`clientes_venta` real), no el circuito anónimo del Menú Público.
-- El VPS/n8n **todavía no existe** — se construye después, a medida, conforme al contrato ya definido acá. Por eso los endpoints no parsean ningún formato crudo de WhatsApp (ni Meta Cloud API ni Baileys) — esperan JSON ya normalizado.
+- El VPS/n8n ya existe y está en producción para La Charcutería (Evolution API + n8n, self-hosted). Los endpoints siguen sin parsear ningún formato crudo de WhatsApp (ni Meta Cloud API ni Baileys) — esperan JSON ya normalizado, y es el workflow de n8n el que traduce el payload de Evolution a ese contrato.
 - **Pendiente de confirmar**: si un mismo número de WhatsApp puede atender a varios negocios de Carlos a la vez, o si cada negocio tiene su propio número. El diseño actual asume **un número por tenant** (columna única `numero_whatsapp_negocio` en `clientes_agente_config`) — ajustar si la respuesta es otra.
 
 ## Esquema de datos (migraciones 0098 y 0099, aplicadas en Supabase)
@@ -123,11 +123,38 @@ Para reconsultar el historial sin mandar un mensaje nuevo (ej. retomar contexto 
 200 → { ok: true, telefono, historial: [{ sender, content, created_at }, ...] }
 ```
 
+### `agente-comprobante-recibir` (Capa 3, rama administrativa -- Fase 50c, 27/08)
+
+Segunda rama del agente, en paralelo a la de Ventas: un subconjunto de números por tenant ("Números que pueden enviarle doc. administrativa") puede mandar facturas/remitos como foto. El endpoint valida la whitelist (`clientes_agente_admins`) antes de aceptar el documento.
+
+```
+POST /agente-comprobante-recibir
+Body:  {
+  "telefono": "5492954610221",   // quién mandó la imagen
+  "imagenUrl": "https://...",    // URL ya resuelta del lado de n8n (Evolution
+                                  // entrega el archivo encriptado -- decodificarlo
+                                  // y subirlo a algún storage es responsabilidad
+                                  // de n8n, no de este endpoint)
+  "tipo": "factura",             // opcional, texto libre
+  "datosExtraidos": { ... },     // opcional -- lo que haya extraído Claude Vision
+  "notas": "..."                 // opcional
+}
+```
+
+Si el teléfono NO está en la whitelist del tenant, igual se guarda el registro (con `estado: 'rechazado_no_autorizado'`, sin `admin_id`) para que quede rastro de quién intentó mandar algo sin estar autorizado -- pero se devuelve `autorizado: false` para que n8n decida qué contestarle (no lo trata como un documento válido).
+
+```
+200 → { ok: true, autorizado, remitenteNombre, comprobanteId, estado }
+```
+
+Todavía NO carga nada automático en Compras (comprobantes, stock, etc.) -- es solo una bandeja de entrada para revisión humana. El perfilado en detalle del agente administrativo (qué hace con cada documento, a quién avisa, etc.) es una etapa siguiente, a propósito.
+
 ## Archivos
 
 ```
 supabase/migrations/0098_fase50_agente_whatsapp.sql
 supabase/migrations/0099_fase50_crear_orden_venta_agente.sql
+supabase/migrations/0100_fase50c_agente_administrativo.sql
 netlify/functions/_lib/agenteAuth.js
 netlify/functions/agente-webhook.js
 netlify/functions/agente-productos-buscar.js
@@ -135,13 +162,18 @@ netlify/functions/agente-clientes-lookup.js
 netlify/functions/agente-ordenes-crear.js
 netlify/functions/agente-mensajes-guardar.js
 netlify/functions/agente-mensajes-historial.js
+netlify/functions/agente-comprobante-recibir.js
 ```
 
-Todos verificados con `node --check`. Migraciones ya aplicadas en el proyecto Supabase `ipnufyqwbjbocsezdkiw` (schema `edgy_gestion`). Nada de esto está commiteado todavía.
+Todos verificados con `node --check`. Migraciones aplicadas en el proyecto Supabase `ipnufyqwbjbocsezdkiw` (schema `edgy_gestion`).
 
-## Próximos pasos (cuando se retome)
+## Estado (27/08)
 
-1. Confirmar la pregunta pendiente (número único vs. número por negocio).
-2. Cargar manualmente la primera fila en `clientes_agente_config` (API key + número) para el negocio piloto.
-3. Armar el VPS/n8n del lado de Carlos, contra este contrato.
-4. Eventualmente: UI en el panel para generar/rotar API keys y ver la conversación (ahí sí se agregan policies RLS).
+El VPS/n8n del lado de Carlos ya existe y está en producción para **La Charcutería** (Capa 1/3 de Ventas, "solo consultas" -- agente Claude con tool-calling contra `agente-productos-buscar`, workflow `My workflow` en n8n). Se está sumando **Punto Tex** como segundo tenant (fila ya cargada en `clientes_agente_config`, número `2954610221`) y la rama administrativa (whitelist + documentos recibidos) recién descripta arriba, todavía sin workflow de n8n armado.
+
+## Próximos pasos
+
+1. Cargar en `clientes_agente_admins` los números autorizados a mandar documentos administrativos para Punto Tex (falta que Carlos indique cuáles).
+2. Confirmar si el número `2954610221` ya tiene una instancia de Evolution API creada/conectada (QR escaneado) -- paso manual de Carlos, previo a armar el workflow de n8n para Punto Tex.
+3. Armar en n8n el workflow de Punto Tex (Ventas "solo consultas", mismo patrón que La Charcutería) y la rama administrativa (branch por `messageType` -- `imageMessage` va a `agente-comprobante-recibir`, `conversation` sigue el camino de Ventas ya construido).
+4. Eventualmente: UI en el panel para generar/rotar API keys, gestionar la whitelist y ver la conversación/bandeja de documentos (ahí sí se agregan policies RLS).
