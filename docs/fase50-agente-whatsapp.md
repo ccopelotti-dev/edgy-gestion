@@ -169,11 +169,17 @@ Todos verificados con `node --check`. Migraciones aplicadas en el proyecto Supab
 
 ## Estado (27/08)
 
-El VPS/n8n del lado de Carlos ya existe y está en producción para **La Charcutería** (Capa 1/3 de Ventas, "solo consultas" -- agente Claude con tool-calling contra `agente-productos-buscar`, workflow `My workflow` en n8n). Se está sumando **Punto Tex** como segundo tenant (fila ya cargada en `clientes_agente_config`, número `2954610221`) y la rama administrativa (whitelist + documentos recibidos) recién descripta arriba, todavía sin workflow de n8n armado.
+El VPS/n8n del lado de Carlos ya existe y está en producción con **dos tenants activos en simultáneo** sobre el mismo workflow (`My workflow`, `FSc6MetDmgCH3Jqh`), ambos con Evolution API instances propias:
+
+- **La Charcutería** — instancia Evolution `charcuteria`, número dueño `5492954367009`. Ventas "solo consultas".
+- **Punto Tex** — instancia Evolution `puntotex`, número dueño `2954610221`, vinculada el 27/08. Ventas "solo consultas" (cortinas/textiles).
+
+**Bug encontrado y corregido (27/08):** el webhook único de n8n (`WEBHOOK_GLOBAL_URL`, compartido por todas las instancias de Evolution en el `.env` del VPS) recibía los mensajes de ambos números, pero el workflow no distinguía de qué instancia venían -- siempre corría el pipeline de Charcutería (API key, prompt del agente y número de respuesta hardcodeados). Resultado: un "Hola" a Punto Tex contestaba como si fuera Charcutería. Se agregó un nodo `Ruteo por instancia` justo después del `Webhook`, que lee `$json.body.instance` y separa en dos ramas totalmente independientes (API key, prompt del agente, tool de búsqueda de productos y el nodo de respuesta -- cada uno apuntando a la instancia de Evolution correcta). Probado de punta a punta con una ejecución manual simulando un mensaje entrante de `puntotex` -- respondió correctamente como Punto Tex y por el número correcto. Publicado en producción.
+
+La rama administrativa (whitelist + documentos recibidos, Fase 50c) tiene el backend listo (`clientes_agente_admins` con 3 números autorizados para Punto Tex, `agente-comprobante-recibir`) pero **todavía no tiene workflow de n8n** -- ver próximos pasos.
 
 ## Próximos pasos
 
-1. Cargar en `clientes_agente_admins` los números autorizados a mandar documentos administrativos para Punto Tex (falta que Carlos indique cuáles).
-2. Confirmar si el número `2954610221` ya tiene una instancia de Evolution API creada/conectada (QR escaneado) -- paso manual de Carlos, previo a armar el workflow de n8n para Punto Tex.
-3. Armar en n8n el workflow de Punto Tex (Ventas "solo consultas", mismo patrón que La Charcutería) y la rama administrativa (branch por `messageType` -- `imageMessage` va a `agente-comprobante-recibir`, `conversation` sigue el camino de Ventas ya construido).
-4. Eventualmente: UI en el panel para generar/rotar API keys, gestionar la whitelist y ver la conversación/bandeja de documentos (ahí sí se agregan policies RLS).
+1. Armar en n8n la rama administrativa de Punto Tex: branch por `messageType` dentro de la rama de Punto Tex ya creada -- `imageMessage` va a `agente-comprobante-recibir` (validando que el remitente esté en `clientes_agente_admins`), `conversation` sigue el camino de Ventas ya construido.
+2. Confirmar si el número dueño de La Charcutería (`numero_whatsapp_negocio` en `clientes_agente_config`) debería completarse -- hoy está `null` para ese tenant.
+3. Eventualmente: UI en el panel para generar/rotar API keys, gestionar la whitelist y ver la conversación/bandeja de documentos (ahí sí se agregan policies RLS).
