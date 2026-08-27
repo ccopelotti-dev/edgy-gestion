@@ -130,24 +130,26 @@ Segunda rama del agente, en paralelo a la de Ventas: un subconjunto de números 
 ```
 POST /agente-comprobante-recibir
 Body:  {
-  "telefono": "5492954610221",   // quién mandó la imagen
-  "imagenUrl": "https://...",    // URL ya resuelta del lado de n8n (Evolution
-                                  // entrega el archivo encriptado -- decodificarlo
-                                  // y subirlo a algún storage es responsabilidad
-                                  // de n8n, no de este endpoint)
-  "tipo": "factura",             // opcional, texto libre
-  "datosExtraidos": { ... },     // opcional -- lo que haya extraído Claude Vision
-  "notas": "..."                 // opcional
+  "telefono": "5492954610221",     // quién mandó la imagen
+  "imagenBase64": "iVBORw0KG...",  // base64 crudo (sin el prefijo data:...;base64,),
+                                    // tal cual lo devuelve Evolution API en
+                                    // /chat/getBase64FromMediaMessage/{instance}
+  "mimeType": "image/jpeg",        // opcional, default image/jpeg
+  "tipo": "factura",               // opcional, texto libre
+  "datosExtraidos": { ... },       // opcional -- lo que haya extraído Claude Vision
+  "notas": "..."                   // opcional
 }
 ```
 
-Si el teléfono NO está en la whitelist del tenant, igual se guarda el registro (con `estado: 'rechazado_no_autorizado'`, sin `admin_id`) para que quede rastro de quién intentó mandar algo sin estar autorizado -- pero se devuelve `autorizado: false` para que n8n decida qué contestarle (no lo trata como un documento válido).
+El upload a Supabase Storage lo hace el endpoint (con `service_role`), no n8n -- así el workflow nunca necesita la service_role key, solo la `X-Api-Key` del tenant. Reutiliza el bucket privado `comprobantes-gastos` (mismo criterio que `comprobantesGastos.ts`): se guarda el **path** en `comprobantes_recibidos.imagen_url`, no una URL pública -- para verla hay que generar un `createSignedUrl` al momento (todavía no hay UI para esto, es la bandeja de entrada cruda).
+
+Si el teléfono NO está en la whitelist del tenant, no se sube la imagen (se descarta) pero igual se guarda el registro (con `estado: 'rechazado_no_autorizado'`, sin `admin_id` ni imagen) para que quede rastro de quién intentó mandar algo sin estar autorizado -- y se devuelve `autorizado: false` para que n8n decida qué contestarle.
 
 ```
 200 → { ok: true, autorizado, remitenteNombre, comprobanteId, estado }
 ```
 
-Todavía NO carga nada automático en Compras (comprobantes, stock, etc.) -- es solo una bandeja de entrada para revisión humana. El perfilado en detalle del agente administrativo (qué hace con cada documento, a quién avisa, etc.) es una etapa siguiente, a propósito.
+Todavía NO carga nada automático en Compras (comprobantes, stock, etc.) ni corre extracción con Claude Vision -- es solo una bandeja de entrada (con la imagen ya guardada) para revisión humana. El perfilado en detalle del agente administrativo (extracción automática, a quién avisa, etc.) es una etapa siguiente, a propósito.
 
 ## Archivos
 
@@ -176,10 +178,11 @@ El VPS/n8n del lado de Carlos ya existe y está en producción con **dos tenants
 
 **Bug encontrado y corregido (27/08):** el webhook único de n8n (`WEBHOOK_GLOBAL_URL`, compartido por todas las instancias de Evolution en el `.env` del VPS) recibía los mensajes de ambos números, pero el workflow no distinguía de qué instancia venían -- siempre corría el pipeline de Charcutería (API key, prompt del agente y número de respuesta hardcodeados). Resultado: un "Hola" a Punto Tex contestaba como si fuera Charcutería. Se agregó un nodo `Ruteo por instancia` justo después del `Webhook`, que lee `$json.body.instance` y separa en dos ramas totalmente independientes (API key, prompt del agente, tool de búsqueda de productos y el nodo de respuesta -- cada uno apuntando a la instancia de Evolution correcta). Probado de punta a punta con una ejecución manual simulando un mensaje entrante de `puntotex` -- respondió correctamente como Punto Tex y por el número correcto. Publicado en producción.
 
-La rama administrativa (whitelist + documentos recibidos, Fase 50c) tiene el backend listo (`clientes_agente_admins` con 3 números autorizados para Punto Tex, `agente-comprobante-recibir`) pero **todavía no tiene workflow de n8n** -- ver próximos pasos.
+La rama administrativa de Punto Tex (whitelist + documentos recibidos, Fase 50c) ya tiene workflow de n8n armado y publicado (dentro de `My workflow`, branch por `data.messageType` debajo de `If Punto Tex`): un mensaje tipo `imageMessage` de uno de los 3 números whitelisteados dispara `Descargar Imagen Punto Tex` (Evolution `getBase64FromMediaMessage`) → `Guardar Comprobante Punto Tex` (`agente-comprobante-recibir`, que valida whitelist y sube la imagen a Storage) → `Responder WhatsApp Admin Punto Tex` (confirma o avisa que el número no está autorizado). Todavía sin probar con una foto real (`getBase64FromMediaMessage` necesita un mensaje real en la base de Evolution, no se puede simular a mano) -- ver próximos pasos.
 
 ## Próximos pasos
 
-1. Armar en n8n la rama administrativa de Punto Tex: branch por `messageType` dentro de la rama de Punto Tex ya creada -- `imageMessage` va a `agente-comprobante-recibir` (validando que el remitente esté en `clientes_agente_admins`), `conversation` sigue el camino de Ventas ya construido.
-2. Confirmar si el número dueño de La Charcutería (`numero_whatsapp_negocio` en `clientes_agente_config`) debería completarse -- hoy está `null` para ese tenant.
-3. Eventualmente: UI en el panel para generar/rotar API keys, gestionar la whitelist y ver la conversación/bandeja de documentos (ahí sí se agregan policies RLS).
+1. Probar la rama administrativa con una foto real: que uno de los 3 números whitelisteados de Punto Tex mande una foto de un comprobante y revisar la ejecución en n8n (`My workflow`) por si el contrato real de `getBase64FromMediaMessage` no calza 1:1 con lo asumido (`{ base64, mimetype }`).
+2. Una vez estable: extracción automática de datos con Claude Vision (`datosExtraidos`) y, más adelante, alta automática en Compras a partir del comprobante revisado -- a propósito fuera de esta primera vuelta.
+3. Confirmar si el número dueño de La Charcutería (`numero_whatsapp_negocio` en `clientes_agente_config`) debería completarse -- hoy está `null` para ese tenant.
+4. Eventualmente: UI en el panel para generar/rotar API keys, gestionar la whitelist y ver la conversación/bandeja de documentos (ahí sí se agregan policies RLS).
