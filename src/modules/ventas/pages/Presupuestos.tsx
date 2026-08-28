@@ -29,7 +29,8 @@ import {
 
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { descargarPresupuestoPdf, descargarReciboPdf } from '../lib/pdfComprobantes';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
+import { descargarPresupuestoPdf, descargarReciboPdf, generarPresupuestoPdfBase64 } from '../lib/pdfComprobantes';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import { buscarSenaPendiente } from '../lib/senaHelpers';
 import {
@@ -461,13 +462,39 @@ export default function Presupuestos() {
     marcarEnviadoSiBorrador(pres);
   };
 
-  const handleEnviarWhatsapp = (pres: Presupuesto, cliente?: Cliente) => {
-    if (!cliente?.telefono) return;
-    const telefono = cliente.telefono.replace(/\D/g, '');
+  // Fase 50d (28/08): antes esto abría un link `wa.me` con el texto y
+  // dejaba que el operador adjuntara el PDF a mano. Ahora, si el
+  // tenant ya tiene el agente configurado como canal de salida
+  // (`clientes_agente_config.evolution_instance_nombre`), manda el PDF
+  // real como documento adjunto. Si el envío falla (o el tenant no
+  // tiene canal configurado todavía -- ver enviar-documento-whatsapp.js),
+  // cae al comportamiento viejo (wa.me + texto) para no dejar al
+  // operador sin salida.
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
+  const handleEnviarWhatsapp = async (pres: Presupuesto, cliente?: Cliente) => {
+    if (!cliente?.telefono || !empresaActual) return;
+    const numero = formatNumero(PREFIJO_PRESUPUESTO, pres.numero);
     const { cuerpo } = armarTextoPresupuesto(pres);
-    const url = `https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`;
-    window.open(url, '_blank');
-    marcarEnviadoSiBorrador(pres);
+    setEnviandoWhatsappId(pres.id);
+    try {
+      const pdfBase64 = await generarPresupuestoPdfBase64(empresaActual, cliente, pres, clienteNombre(pres.clienteId), config.ivaDefault);
+      await enviarDocumentoWhatsapp({
+        clienteId: empresaActual.id,
+        telefono: cliente.telefono,
+        pdfBase64,
+        nombreArchivo: numero,
+        caption: cuerpo,
+      });
+      marcarEnviadoSiBorrador(pres);
+    } catch (e) {
+      console.error('Presupuestos: no se pudo enviar por el agente, cae a wa.me', e);
+      const telefono = cliente.telefono.replace(/\D/g, '');
+      const url = `https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`;
+      window.open(url, '_blank');
+      marcarEnviadoSiBorrador(pres);
+    } finally {
+      setEnviandoWhatsappId(null);
+    }
   };
 
   // ── Render ────────────────────────────────────────────────
@@ -584,6 +611,7 @@ export default function Presupuestos() {
                     generandoPdfDetalle={generandoPdfDetalleId === pres.id}
                     onEnviarEmail={() => handleEnviarEmail(pres, cliente)}
                     onEnviarWhatsapp={() => handleEnviarWhatsapp(pres, cliente)}
+                    enviandoWhatsapp={enviandoWhatsappId === pres.id}
                     onCobrarSena={() => setSenaDialogPresupuesto(pres)}
                     senaMonto={senaMonto}
                     onDescargarRecibo={() => handleDescargarRecibo(pres)}
@@ -724,6 +752,7 @@ interface PresupuestoRowProps {
   generandoPdfDetalle: boolean;
   onEnviarEmail: () => void;
   onEnviarWhatsapp: () => void;
+  enviandoWhatsapp: boolean;
   onCobrarSena: () => void;
   senaMonto: number;
   onDescargarRecibo: () => void;
@@ -750,6 +779,7 @@ function PresupuestoRow({
   generandoPdfDetalle,
   onEnviarEmail,
   onEnviarWhatsapp,
+  enviandoWhatsapp,
   onCobrarSena,
   senaMonto,
   onDescargarRecibo,
@@ -817,11 +847,15 @@ function PresupuestoRow({
             </button>
             <button
               onClick={onEnviarWhatsapp}
-              disabled={!cliente?.telefono}
+              disabled={!cliente?.telefono || enviandoWhatsapp}
               title={cliente?.telefono ? `Enviar por WhatsApp a ${cliente.telefono}` : 'El cliente no tiene teléfono cargado'}
               className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
             >
-              <MessageCircle className="h-3.5 w-3.5" />
+              {enviandoWhatsapp ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <MessageCircle className="h-3.5 w-3.5" />
+              )}
             </button>
             {p.estado === 'borrador' && (
               <>

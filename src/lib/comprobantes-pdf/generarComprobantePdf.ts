@@ -313,7 +313,13 @@ export async function generarComprobantePdf(
   comprobante: ComprobanteParaPdf,
   nombreArchivo: string,
   copias = 1,
-): Promise<void> {
+  // Fase 50d (28/08): en vez de descargar/imprimir, devuelve el PDF ya
+  // armado como base64 (sin el prefijo `data:...;base64,`) -- lo usa
+  // `enviar-documento-whatsapp.js` para mandarlo como adjunto real por
+  // WhatsApp (agente como canal de salida) en vez de abrir un link
+  // `wa.me` y dejar que el operador lo adjunte a mano.
+  soloBase64 = false,
+): Promise<void | string> {
   // Fase 38m: A4 vertical -- ancho (210) menor que alto (297), así que
   // acá "portrait" es explícito pero también lo que jsPDF asume por
   // default; se deja declarado igual, por prolijidad y para que quede
@@ -685,6 +691,11 @@ export async function generarComprobantePdf(
   // `afip`, el número interno ya es el que se ve en el recuadro).
   if (comprobante.afip) {
     doc.text(`Ref. interna: ${comprobante.numero}`, pageWidth - marginX, pageHeight - 6, { align: 'right' })
+  }
+
+  if (soloBase64) {
+    const dataUri = doc.output('datauristring')
+    return dataUri.split(',').pop()
   }
 
   await imprimirOGuardarPdf(doc, nombreArchivo, copias)

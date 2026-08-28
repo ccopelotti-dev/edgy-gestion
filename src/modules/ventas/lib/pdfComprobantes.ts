@@ -233,7 +233,8 @@ export async function descargarPresupuestoPdf(
   clienteNombreFallback: string,
   ivaDefault: number,
   incluirDetalleRelevado = false,
-): Promise<void> {
+  soloBase64 = false,
+): Promise<void | string> {
   const numero = `PRE-${String(presupuesto.numero).padStart(5, '0')}`;
 
   let bloqueAdicional: Parameters<typeof generarComprobantePdf>[1]['bloqueAdicional'];
@@ -246,7 +247,7 @@ export async function descargarPresupuestoPdf(
     }
   }
 
-  await generarComprobantePdf(
+  return generarComprobantePdf(
     empresaParaPdf(empresaActual),
     {
       tipoLabel: 'Presupuesto',
@@ -268,7 +269,32 @@ export async function descargarPresupuestoPdf(
       bloqueAdicional,
     },
     numero,
+    1,
+    soloBase64,
   );
+}
+
+/** Fase 50d: variante de `descargarPresupuestoPdf` que devuelve el PDF
+ * en base64 en vez de descargarlo -- para mandarlo como adjunto real
+ * por WhatsApp (`enviar-documento-whatsapp.js`) en vez de abrir un link
+ * `wa.me` sin el archivo. Delega en la misma función para no duplicar
+ * el armado del comprobante. */
+export function generarPresupuestoPdfBase64(
+  empresaActual: ClienteEmpresa,
+  cliente: Cliente | undefined,
+  presupuesto: Presupuesto,
+  clienteNombreFallback: string,
+  ivaDefault: number,
+): Promise<string> {
+  return descargarPresupuestoPdf(
+    empresaActual,
+    cliente,
+    presupuesto,
+    clienteNombreFallback,
+    ivaDefault,
+    false,
+    true,
+  ) as Promise<string>;
 }
 
 // ─── Resumen de cuenta ────────────────────────────────────────
