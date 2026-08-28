@@ -488,8 +488,19 @@ export default function Presupuestos() {
       });
       marcarEnviadoSiBorrador(pres);
     } catch (e) {
+      // Fase 50d: el fallback a wa.me puede llegar bloqueado por el
+      // navegador (al pasar por un `await` antes del `window.open`, se
+      // puede perder el "gesto de usuario" que Chrome exige para no
+      // tratarlo como pop-up no solicitado) -- por eso SIEMPRE se avisa
+      // con el motivo real del error, en vez de fallar en silencio.
       console.error('Presupuestos: no se pudo enviar por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
       window.open(armarLinkWhatsapp(cliente.telefono, cuerpo), '_blank');
+      alert(
+        `No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\n` +
+          'Se intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ' +
+          'ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.',
+      );
       marcarEnviadoSiBorrador(pres);
     } finally {
       setEnviandoWhatsappId(null);
