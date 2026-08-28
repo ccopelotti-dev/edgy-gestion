@@ -20,6 +20,7 @@ import {
   Send,
   MessageCircle,
   ClipboardList,
+  Loader2,
   X,
 } from 'lucide-react';
 
@@ -32,6 +33,8 @@ import {
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import { buscarSenaPendiente } from '../lib/senaHelpers';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
+import { generarConfirmacionPedidoPdfBase64 } from '../lib/pdfComprobantes';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { terminologiaOrdenVenta } from '@/lib/terminologia';
@@ -101,6 +104,9 @@ export default function Ordenes() {
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showNuevaOrden, setShowNuevaOrden] = useState(false);
+  // Fase 50f (28/08): envío de "Confirmación de pedido" por WhatsApp --
+  // mismo patrón que el resto del rollout (ver Presupuestos.tsx).
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
   const [ordenParaFacturar, setOrdenParaFacturar] = useState<Orden | null>(null);
 
@@ -556,6 +562,41 @@ export default function Ordenes() {
     notificarEnCamino(orden, orden.proveedorLogistica, orden.numeroSeguimiento, orden.urlSeguimiento);
   };
 
+  // Fase 50f (28/08, a pedido de Carlos): "Confirmación de pedido" --
+  // mismo patrón de envío real (PDF adjunto vía el agente) que el resto
+  // del rollout, con el mismo criterio de resolución de teléfono que ya
+  // usa notificarEnCamino (cliente formal, o el contacto suelto de la
+  // orden si no hay uno vinculado). Cae a wa.me si el agente falla.
+  const handleEnviarConfirmacionPedido = async (orden: Orden) => {
+    const clienteReal = clientes.find((c) => c.id === orden.clienteId);
+    const telefono = clienteReal?.telefono ?? orden.contactoTelefono;
+    if (!telefono || !clienteTenant) return;
+    const nombre = clienteReal?.nombre ?? orden.contactoNombre ?? '';
+    const numeroOrden = formatNumero(PREFIJO_ORDEN[orden.tipo], orden.numero);
+    const cuerpo =
+      `Hola${nombre ? ` ${nombre}` : ''},\n\n` +
+      `Te confirmamos tu pedido ${numeroOrden}${orden.fechaEntrega ? ` -- entrega estimada ${formatDate(orden.fechaEntrega)}` : ''}.\n\n` +
+      `Cualquier consulta quedamos a disposición.\nSaludos.`;
+    setEnviandoWhatsappId(orden.id);
+    try {
+      const pdfBase64 = await generarConfirmacionPedidoPdfBase64(clienteTenant, clienteReal, orden, nombre || 'Cliente');
+      await enviarDocumentoWhatsapp({
+        clienteId: clienteTenant.id,
+        telefono,
+        pdfBase64,
+        nombreArchivo: numeroOrden,
+        caption: cuerpo,
+      });
+    } catch (e) {
+      console.error('Ordenes: no se pudo enviar la confirmación por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
+      window.open(armarLinkWhatsapp(telefono, cuerpo), '_blank');
+      alert(`No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\nSe intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.`);
+    } finally {
+      setEnviandoWhatsappId(null);
+    }
+  };
+
   const handleMarcarEntregadoLogistica = (id: string) => {
     dispatch({
       type: 'ACTUALIZAR_LOGISTICA_ORDEN',
@@ -899,6 +940,9 @@ export default function Ordenes() {
                     onMarcarEnCamino={() => handleAbrirDespacho(orden)}
                     onMarcarEntregadoLogistica={() => handleMarcarEntregadoLogistica(orden.id)}
                     onReenviarWhatsapp={() => handleReenviarWhatsapp(orden)}
+                    clienteTelefono={clientes.find((c) => c.id === orden.clienteId)?.telefono ?? orden.contactoTelefono ?? null}
+                    onEnviarConfirmacion={() => handleEnviarConfirmacionPedido(orden)}
+                    enviandoConfirmacion={enviandoWhatsappId === orden.id}
                   />
                 );
               })}
@@ -957,6 +1001,9 @@ interface OrdenRowProps {
   onMarcarEnCamino: () => void;
   onMarcarEntregadoLogistica: () => void;
   onReenviarWhatsapp: () => void;
+  clienteTelefono: string | null;
+  onEnviarConfirmacion: () => void;
+  enviandoConfirmacion: boolean;
 }
 
 function OrdenRow({
@@ -977,6 +1024,9 @@ function OrdenRow({
   onMarcarEnCamino,
   onMarcarEntregadoLogistica,
   onReenviarWhatsapp,
+  clienteTelefono,
+  onEnviarConfirmacion,
+  enviandoConfirmacion,
 }: OrdenRowProps) {
   const o = orden;
   const prefijo = PREFIJO_ORDEN[o.tipo];
@@ -1088,6 +1138,21 @@ function OrdenRow({
                 {o.proveedorLogistica ? PROVEEDOR_LOGISTICA_LABEL[o.proveedorLogistica] : 'Entregado'}
               </span>
             )}
+            {/* Fase 50f (28/08, a pedido de Carlos): "Confirmación de
+                pedido" -- agente como canal de salida, disponible en
+                cualquier estado (no solo al facturar/despachar). */}
+            <button
+              onClick={onEnviarConfirmacion}
+              disabled={!clienteTelefono || enviandoConfirmacion}
+              title={clienteTelefono ? `Enviar confirmación de pedido por WhatsApp a ${clienteTelefono}` : 'El cliente no tiene teléfono cargado'}
+              className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+            >
+              {enviandoConfirmacion ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <MessageCircle className="h-3.5 w-3.5" />
+              )}
+            </button>
           </div>
         </td>
         <td className="px-4 py-3 text-center">

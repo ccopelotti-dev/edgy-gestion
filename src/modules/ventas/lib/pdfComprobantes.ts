@@ -25,8 +25,8 @@ import { generarReciboPdf } from '@/lib/comprobantes-pdf/generarReciboPdf';
 import { fetchFichaPorPresupuestoId } from '@/modules/fichas-medida/data/useFichasMedida';
 import { dibujarDetalleRelevado } from '@/modules/fichas-medida/lib/generarFichaMedidaPdf';
 import type { Cliente as ClienteEmpresa } from '@/types';
-import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE, conIvaIncluido } from './format';
-import type { Cliente, Cobro, Comprobante, Presupuesto } from '../types';
+import { formatCuit, formatDate, formatNumero, PREFIJO_COMPROBANTE, PREFIJO_ORDEN, conIvaIncluido } from './format';
+import type { Cliente, Cobro, Comprobante, Presupuesto, Orden } from '../types';
 import {
   CONDICION_IVA_LABEL,
   CONSUMIDOR_FINAL_ID,
@@ -324,6 +324,54 @@ export function generarPresupuestoPdfBase64(
     clienteNombreFallback,
     ivaDefault,
     false,
+    true,
+  ) as Promise<string>;
+}
+
+// ─── Confirmación de pedido (Orden de venta) ─────────────────
+// Fase 50f (28/08, a pedido de Carlos): Órdenes de Venta era el único
+// listado del rollout "agente como canal de salida" sin ningún PDF
+// propio -- a diferencia de Presupuesto/Factura/Recibo, una Orden no
+// tenía documento para mandarle al cliente. Carlos eligió armar un PDF
+// nuevo ("Confirmación de pedido") en vez de reenviar el Presupuesto de
+// origen, para poder usarlo también en pedidos que no vienen de un
+// Presupuesto (ej. Delivery-WhatsApp). Reusa el mismo motor genérico
+// (sin letraFiscal -- no es un comprobante) que ya usa Presupuesto.
+
+/** Arma y devuelve en base64 el PDF de "Confirmación de pedido" de una
+ * Orden -- pensado únicamente para mandarlo como adjunto real por
+ * WhatsApp (no tiene una variante de descarga porque Carlos no la pidió;
+ * se puede agregar después con el mismo criterio que Presupuesto si
+ * hiciera falta). */
+export function generarConfirmacionPedidoPdfBase64(
+  empresaActual: ClienteEmpresa,
+  cliente: Cliente | undefined,
+  orden: Orden,
+  clienteNombreFallback: string,
+): Promise<string> {
+  const numero = formatNumero(PREFIJO_ORDEN[orden.tipo], orden.numero);
+  return generarComprobantePdf(
+    empresaParaPdf(empresaActual),
+    {
+      tipoLabel: 'Confirmación de pedido',
+      numero,
+      fecha: formatDate(orden.fecha),
+      clienteNombre: cliente?.nombre ?? clienteNombreFallback,
+      clienteDocumento: cliente && cliente.id !== CONSUMIDOR_FINAL_ID ? cliente.documento : null,
+      condicionVenta: orden.fechaEntrega ? `Entrega estimada: ${formatDate(orden.fechaEntrega)}` : undefined,
+      items: orden.items.map((i) => ({
+        descripcion: i.descripcion,
+        cantidad: i.cantidad,
+        precioUnitario: i.precioUnitario,
+        subtotal: i.subtotal,
+      })),
+      subtotal: orden.subtotal,
+      descuentoGeneral: orden.descuentoGeneral,
+      total: orden.total,
+      notas: orden.notas ?? null,
+    },
+    numero,
+    1,
     true,
   ) as Promise<string>;
 }
