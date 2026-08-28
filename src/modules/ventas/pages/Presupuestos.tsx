@@ -489,16 +489,30 @@ export default function Presupuestos() {
   const armarTextoPresupuesto = (pres: Presupuesto) => {
     const numero = formatNumero(PREFIJO_PRESUPUESTO, pres.numero);
     const lineas = pres.items.map((it) => `- ${it.descripcion} · cant. ${it.cantidad}`);
+    const nombre = clienteNombre(pres.clienteId) !== 'Desconocido' ? ` ${clienteNombre(pres.clienteId)}` : '';
+    // Fase 51c (28/08, a pedido de Carlos): el saludo del caption corto
+    // usa solo el primer nombre (más natural en un WhatsApp que el
+    // nombre completo/razón social que se usa en el resto del PDF).
+    const nombrePila = clienteNombre(pres.clienteId) !== 'Desconocido' ? ` ${clienteNombre(pres.clienteId).split(' ')[0]}` : '';
     return {
       asunto: `Presupuesto ${numero}`,
+      // Texto completo -- se usa como cuerpo del mail y como respaldo del
+      // wa.me viejo (ahí no hay PDF adjunto, así que el detalle tiene que
+      // ir sí o sí en el texto).
       cuerpo:
-        `Hola${clienteNombre(pres.clienteId) !== 'Desconocido' ? ` ${clienteNombre(pres.clienteId)}` : ''},\n\n` +
+        `Hola${nombre},\n\n` +
         `Le enviamos el presupuesto ${numero} (válido ${pres.validezDias} días desde el ${formatDate(pres.fecha)}):\n\n` +
         `${lineas.join('\n')}\n\n` +
         `Total: ${formatARS(pres.total)}\n\n` +
         `${pres.condiciones ? `Condiciones: ${pres.condiciones}\n\n` : ''}` +
         `${pres.notas ? `Notas: ${pres.notas}\n\n` : ''}` +
         `Quedamos a disposición.\nSaludos.`,
+      // Fase 51b/c (28/08, a pedido de Carlos): cuando el PDF va adjunto
+      // de verdad, repetir el detalle completo en el texto es redundante
+      // -- este es el que se usa como caption del envío real.
+      captionCorto:
+        `Hola${nombrePila}, te enviamos el presupuesto solicitado. El costo Total es de ${formatARS(pres.total)}\n` +
+        `Quedamos a disposición.\nSaludos`,
     };
   };
 
@@ -526,7 +540,7 @@ export default function Presupuestos() {
   const handleEnviarWhatsapp = async (pres: Presupuesto, cliente?: Cliente) => {
     if (!cliente?.telefono || !empresaActual) return;
     const numero = formatNumero(PREFIJO_PRESUPUESTO, pres.numero);
-    const { cuerpo } = armarTextoPresupuesto(pres);
+    const { cuerpo, captionCorto } = armarTextoPresupuesto(pres);
     setEnviandoWhatsappId(pres.id);
     try {
       const pdfBase64 = await generarPresupuestoPdfBase64(empresaActual, cliente, pres, clienteNombre(pres.clienteId), config.ivaDefault);
@@ -535,7 +549,7 @@ export default function Presupuestos() {
         telefono: cliente.telefono,
         pdfBase64,
         nombreArchivo: numero,
-        caption: cuerpo,
+        caption: captionCorto,
         tipoDocumento: 'presupuesto',
         numeroDocumento: numero,
       });

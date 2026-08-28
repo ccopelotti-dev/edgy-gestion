@@ -168,14 +168,20 @@ export default function Cotizaciones() {
     const lineas = cot.items.map(
       (it) => `- ${it.descripcion} · cant. ${it.cantidad}${it.unidad ? ` ${it.unidad}` : ''}`,
     );
+    const nombre = nombreProveedor(cot.proveedorId) !== 'Desconocido' ? ` ${nombreProveedor(cot.proveedorId)}` : '';
     return {
       asunto: `Pedido de cotización ${numero}`,
+      // Texto completo -- cuerpo del mail y respaldo del wa.me viejo (sin
+      // PDF adjunto, el detalle tiene que ir en el texto).
       cuerpo:
-        `Hola${nombreProveedor(cot.proveedorId) !== 'Desconocido' ? ` ${nombreProveedor(cot.proveedorId)}` : ''},\n\n` +
+        `Hola${nombre},\n\n` +
         `Les solicitamos cotización para los siguientes ítems (Pedido ${numero}, válido ${cot.validezDias} días desde el ${formatDate(cot.fecha)}):\n\n` +
         `${lineas.join('\n')}\n\n` +
         `${cot.notas ? `Notas: ${cot.notas}\n\n` : ''}` +
         `Quedamos a la espera de sus precios.\nSaludos.`,
+      // Fase 51b (28/08): caption del envío real -- el PDF ya trae el
+      // detalle, no hace falta repetirlo en el texto.
+      captionCorto: `Hola${nombre}, te enviamos el Pedido de cotización ${numero} adjunto. Quedamos a la espera de sus precios.`,
     };
   };
 
@@ -198,7 +204,7 @@ export default function Cotizaciones() {
   const handleEnviarWhatsapp = async (cot: (typeof cotizaciones)[number], proveedor?: Proveedor) => {
     if (!proveedor?.telefono || !empresaActual) return;
     const numero = formatNumero('COT', cot.numero);
-    const { cuerpo } = armarTextoCotizacion(cot);
+    const { cuerpo, captionCorto } = armarTextoCotizacion(cot);
     setEnviandoWhatsappId(cot.id);
     try {
       const pdfBase64 = await generarCotizacionPdfBase64(empresaActual, proveedor, cot, nombreProveedor(cot.proveedorId));
@@ -207,7 +213,7 @@ export default function Cotizaciones() {
         telefono: proveedor.telefono,
         pdfBase64,
         nombreArchivo: numero,
-        caption: cuerpo,
+        caption: captionCorto,
         tipoDocumento: 'cotizacion',
         numeroDocumento: numero,
       });

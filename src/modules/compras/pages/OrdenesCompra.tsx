@@ -553,16 +553,22 @@ export default function OrdenesCompra() {
     const lineas = oc.items.map(
       (it) => `- ${it.descripcion} · cant. ${it.cantidad}${it.unidad ? ` ${it.unidad}` : ''}`,
     );
+    const nombre = nombreProveedor(oc.proveedorId) !== 'Desconocido' ? ` ${nombreProveedor(oc.proveedorId)}` : '';
     return {
       asunto: `Orden de Compra ${numero}`,
+      // Texto completo -- cuerpo del mail y respaldo del wa.me viejo (sin
+      // PDF adjunto, el detalle tiene que ir en el texto).
       cuerpo:
-        `Hola${nombreProveedor(oc.proveedorId) !== 'Desconocido' ? ` ${nombreProveedor(oc.proveedorId)}` : ''},\n\n` +
+        `Hola${nombre},\n\n` +
         `Te enviamos la Orden de Compra ${numero} del ${formatDate(oc.fecha)}` +
         `${oc.fechaEntrega ? `, con entrega estimada para el ${formatDate(oc.fechaEntrega)}` : ''}:\n\n` +
         `${lineas.join('\n')}\n\n` +
         `Total: ${formatARS(oc.total)}\n\n` +
         `${oc.notas ? `Notas: ${oc.notas}\n\n` : ''}` +
         `Saludos.`,
+      // Fase 51b (28/08): caption del envío real -- el PDF ya trae el
+      // detalle, no hace falta repetirlo en el texto.
+      captionCorto: `Hola${nombre}, te enviamos la Orden de Compra ${numero} adjunta. Saludos.`,
     };
   };
 
@@ -578,7 +584,7 @@ export default function OrdenesCompra() {
   const handleEnviarWhatsappOC = async (oc: (typeof ordenesCompra)[number], proveedor?: Proveedor) => {
     if (!proveedor?.telefono || !empresaActual) return;
     const numero = formatNumero('OC', oc.numero);
-    const { cuerpo } = armarTextoOC(oc);
+    const { cuerpo, captionCorto } = armarTextoOC(oc);
     setEnviandoWhatsappId(oc.id);
     try {
       const pdfBase64 = await generarOrdenCompraPdfBase64(empresaActual, proveedor, oc, nombreProveedor(oc.proveedorId));
@@ -587,7 +593,7 @@ export default function OrdenesCompra() {
         telefono: proveedor.telefono,
         pdfBase64,
         nombreArchivo: numero,
-        caption: cuerpo,
+        caption: captionCorto,
         tipoDocumento: 'orden_compra',
         numeroDocumento: numero,
       });
