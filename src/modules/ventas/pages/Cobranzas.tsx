@@ -2,11 +2,11 @@
 // Módulo Ventas — Cobranzas
 // ============================================================
 
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { useVentas, useVentasDispatch, useCobros } from '../data/store';
 import { CobroDialog } from '../components/ventas/dialogs';
 import { MedioPagoBadge, Amount, EmptyState, KpiCard } from '../components/ventas/display';
-import { formatARS, formatDate, formatNumero, todayISO, nowISO } from '../lib/format';
+import { formatARS, formatDate, formatNumero, todayISO, nowISO, PREFIJO_COMPROBANTE } from '../lib/format';
 import type { Cobro, Cliente, Comprobante, MedioPago, ImputacionCobro } from '../types';
 import { MEDIO_PAGO_LABEL, generarId } from '../types';
 import {
@@ -14,7 +14,8 @@ import {
   DollarSign, Clock, TrendingUp, FileText, Download, Loader2, MessageCircle,
 } from 'lucide-react';
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import { supabase } from '@/lib/supabase';
+import { armarLinkWhatsapp, normalizarTelefonoArgentina } from '@/lib/whatsapp';
 import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { descargarReciboPdf, generarReciboPdfBase64 } from '../lib/pdfComprobantes';
 
@@ -120,6 +121,8 @@ export default function Cobranzas() {
         pdfBase64,
         nombreArchivo: numero,
         caption: cuerpo,
+        tipoDocumento: 'recibo',
+        numeroDocumento: numero,
       });
     } catch (e) {
       console.error('Cobranzas: no se pudo enviar por el agente, cae a wa.me', e);
@@ -132,10 +135,11 @@ export default function Cobranzas() {
   }
 
   function handleSaveCobro(data: { fecha: string; monto: number; medioPago: MedioPago; imputaciones: ImputacionCobro[]; notas?: string }) {
+    const id = generarId();
     dispatch({
       type: 'ADD_COBRO',
       payload: {
-        id: generarId(),
+        id,
         clienteId: dialogCliente!.id,
         fecha: data.fecha,
         monto: data.monto,
@@ -145,9 +149,71 @@ export default function Cobranzas() {
         createdAt: nowISO(),
       },
     });
+    // Fase 51 (28/08, a pedido de Carlos): igual que Presupuestos ->
+    // Orden, acá se marca el Cobro recién creado para que el efecto de
+    // abajo, en cuanto aparezca en `cobros`, chequee si corresponde
+    // auto-enviar el Recibo.
+    setCobroPendienteConfirmar(id);
     setDialogOpen(false);
     setDialogCliente(null);
   }
+
+  // Fase 51: solo auto-envía el Recibo si el/los Comprobante(s) que este
+  // Cobro imputa fueron mandados por el agente a ESTE mismo teléfono
+  // (ver documentos_enviados_agente) -- un cliente que pagó en el
+  // mostrador nunca pidió recibir nada por WhatsApp, no tiene sentido
+  // mandarle un mensaje de la nada. Si falla cualquier paso, no
+  // interrumpe el alta del cobro (ya se guardó bien) -- el operador
+  // puede mandar el Recibo a mano desde el ícono de la fila.
+  const [cobroPendienteConfirmar, setCobroPendienteConfirmar] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cobroPendienteConfirmar || !empresaActual) return;
+    const cobro = cobros.find((c) => c.id === cobroPendienteConfirmar);
+    if (!cobro) return;
+    setCobroPendienteConfirmar(null);
+
+    const cliente = clienteMap.get(cobro.clienteId);
+    const telefono = cliente?.telefono;
+    if (!telefono || cobro.imputaciones.length === 0) return;
+
+    (async () => {
+      try {
+        const numerosComprobantes = cobro.imputaciones
+          .map((imp) => comprobantes.find((c) => c.id === imp.comprobanteId))
+          .filter((c): c is Comprobante => Boolean(c))
+          .map((c) => formatNumero(PREFIJO_COMPROBANTE[c.tipo], c.numero));
+        if (numerosComprobantes.length === 0) return;
+
+        const { data: envios } = await supabase
+          .from('documentos_enviados_agente')
+          .select('numero_documento')
+          .eq('cliente_id', empresaActual.id)
+          .eq('telefono', normalizarTelefonoArgentina(telefono))
+          .eq('tipo_documento', 'comprobante')
+          .in('numero_documento', numerosComprobantes);
+
+        if (!envios || envios.length === 0) return;
+
+        const numero = formatNumero('COB', cobro.numero);
+        const cuerpo =
+          `Hola${cliente?.nombre ? ` ${cliente.nombre}` : ''},\n\n` +
+          `Te enviamos el Recibo ${numero} por ${formatARS(cobro.monto)}.\n\n` +
+          `Cualquier consulta quedamos a disposición.\nSaludos.`;
+        const pdfBase64 = await generarReciboPdfBase64(empresaActual, cliente, cobro, comprobantes, cliente?.nombre ?? 'Cliente');
+        await enviarDocumentoWhatsapp({
+          clienteId: empresaActual.id,
+          telefono,
+          pdfBase64,
+          nombreArchivo: numero,
+          caption: cuerpo,
+          tipoDocumento: 'recibo',
+          numeroDocumento: numero,
+        });
+      } catch (e) {
+        console.error('Cobranzas: no se pudo auto-enviar el Recibo al registrar el cobro', e);
+      }
+    })();
+  }, [cobroPendienteConfirmar, cobros, comprobantes, empresaActual]);
 
   return (
     <div className="space-y-6">

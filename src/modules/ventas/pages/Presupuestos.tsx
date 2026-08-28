@@ -31,7 +31,7 @@ import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
-import { descargarPresupuestoPdf, descargarReciboPdf, generarPresupuestoPdfBase64 } from '../lib/pdfComprobantes';
+import { descargarPresupuestoPdf, descargarReciboPdf, generarPresupuestoPdfBase64, generarConfirmacionPedidoPdfBase64 } from '../lib/pdfComprobantes';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import { buscarSenaPendiente } from '../lib/senaHelpers';
 import {
@@ -236,7 +236,58 @@ export default function Presupuestos() {
       type: 'CONVERTIR_PRESUPUESTO_A_ORDEN',
       payload: { presupuestoId, tipoOrden },
     });
+    // Fase 51 (28/08, a pedido de Carlos): "informarle al cliente la
+    // fecha de entrega... inmediatamente posterior a la acción" -- la
+    // Orden recién creada todavía no existe en `ordenes` en este mismo
+    // tick (el dispatch actualiza el estado del reducer, pero este
+    // componente todavía no re-renderizó con la nueva lista). Se marca
+    // acá qué presupuesto quedó pendiente de auto-confirmar, y el efecto
+    // de abajo dispara el envío en cuanto la Orden aparece.
+    setPresupuestoPendienteConfirmar(presupuestoId);
   };
+
+  // Fase 51: una vez que la Orden ya existe en el estado (ver arriba),
+  // manda automáticamente la "Confirmación de pedido" al cliente -- el
+  // mismo documento/canal que ya usa Órdenes de Venta, sin que el
+  // operador tenga que ir a apretar el botón ahí a mano. Si falla (canal
+  // no configurado, sin teléfono, etc.) NO interrumpe el flujo de
+  // aprobar -- la Orden ya se creó igual, es solo el aviso automático el
+  // que no salió; el operador puede reenviarlo a mano desde Órdenes de
+  // Venta cuando quiera.
+  const [presupuestoPendienteConfirmar, setPresupuestoPendienteConfirmar] = useState<string | null>(null);
+  useEffect(() => {
+    if (!presupuestoPendienteConfirmar || !empresaActual) return;
+    const orden = ordenes.find((o) => o.presupuestoId === presupuestoPendienteConfirmar);
+    if (!orden) return;
+    setPresupuestoPendienteConfirmar(null);
+
+    const cliente = clientes.find((c) => c.id === orden.clienteId);
+    const telefono = cliente?.telefono;
+    if (!telefono) return;
+
+    (async () => {
+      const numeroOrden = formatNumero(PREFIJO_ORDEN[orden.tipo], orden.numero);
+      const nombre = cliente?.nombre ?? '';
+      const cuerpo =
+        `Hola${nombre ? ` ${nombre}` : ''},\n\n` +
+        `Te confirmamos tu pedido ${numeroOrden}${orden.fechaEntrega ? ` -- entrega estimada ${formatDate(orden.fechaEntrega)}` : ''}.\n\n` +
+        `Cualquier consulta quedamos a disposición.\nSaludos.`;
+      try {
+        const pdfBase64 = await generarConfirmacionPedidoPdfBase64(empresaActual, cliente, orden, nombre || 'Cliente');
+        await enviarDocumentoWhatsapp({
+          clienteId: empresaActual.id,
+          telefono,
+          pdfBase64,
+          nombreArchivo: numeroOrden,
+          caption: cuerpo,
+          tipoDocumento: 'confirmacion_pedido',
+          numeroDocumento: numeroOrden,
+        });
+      } catch (e) {
+        console.error('Presupuestos: no se pudo auto-enviar la Confirmación de pedido al aprobar', e);
+      }
+    })();
+  }, [presupuestoPendienteConfirmar, ordenes, clientes, empresaActual]);
 
   // Fase 41.2: cobro de seña -- desenganchado a propósito de "Aprobar y
   // crear orden" y de la Ficha de medida (ese campo Seña se carga en la
@@ -485,6 +536,8 @@ export default function Presupuestos() {
         pdfBase64,
         nombreArchivo: numero,
         caption: cuerpo,
+        tipoDocumento: 'presupuesto',
+        numeroDocumento: numero,
       });
       marcarEnviadoSiBorrador(pres);
     } catch (e) {

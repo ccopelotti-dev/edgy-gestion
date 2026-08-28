@@ -588,6 +588,8 @@ export default function OrdenesCompra() {
         pdfBase64,
         nombreArchivo: numero,
         caption: cuerpo,
+        tipoDocumento: 'orden_compra',
+        numeroDocumento: numero,
       });
     } catch (e) {
       console.error('Ordenes de compra: no se pudo enviar por el agente, cae a wa.me', e);

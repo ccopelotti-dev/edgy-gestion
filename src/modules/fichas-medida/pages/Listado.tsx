@@ -202,6 +202,8 @@ export default function Listado() {
         pdfBase64,
         nombreArchivo: numeroFicha,
         caption: cuerpo,
+        tipoDocumento: 'ficha_medida',
+        numeroDocumento: numeroFicha,
       });
     } catch (e) {
       console.error('Fichas de medida: no se pudo enviar por el agente, cae a wa.me', e);

@@ -208,6 +208,8 @@ export default function Cotizaciones() {
         pdfBase64,
         nombreArchivo: numero,
         caption: cuerpo,
+        tipoDocumento: 'cotizacion',
+        numeroDocumento: numero,
       });
       marcarEnviadoSiBorrador(cot);
     } catch (e) {

@@ -334,6 +334,8 @@ export default function Comprobantes() {
         pdfBase64,
         nombreArchivo: numero,
         caption: cuerpo,
+        tipoDocumento: 'comprobante',
+        numeroDocumento: numero,
       });
     } catch (e) {
       console.error('Comprobantes: no se pudo enviar por el agente, cae a wa.me', e);

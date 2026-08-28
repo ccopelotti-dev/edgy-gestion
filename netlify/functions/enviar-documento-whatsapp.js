@@ -23,12 +23,35 @@ import { createClient } from '@supabase/supabase-js'
 //     "nombreArchivo": "Presupuesto-PRE-00001", // sin extensión
 //     "caption": "Te enviamos el presupuesto..." // opcional, texto que
 //                                                  // acompaña el PDF
+//     "tipoDocumento": "presupuesto",  // Fase 51 -- rótulo libre del
+//                                      // tipo (ver DOC_ENVIADO abajo),
+//                                      // para poder correlacionar una
+//                                      // respuesta futura con lo que se
+//                                      // mandó. Opcional por compat
+//                                      // hacia atrás, pero todos los
+//                                      // llamadores actuales ya lo pasan.
+//     "numeroDocumento": "PRE-00006"   // mismo valor que nombreArchivo
+//                                      // en la práctica -- se guarda
+//                                      // aparte para no depender de que
+//                                      // nombreArchivo no cambie de forma.
 //   }
 //
 // Requiere que el tenant tenga cargado `evolution_instance_nombre` +
 // `evolution_instance_apikey` en `clientes_agente_config` (migración
 // 0101) -- si no los tiene, todavía no tiene un canal de WhatsApp de
 // salida configurado (hoy solo Punto Tex).
+//
+// Fase 51 (28/08, a pedido de Carlos): además de mandar el documento,
+// deja un registro en `documentos_enviados_agente` (tenant + teléfono +
+// tipo + número + fecha). Es la base para que, cuando el destinatario
+// responda por WhatsApp, n8n pueda preguntarle a `agente-documento-check`
+// "¿a qué le está contestando este teléfono?" y reenviarle la respuesta
+// a un supervisor humano en vez de dejar que el agente conteste solo --
+// el agente nunca decide nada comercial por su cuenta, solo relaciona y
+// escala. El registro se intenta guardar SIEMPRE que el envío a Evolution
+// haya sido exitoso; si el insert falla no se corta la respuesta al
+// panel (el documento ya salió, perder el log de correlación es un mal
+// menor frente a hacerle creer al operador que el envío falló).
 
 function normalizarTelefonoArgentina(telefonoRaw) {
   let d = String(telefonoRaw || '').replace(/\D/g, '')
@@ -66,6 +89,8 @@ export default async (req) => {
   const pdfBase64 = String(body.pdfBase64 || '')
   const nombreArchivo = String(body.nombreArchivo || 'documento').trim() || 'documento'
   const caption = body.caption ? String(body.caption) : undefined
+  const tipoDocumento = body.tipoDocumento ? String(body.tipoDocumento) : null
+  const numeroDocumento = body.numeroDocumento ? String(body.numeroDocumento) : nombreArchivo
 
   if (!clienteId || !telefonoRaw || !pdfBase64) {
     return new Response(JSON.stringify({ ok: false, error: 'Falta clienteId, telefono o pdfBase64' }), { status: 400 })
@@ -150,6 +175,19 @@ export default async (req) => {
       JSON.stringify({ ok: false, error: `Evolution API respondió ${evolutionRes.status}`, detalle: evolutionBody }),
       { status: 502 },
     )
+  }
+
+  // 5) Fase 51: dejar registro para poder correlacionar la respuesta.
+  if (tipoDocumento) {
+    const { error: logError } = await supabaseAdmin.from('documentos_enviados_agente').insert({
+      cliente_id: clienteId,
+      telefono,
+      tipo_documento: tipoDocumento,
+      numero_documento: numeroDocumento,
+    })
+    if (logError) {
+      console.error('enviar-documento-whatsapp: no se pudo loguear documentos_enviados_agente', logError)
+    }
   }
 
   return new Response(JSON.stringify({ ok: true }), { status: 200 })

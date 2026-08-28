@@ -170,6 +170,8 @@ export default function OrdenesPago() {
         pdfBase64,
         nombreArchivo: numero,
         caption: cuerpo,
+        tipoDocumento: 'comprobante_pago',
+        numeroDocumento: numero,
       });
     } catch (e) {
       console.error('Ordenes de pago: no se pudo enviar por el agente, cae a wa.me', e);

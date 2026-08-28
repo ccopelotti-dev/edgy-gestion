@@ -586,6 +586,8 @@ export default function Ordenes() {
         pdfBase64,
         nombreArchivo: numeroOrden,
         caption: cuerpo,
+        tipoDocumento: 'confirmacion_pedido',
+        numeroDocumento: numeroOrden,
       });
     } catch (e) {
       console.error('Ordenes: no se pudo enviar la confirmación por el agente, cae a wa.me', e);
