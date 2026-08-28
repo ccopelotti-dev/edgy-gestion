@@ -30,6 +30,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { descargarPresupuestoPdf, descargarReciboPdf, generarPresupuestoPdfBase64 } from '../lib/pdfComprobantes';
 import { aplicarEfectosCatalogoAlFacturar } from '../lib/efectosCatalogoFacturar';
 import { buscarSenaPendiente } from '../lib/senaHelpers';
@@ -488,9 +489,7 @@ export default function Presupuestos() {
       marcarEnviadoSiBorrador(pres);
     } catch (e) {
       console.error('Presupuestos: no se pudo enviar por el agente, cae a wa.me', e);
-      const telefono = cliente.telefono.replace(/\D/g, '');
-      const url = `https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`;
-      window.open(url, '_blank');
+      window.open(armarLinkWhatsapp(cliente.telefono, cuerpo), '_blank');
       marcarEnviadoSiBorrador(pres);
     } finally {
       setEnviandoWhatsappId(null);

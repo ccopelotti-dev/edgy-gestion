@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { supabase } from '@/lib/supabase';
 import { descargarOrdenCompraPdf } from '../lib/pdfComprobantes';
 import {
@@ -571,9 +572,8 @@ export default function OrdenesCompra() {
 
   const handleEnviarWhatsappOC = (oc: (typeof ordenesCompra)[number], proveedor?: Proveedor) => {
     if (!proveedor?.telefono) return;
-    const telefono = proveedor.telefono.replace(/\D/g, '');
     const { cuerpo } = armarTextoOC(oc);
-    window.open(`https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`, '_blank');
+    window.open(armarLinkWhatsapp(proveedor.telefono, cuerpo), '_blank');
   };
 
   const handleDescargarPdf = async (oc: (typeof ordenesCompra)[number]) => {

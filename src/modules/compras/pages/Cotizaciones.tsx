@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { descargarCotizacionPdf } from '../lib/pdfComprobantes';
 import {
   useCotizaciones,
@@ -190,10 +191,8 @@ export default function Cotizaciones() {
 
   const handleEnviarWhatsapp = (cot: (typeof cotizaciones)[number], proveedor?: Proveedor) => {
     if (!proveedor?.telefono) return;
-    const telefono = proveedor.telefono.replace(/\D/g, '');
     const { cuerpo } = armarTextoCotizacion(cot);
-    const url = `https://wa.me/${telefono}?text=${encodeURIComponent(cuerpo)}`;
-    window.open(url, '_blank');
+    window.open(armarLinkWhatsapp(proveedor.telefono, cuerpo), '_blank');
     marcarEnviadoSiBorrador(cot);
   };
 
