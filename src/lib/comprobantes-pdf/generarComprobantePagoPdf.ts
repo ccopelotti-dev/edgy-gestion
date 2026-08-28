@@ -61,7 +61,11 @@ export async function generarComprobantePagoPdf(
   empresa: EmpresaParaPdf,
   pago: PagoParaPdf,
   nombreArchivo: string,
-): Promise<void> {
+  // Fase 50e (28/08): igual que generarComprobantePdf/generarReciboPdf --
+  // devuelve el PDF en base64 en vez de descargarlo, para Órdenes de
+  // Pago (agente como canal de salida).
+  soloBase64 = false,
+): Promise<void | string> {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
@@ -217,5 +221,10 @@ export async function generarComprobantePagoPdf(
   doc.text('Aclaración', pageWidth - marginX - 70, y)
 
   dibujarPie(doc, empresa)
+  if (soloBase64) {
+    const dataUri = doc.output('datauristring')
+    return dataUri.split(',').pop()
+  }
+
   await imprimirOGuardarPdf(doc, nombreArchivo)
 }

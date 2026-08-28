@@ -25,8 +25,9 @@ import {
 
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { supabase } from '@/lib/supabase';
-import { descargarOrdenCompraPdf } from '../lib/pdfComprobantes';
+import { descargarOrdenCompraPdf, generarOrdenCompraPdfBase64 } from '../lib/pdfComprobantes';
 import {
   useOrdenesCompra,
   useProveedores,
@@ -121,6 +122,7 @@ export default function OrdenesCompra() {
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
   // Fase 21 (punto 3 de Cotizaciones): una vez generada la OC desde una
   // cotización respondida, acá se cargan los precios cotizados y se
   // confirman -- ver OrdenCompraPreciosDialog.
@@ -570,10 +572,31 @@ export default function OrdenesCompra() {
     window.open(`mailto:${proveedor.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`, '_blank');
   };
 
-  const handleEnviarWhatsappOC = (oc: (typeof ordenesCompra)[number], proveedor?: Proveedor) => {
-    if (!proveedor?.telefono) return;
+  // Fase 50e (28/08): igual que Cotizaciones/Presupuestos -- manda el
+  // PDF real como adjunto de WhatsApp a través del agente, con
+  // respaldo a wa.me si falla.
+  const handleEnviarWhatsappOC = async (oc: (typeof ordenesCompra)[number], proveedor?: Proveedor) => {
+    if (!proveedor?.telefono || !empresaActual) return;
+    const numero = formatNumero('OC', oc.numero);
     const { cuerpo } = armarTextoOC(oc);
-    window.open(armarLinkWhatsapp(proveedor.telefono, cuerpo), '_blank');
+    setEnviandoWhatsappId(oc.id);
+    try {
+      const pdfBase64 = await generarOrdenCompraPdfBase64(empresaActual, proveedor, oc, nombreProveedor(oc.proveedorId));
+      await enviarDocumentoWhatsapp({
+        clienteId: empresaActual.id,
+        telefono: proveedor.telefono,
+        pdfBase64,
+        nombreArchivo: numero,
+        caption: cuerpo,
+      });
+    } catch (e) {
+      console.error('Ordenes de compra: no se pudo enviar por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
+      window.open(armarLinkWhatsapp(proveedor.telefono, cuerpo), '_blank');
+      alert(`No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\nSe intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.`);
+    } finally {
+      setEnviandoWhatsappId(null);
+    }
   };
 
   const handleDescargarPdf = async (oc: (typeof ordenesCompra)[number]) => {
@@ -1001,11 +1024,15 @@ export default function OrdenesCompra() {
                           </button>
                           <button
                             onClick={() => handleEnviarWhatsappOC(oc, proveedorOC)}
-                            disabled={!proveedorOC?.telefono}
+                            disabled={!proveedorOC?.telefono || enviandoWhatsappId === oc.id}
                             title={proveedorOC?.telefono ? `Enviar por WhatsApp a ${proveedorOC.telefono}` : 'El proveedor no tiene teléfono cargado'}
                             className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
                           >
-                            <MessageCircle className="h-3.5 w-3.5" />
+                            {enviandoWhatsappId === oc.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <MessageCircle className="h-3.5 w-3.5" />
+                            )}
                           </button>
                           {oc.estado === 'pendiente' && (
                             <>

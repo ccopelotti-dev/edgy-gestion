@@ -109,7 +109,14 @@ export async function descargarComprobantePdf(
   // Default [] para no romper ningún llamador existente que todavía no
   // la pasa (clientes de un solo local, o código no actualizado).
   puntosVenta: PuntoVentaParaPdf[] = [],
-): Promise<void> {
+  // Fase 50e (28/08): igual que Presupuesto -- devuelve el PDF en
+  // base64 en vez de descargarlo, para mandarlo como adjunto real por
+  // WhatsApp. Solo lo soporta el motor NUEVO (posterior al corte de
+  // formato) -- un comprobante viejo (motor Clásico) no puede generarse
+  // en base64 hoy, así que se corta con un error explícito y el llamador
+  // cae al wa.me de siempre (ver Comprobantes.tsx).
+  soloBase64 = false,
+): Promise<void | string> {
   const puntoVenta = comp.puntoVentaId
     ? puntosVenta.find((pv) => pv.id === comp.puntoVentaId)
     : undefined;
@@ -185,12 +192,15 @@ export async function descargarComprobantePdf(
   // ambos lados a instante real es lo único que da un resultado
   // correcto siempre.
   if (new Date(comp.createdAt).getTime() < new Date(CORTE_FORMATO_A5).getTime()) {
+    if (soloBase64) {
+      throw new Error('Este comprobante usa el formato anterior -- descargalo y adjuntalo a mano.');
+    }
     // Ya emitido con el diseño viejo -- se descarga igual que siempre.
     await generarComprobantePdfClasico(empresaParaPdf(empresaActual), datosComprobante, nombreArchivo);
     return;
   }
 
-  await generarComprobantePdf(
+  return generarComprobantePdf(
     empresaParaPdf(empresaActual),
     datosComprobante,
     nombreArchivo,
@@ -199,7 +209,28 @@ export async function descargarComprobantePdf(
     // tiene efecto real dentro de la app de escritorio (Electron); en
     // navegador se ignora y descarga una vez, como siempre.
     2,
+    soloBase64,
   );
+}
+
+/** Fase 50e: variante de `descargarComprobantePdf` que devuelve el PDF
+ * en base64 en vez de descargarlo -- ver comentario homólogo en
+ * `generarPresupuestoPdfBase64` más abajo. */
+export function generarComprobantePdfBase64(
+  empresaActual: ClienteEmpresa,
+  cliente: Cliente | undefined,
+  comp: Comprobante,
+  clienteNombreFallback: string,
+  puntosVenta: PuntoVentaParaPdf[] = [],
+): Promise<string> {
+  return descargarComprobantePdf(
+    empresaActual,
+    cliente,
+    comp,
+    clienteNombreFallback,
+    puntosVenta,
+    true,
+  ) as Promise<string>;
 }
 
 /** Descarga el PDF de un Presupuesto -- mismo motor genérico que
@@ -376,9 +407,11 @@ export async function descargarReciboPdf(
   cobro: Cobro,
   comprobantes: Comprobante[],
   clienteNombreFallback: string,
-): Promise<void> {
+  // Fase 50e (28/08): ver comentario homólogo en descargarComprobantePdf.
+  soloBase64 = false,
+): Promise<void | string> {
   const numero = `COB-${String(cobro.numero).padStart(5, '0')}`;
-  await generarReciboPdf(
+  return generarReciboPdf(
     empresaParaPdf(empresaActual),
     {
       numero,
@@ -398,5 +431,19 @@ export async function descargarReciboPdf(
       notas: cobro.notas ?? null,
     },
     numero,
+    soloBase64,
   );
+}
+
+/** Fase 50e: variante de `descargarReciboPdf` que devuelve el PDF en
+ * base64 en vez de descargarlo -- para Cobranzas (agente como canal de
+ * salida). */
+export function generarReciboPdfBase64(
+  empresaActual: ClienteEmpresa,
+  cliente: Cliente | undefined,
+  cobro: Cobro,
+  comprobantes: Comprobante[],
+  clienteNombreFallback: string,
+): Promise<string> {
+  return descargarReciboPdf(empresaActual, cliente, cobro, comprobantes, clienteNombreFallback, true) as Promise<string>;
 }

@@ -23,7 +23,8 @@ import {
 
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
-import { descargarCotizacionPdf } from '../lib/pdfComprobantes';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
+import { descargarCotizacionPdf, generarCotizacionPdfBase64 } from '../lib/pdfComprobantes';
 import {
   useCotizaciones,
   useProveedores,
@@ -64,6 +65,7 @@ export default function Cotizaciones() {
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
 
   // ── Datos filtrados ───────────────────────────────────────
 
@@ -189,11 +191,34 @@ export default function Cotizaciones() {
     marcarEnviadoSiBorrador(cot);
   };
 
-  const handleEnviarWhatsapp = (cot: (typeof cotizaciones)[number], proveedor?: Proveedor) => {
-    if (!proveedor?.telefono) return;
+  // Fase 50e (28/08): igual que Presupuestos/Fichas de medida -- manda
+  // el PDF real como adjunto de WhatsApp a través del agente. Si falla,
+  // cae al wa.me de siempre como respaldo, con el motivo del error
+  // siempre visible (ver Presupuestos.tsx para el mismo patrón).
+  const handleEnviarWhatsapp = async (cot: (typeof cotizaciones)[number], proveedor?: Proveedor) => {
+    if (!proveedor?.telefono || !empresaActual) return;
+    const numero = formatNumero('COT', cot.numero);
     const { cuerpo } = armarTextoCotizacion(cot);
-    window.open(armarLinkWhatsapp(proveedor.telefono, cuerpo), '_blank');
-    marcarEnviadoSiBorrador(cot);
+    setEnviandoWhatsappId(cot.id);
+    try {
+      const pdfBase64 = await generarCotizacionPdfBase64(empresaActual, proveedor, cot, nombreProveedor(cot.proveedorId));
+      await enviarDocumentoWhatsapp({
+        clienteId: empresaActual.id,
+        telefono: proveedor.telefono,
+        pdfBase64,
+        nombreArchivo: numero,
+        caption: cuerpo,
+      });
+      marcarEnviadoSiBorrador(cot);
+    } catch (e) {
+      console.error('Cotizaciones: no se pudo enviar por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
+      window.open(armarLinkWhatsapp(proveedor.telefono, cuerpo), '_blank');
+      alert(`No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\nSe intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.`);
+      marcarEnviadoSiBorrador(cot);
+    } finally {
+      setEnviandoWhatsappId(null);
+    }
   };
 
   const handleDescargarPdf = async (cot: (typeof cotizaciones)[number]) => {
@@ -310,11 +335,15 @@ export default function Cotizaciones() {
                           </button>
                           <button
                             onClick={() => handleEnviarWhatsapp(cot, proveedorCot)}
-                            disabled={!proveedorCot?.telefono}
+                            disabled={!proveedorCot?.telefono || enviandoWhatsappId === cot.id}
                             title={proveedorCot?.telefono ? `Enviar por WhatsApp a ${proveedorCot.telefono}` : 'El proveedor no tiene teléfono cargado'}
                             className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
                           >
-                            <MessageCircle className="h-3.5 w-3.5" />
+                            {enviandoWhatsappId === cot.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <MessageCircle className="h-3.5 w-3.5" />
+                            )}
                           </button>
                           {cot.estado === 'borrador' && (
                             <>

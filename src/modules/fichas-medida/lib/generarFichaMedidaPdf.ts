@@ -265,7 +265,11 @@ export async function generarFichaMedidaPdf(
   ficha: FichaMedida,
   nombreArchivo: string,
   condicionIvaEmisor?: string | null,
-): Promise<void> {
+  // Fase 50e (28/08): igual que generarComprobantePdf -- devuelve el PDF
+  // en base64 (sin el prefijo `data:...;base64,`) en vez de descargarlo,
+  // para mandarlo como adjunto real por WhatsApp.
+  soloBase64 = false,
+): Promise<void | string> {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
@@ -376,5 +380,11 @@ export async function generarFichaMedidaPdf(
   // `ficha.total > 0` nunca se hubiera vuelto a mostrar.
 
   dibujarPie(doc, empresa)
+
+  if (soloBase64) {
+    const dataUri = doc.output('datauristring')
+    return dataUri.split(',').pop()
+  }
+
   await imprimirOGuardarPdf(doc, nombreArchivo)
 }

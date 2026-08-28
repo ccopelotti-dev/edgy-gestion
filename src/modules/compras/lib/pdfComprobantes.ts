@@ -98,15 +98,20 @@ export async function descargarComprobanteCompraPdf(
 
 /** Descarga el PDF de una Orden de compra (documento para mandarle al
  * proveedor, no tiene IVA discriminado -- eso llega recién con el
- * comprobante que el proveedor emite en respuesta). */
+ * comprobante que el proveedor emite en respuesta).
+ *
+ * `soloBase64` (Fase 50e, 28/08): en vez de descargar, devuelve el PDF
+ * en base64 -- para mandarlo como adjunto real por WhatsApp (agente
+ * como canal de salida), igual que ya hace Presupuestos en Ventas. */
 export async function descargarOrdenCompraPdf(
   empresaActual: ClienteEmpresa,
   proveedor: Proveedor | undefined,
   oc: OrdenCompra,
   proveedorNombreFallback: string,
-): Promise<void> {
+  soloBase64 = false,
+): Promise<void | string> {
   const numero = formatNumero('OC', oc.numero);
-  await generarComprobantePdf(
+  return generarComprobantePdf(
     empresaParaPdf(empresaActual),
     {
       tipoLabel: 'Orden de compra',
@@ -126,19 +131,37 @@ export async function descargarOrdenCompraPdf(
       notas: oc.notas ?? null,
     },
     numero,
+    1,
+    soloBase64,
   );
 }
 
+/** Fase 50e: variante de `descargarOrdenCompraPdf` que devuelve el PDF
+ * en base64 en vez de descargarlo -- ver comentario homólogo en
+ * ventas/lib/pdfComprobantes.ts (generarPresupuestoPdfBase64). */
+export function generarOrdenCompraPdfBase64(
+  empresaActual: ClienteEmpresa,
+  proveedor: Proveedor | undefined,
+  oc: OrdenCompra,
+  proveedorNombreFallback: string,
+): Promise<string> {
+  return descargarOrdenCompraPdf(empresaActual, proveedor, oc, proveedorNombreFallback, true) as Promise<string>;
+}
+
 /** Descarga el PDF de un Pedido de cotización (lo que se le manda al
- * proveedor para que cotice, no un documento que el proveedor emite). */
+ * proveedor para que cotice, no un documento que el proveedor emite).
+ *
+ * `soloBase64` (Fase 50e): ver comentario homólogo en
+ * `descargarOrdenCompraPdf` más arriba. */
 export async function descargarCotizacionPdf(
   empresaActual: ClienteEmpresa,
   proveedor: Proveedor | undefined,
   cot: PedidoCotizacion,
   proveedorNombreFallback: string,
-): Promise<void> {
+  soloBase64 = false,
+): Promise<void | string> {
   const numero = formatNumero('COT', cot.numero);
-  await generarComprobantePdf(
+  return generarComprobantePdf(
     empresaParaPdf(empresaActual),
     {
       tipoLabel: 'Pedido de cotización',
@@ -158,7 +181,20 @@ export async function descargarCotizacionPdf(
       notas: cot.notas ?? null,
     },
     numero,
+    1,
+    soloBase64,
   );
+}
+
+/** Fase 50e: variante de `descargarCotizacionPdf` que devuelve el PDF
+ * en base64 en vez de descargarlo. */
+export function generarCotizacionPdfBase64(
+  empresaActual: ClienteEmpresa,
+  proveedor: Proveedor | undefined,
+  cot: PedidoCotizacion,
+  proveedorNombreFallback: string,
+): Promise<string> {
+  return descargarCotizacionPdf(empresaActual, proveedor, cot, proveedorNombreFallback, true) as Promise<string>;
 }
 
 // ─── Fase 17b: Resumen de cuenta ─────────────────────────────
@@ -235,9 +271,11 @@ export async function descargarComprobantePagoPdf(
   pago: PagoCompra,
   comprobantes: ComprobanteCompra[],
   proveedorNombreFallback: string,
-): Promise<void> {
+  // Fase 50e (28/08): ver comentario homólogo en Ventas/pdfComprobantes.ts.
+  soloBase64 = false,
+): Promise<void | string> {
   const numero = `PAG-${String(pago.numero).padStart(5, '0')}`;
-  await generarComprobantePagoPdf(
+  return generarComprobantePagoPdf(
     empresaParaPdf(empresaActual),
     {
       numero,
@@ -264,5 +302,25 @@ export async function descargarComprobantePagoPdf(
       notas: pago.notas ?? null,
     },
     numero,
+    soloBase64,
   );
+}
+
+/** Fase 50e: variante de `descargarComprobantePagoPdf` que devuelve el
+ * PDF en base64 en vez de descargarlo. */
+export function generarComprobantePagoPdfBase64(
+  empresaActual: ClienteEmpresa,
+  proveedor: Proveedor | undefined,
+  pago: PagoCompra,
+  comprobantes: ComprobanteCompra[],
+  proveedorNombreFallback: string,
+): Promise<string> {
+  return descargarComprobantePagoPdf(
+    empresaActual,
+    proveedor,
+    pago,
+    comprobantes,
+    proveedorNombreFallback,
+    true,
+  ) as Promise<string>;
 }

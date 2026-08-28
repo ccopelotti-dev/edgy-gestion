@@ -18,6 +18,7 @@ import { EstadoPresupuestoBadge } from '@/modules/ventas/components/ventas/displ
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { empresaParaPdf } from '@/modules/ventas/lib/pdfComprobantes';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { supabase } from '@/lib/supabase';
 
 const ESTADO_BADGE: Record<EstadoFicha, string> = {
@@ -36,6 +37,7 @@ export default function Listado() {
   const [fichaEditando, setFichaEditando] = useState<FichaMedida | undefined>(undefined);
   const [generandoId, setGenerandoId] = useState<string | null>(null);
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
   const [estadosWorkflow, setEstadosWorkflow] = useState<Map<string, EstadoWorkflowFicha>>(new Map());
 
@@ -123,34 +125,43 @@ export default function Listado() {
     };
   }
 
+  // Fase 43e (20/08, a pedido de Carlos): la dirección que va en el
+  // encabezado es la del PUNTO DE VENTA que tomó el pedido -- igual
+  // que Factura -- no la fiscal de la empresa (que dejó de
+  // publicarse hace varias fases, ver EmpresaParaPdf en
+  // generarComprobantePdf.ts). Se resuelve por el `puntoVentaNumero`
+  // que la ficha ya tiene congelado desde que se creó (Fase 43); si
+  // no hay una fila de `puntos_venta` con ese número (cliente de un
+  // solo local, numeración tomada de clientes_arca_config) esa línea
+  // directamente no se dibuja -- mismo comportamiento que Factura.
+  // Extraído a helper (Fase 50e) para reusarlo tanto en la descarga
+  // como en el envío real por WhatsApp, sin duplicar las dos consultas.
+  async function resolverEmpresaYCondicionIva(f: FichaMedida) {
+    if (!empresaActual) return null;
+    const [{ data: puntoVenta }, { data: condicionIva }] = await Promise.all([
+      supabase
+        .from('puntos_venta')
+        .select('direccion')
+        .eq('cliente_id', empresaActual.id)
+        .eq('numero', f.puntoVentaNumero)
+        .maybeSingle(),
+      supabase.rpc('obtener_condicion_iva', { p_cliente_id: empresaActual.id }),
+    ]);
+    const empresa = { ...empresaParaPdf(empresaActual), direccion: puntoVenta?.direccion ?? null };
+    return { empresa, condicionIva: (condicionIva as string | null) ?? null };
+  }
+
   async function handleDescargarPdf(f: FichaMedida) {
     if (!empresaActual) return;
     setGenerandoPdfId(f.id);
     try {
-      // Fase 43e (20/08, a pedido de Carlos): la dirección que va en el
-      // encabezado es la del PUNTO DE VENTA que tomó el pedido -- igual
-      // que Factura -- no la fiscal de la empresa (que dejó de
-      // publicarse hace varias fases, ver EmpresaParaPdf en
-      // generarComprobantePdf.ts). Se resuelve por el `puntoVentaNumero`
-      // que la ficha ya tiene congelado desde que se creó (Fase 43); si
-      // no hay una fila de `puntos_venta` con ese número (cliente de un
-      // solo local, numeración tomada de clientes_arca_config) esa línea
-      // directamente no se dibuja -- mismo comportamiento que Factura.
-      const [{ data: puntoVenta }, { data: condicionIva }] = await Promise.all([
-        supabase
-          .from('puntos_venta')
-          .select('direccion')
-          .eq('cliente_id', empresaActual.id)
-          .eq('numero', f.puntoVentaNumero)
-          .maybeSingle(),
-        supabase.rpc('obtener_condicion_iva', { p_cliente_id: empresaActual.id }),
-      ]);
-      const empresa = { ...empresaParaPdf(empresaActual), direccion: puntoVenta?.direccion ?? null };
+      const datos = await resolverEmpresaYCondicionIva(f);
+      if (!datos) return;
       await generarFichaMedidaPdf(
-        empresa,
+        datos.empresa,
         f,
         `Toma de pedidos - ${f.clienteNombre}`,
-        (condicionIva as string | null) ?? null,
+        datos.condicionIva,
       );
     } finally {
       setGenerandoPdfId(null);
@@ -164,10 +175,42 @@ export default function Listado() {
     window.open(url, '_blank');
   }
 
-  function handleEnviarWhatsapp(f: FichaMedida) {
-    if (!f.clienteTelefono) return;
+  // Fase 50e (28/08): igual que Presupuestos -- manda el PDF real como
+  // adjunto de WhatsApp a través del agente (Evolution API), en vez del
+  // wa.me viejo que solo abría el chat con el texto (sin el archivo).
+  // Si el envío real falla por cualquier motivo, cae al wa.me de
+  // siempre como respaldo, con el motivo del error siempre visible.
+  async function handleEnviarWhatsapp(f: FichaMedida) {
+    if (!f.clienteTelefono || !empresaActual) return;
     const { cuerpo } = armarTextoFicha(f);
-    window.open(armarLinkWhatsapp(f.clienteTelefono, cuerpo), '_blank');
+    const numeroFicha = `${f.puntoVentaNumero}-${String(f.numero).padStart(8, '0')}`;
+    setEnviandoWhatsappId(f.id);
+    try {
+      const datos = await resolverEmpresaYCondicionIva(f);
+      if (!datos) throw new Error('No se pudo resolver la empresa');
+      const pdfBase64 = await generarFichaMedidaPdf(
+        datos.empresa,
+        f,
+        `Toma de pedidos - ${f.clienteNombre}`,
+        datos.condicionIva,
+        true,
+      );
+      if (!pdfBase64) throw new Error('No se pudo generar el PDF');
+      await enviarDocumentoWhatsapp({
+        clienteId: empresaActual.id,
+        telefono: f.clienteTelefono,
+        pdfBase64,
+        nombreArchivo: numeroFicha,
+        caption: cuerpo,
+      });
+    } catch (e) {
+      console.error('Fichas de medida: no se pudo enviar por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
+      window.open(armarLinkWhatsapp(f.clienteTelefono, cuerpo), '_blank');
+      alert(`No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\nSe intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.`);
+    } finally {
+      setEnviandoWhatsappId(null);
+    }
   }
 
   return (
@@ -311,11 +354,15 @@ export default function Listado() {
                 </button>
                 <button
                   onClick={() => handleEnviarWhatsapp(f)}
-                  disabled={!f.clienteTelefono}
+                  disabled={!f.clienteTelefono || enviandoWhatsappId === f.id}
                   title={f.clienteTelefono ? `Enviar por WhatsApp a ${f.clienteTelefono}` : 'El cliente no tiene teléfono cargado'}
                   className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
                 >
-                  <MessageCircle className="h-3.5 w-3.5" />
+                  {enviandoWhatsappId === f.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <MessageCircle className="h-3.5 w-3.5" />
+                  )}
                 </button>
                 {f.estado === 'lista' && (
                   <button

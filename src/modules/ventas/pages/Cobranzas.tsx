@@ -11,10 +11,12 @@ import type { Cobro, Cliente, Comprobante, MedioPago, ImputacionCobro } from '..
 import { MEDIO_PAGO_LABEL, generarId } from '../types';
 import {
   Receipt, Search, Plus, ChevronDown, ChevronRight,
-  DollarSign, Clock, TrendingUp, FileText, Download, Loader2,
+  DollarSign, Clock, TrendingUp, FileText, Download, Loader2, MessageCircle,
 } from 'lucide-react';
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { descargarReciboPdf } from '../lib/pdfComprobantes';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
+import { descargarReciboPdf, generarReciboPdfBase64 } from '../lib/pdfComprobantes';
 
 export default function Cobranzas() {
   const { clientes, comprobantes, cobros, config } = useVentas();
@@ -33,6 +35,7 @@ export default function Cobranzas() {
   // Presupuestos ya lo permiten (esta última para el recibo de seña),
   // acá faltaba para cualquier cobro, no solo señas.
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
 
   // ─── KPIs ─────────────────────────────────────────────────
   const hoy = todayISO();
@@ -95,6 +98,36 @@ export default function Cobranzas() {
       await descargarReciboPdf(empresaActual, cliente, cobro, comprobantes, cliente?.nombre ?? 'Cliente');
     } finally {
       setGenerandoPdfId(null);
+    }
+  }
+
+  // Fase 50e (28/08, a pedido de Carlos): "Desde presupuestos hasta
+  // Recibos" -- Cobranzas se suma al mismo patrón de envío real.
+  async function handleEnviarWhatsapp(cobro: Cobro) {
+    const cliente = clienteMap.get(cobro.clienteId);
+    if (!cliente?.telefono || !empresaActual) return;
+    const numero = formatNumero('COB', cobro.numero);
+    const cuerpo =
+      `Hola${cliente.nombre ? ` ${cliente.nombre}` : ''},\n\n` +
+      `Te enviamos el Recibo ${numero} por ${formatARS(cobro.monto)}.\n\n` +
+      `Cualquier consulta quedamos a disposición.\nSaludos.`;
+    setEnviandoWhatsappId(cobro.id);
+    try {
+      const pdfBase64 = await generarReciboPdfBase64(empresaActual, cliente, cobro, comprobantes, cliente?.nombre ?? 'Cliente');
+      await enviarDocumentoWhatsapp({
+        clienteId: empresaActual.id,
+        telefono: cliente.telefono,
+        pdfBase64,
+        nombreArchivo: numero,
+        caption: cuerpo,
+      });
+    } catch (e) {
+      console.error('Cobranzas: no se pudo enviar por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
+      window.open(armarLinkWhatsapp(cliente.telefono, cuerpo), '_blank');
+      alert(`No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\nSe intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.`);
+    } finally {
+      setEnviandoWhatsappId(null);
     }
   }
 
@@ -186,6 +219,7 @@ export default function Cobranzas() {
                 <th className="px-4 py-3 font-medium">Medio</th>
                 <th className="px-4 py-3 font-medium text-right">Monto</th>
                 <th className="px-4 py-3 font-medium w-8"></th>
+                <th className="px-4 py-3 font-medium w-8"></th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -217,10 +251,20 @@ export default function Cobranzas() {
                           {generandoPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                         </button>
                       </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleEnviarWhatsapp(cobro); }}
+                          disabled={!cli?.telefono || enviandoWhatsappId === cobro.id}
+                          title={cli?.telefono ? `Enviar por WhatsApp a ${cli.telefono}` : 'El cliente no tiene teléfono cargado'}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                        >
+                          {enviandoWhatsappId === cobro.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                        </button>
+                      </td>
                     </tr>
                     {expanded && (
                       <tr>
-                        <td colSpan={7} className="bg-gray-50/50 px-8 py-4">
+                        <td colSpan={8} className="bg-gray-50/50 px-8 py-4">
                           <div className="space-y-3">
                             {cobro.notas && <p className="text-sm text-gray-600">{cobro.notas}</p>}
                             <h4 className="text-xs font-semibold text-gray-500 uppercase">Imputaciones</h4>

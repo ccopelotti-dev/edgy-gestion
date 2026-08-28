@@ -16,6 +16,7 @@ import {
   Download,
   Loader2,
   Wallet,
+  MessageCircle,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -32,9 +33,11 @@ import {
   EmptyState,
 } from '../components/compras/display';
 import { OrdenPagoDialog, ConfirmarPagoDialog, type CuentaBancariaOpcionDialog } from '../components/compras/dialogs';
-import { descargarComprobantePagoPdf } from '../lib/pdfComprobantes';
+import { descargarComprobantePagoPdf, generarComprobantePagoPdfBase64 } from '../lib/pdfComprobantes';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { listarCuentasBancarias } from '@/lib/tesoreriaSync';
-import { formatDate, nowISO } from '../lib/format';
+import { formatDate, formatARS, nowISO } from '../lib/format';
 import type { EstadoPagoCompra, PagoCompra } from '../types';
 import { generarId } from '../types';
 
@@ -61,6 +64,7 @@ export default function OrdenesPago() {
   const [cuentas, setCuentas] = useState<CuentaBancariaOpcionDialog[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
 
   useEffect(() => {
     if (confirmarPagoId && empresaActual) {
@@ -142,6 +146,38 @@ export default function OrdenesPago() {
       await descargarComprobantePagoPdf(empresaActual, prov, pago, comprobantes, 'Proveedor');
     } finally {
       setGenerandoPdfId(null);
+    }
+  };
+
+  // Fase 50e (28/08, a pedido de Carlos): Órdenes de Pago no tenía forma
+  // de mandarle el Comprobante de Pago al proveedor -- solo descarga.
+  // Mismo patrón que el resto: PDF real como adjunto por WhatsApp vía
+  // el agente, con respaldo a wa.me si falla.
+  const handleEnviarWhatsapp = async (pago: PagoCompra) => {
+    const prov = proveedores.find((p) => p.id === pago.proveedorId);
+    if (!prov?.telefono || !empresaActual) return;
+    const numero = `PAG-${String(pago.numero).padStart(5, '0')}`;
+    const cuerpo =
+      `Hola${prov.nombre ? ` ${prov.nombre}` : ''},\n\n` +
+      `Te enviamos el Comprobante de Pago ${numero} por ${formatARS(pago.monto)}.\n\n` +
+      `Cualquier consulta quedamos a disposición.\nSaludos.`;
+    setEnviandoWhatsappId(pago.id);
+    try {
+      const pdfBase64 = await generarComprobantePagoPdfBase64(empresaActual, prov, pago, comprobantes, 'Proveedor');
+      await enviarDocumentoWhatsapp({
+        clienteId: empresaActual.id,
+        telefono: prov.telefono,
+        pdfBase64,
+        nombreArchivo: numero,
+        caption: cuerpo,
+      });
+    } catch (e) {
+      console.error('Ordenes de pago: no se pudo enviar por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
+      window.open(armarLinkWhatsapp(prov.telefono, cuerpo), '_blank');
+      alert(`No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\nSe intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.`);
+    } finally {
+      setEnviandoWhatsappId(null);
     }
   };
 
@@ -248,14 +284,28 @@ export default function OrdenesPago() {
                             </>
                           )}
                           {pago.estado === 'pagada' && (
-                            <button
-                              onClick={() => handleDescargarPdf(pago)}
-                              disabled={generandoPdfId === pago.id}
-                              className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
-                              title="Comprobante de Pago (PDF)"
-                            >
-                              {generandoPdfId === pago.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleDescargarPdf(pago)}
+                                disabled={generandoPdfId === pago.id}
+                                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+                                title="Comprobante de Pago (PDF)"
+                              >
+                                {generandoPdfId === pago.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => handleEnviarWhatsapp(pago)}
+                                disabled={!proveedores.find((p) => p.id === pago.proveedorId)?.telefono || enviandoWhatsappId === pago.id}
+                                title={
+                                  proveedores.find((p) => p.id === pago.proveedorId)?.telefono
+                                    ? `Enviar por WhatsApp a ${proveedores.find((p) => p.id === pago.proveedorId)?.telefono}`
+                                    : 'El proveedor no tiene teléfono cargado'
+                                }
+                                className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                              >
+                                {enviandoWhatsappId === pago.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>

@@ -47,7 +47,11 @@ export async function generarReciboPdf(
   empresa: EmpresaParaPdf,
   recibo: ReciboParaPdf,
   nombreArchivo: string,
-): Promise<void> {
+  // Fase 50e (28/08): igual que generarComprobantePdf -- devuelve el PDF
+  // en base64 en vez de descargarlo, para mandarlo como adjunto real
+  // por WhatsApp (agente como canal de salida) desde Cobranzas.
+  soloBase64 = false,
+): Promise<void | string> {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
@@ -182,5 +186,11 @@ export async function generarReciboPdf(
   doc.text('Aclaración', pageWidth - marginX - 70, y)
 
   dibujarPie(doc, empresa)
+
+  if (soloBase64) {
+    const dataUri = doc.output('datauristring')
+    return dataUri.split(',').pop()
+  }
+
   await imprimirOGuardarPdf(doc, nombreArchivo)
 }

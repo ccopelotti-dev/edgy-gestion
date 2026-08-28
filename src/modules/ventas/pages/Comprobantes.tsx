@@ -18,10 +18,13 @@ import {
   Ban,
   Download,
   Loader2,
+  MessageCircle,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { descargarComprobantePdf } from '../lib/pdfComprobantes';
+import { armarLinkWhatsapp } from '@/lib/whatsapp';
+import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
+import { descargarComprobantePdf, generarComprobantePdfBase64 } from '../lib/pdfComprobantes';
 import {
   useComprobantes,
   useClientes,
@@ -100,6 +103,7 @@ export default function Comprobantes() {
   // Fase 10: motor de PDF -- id del comprobante que se está generando
   // en este momento (deshabilita su botón mientras descarga el logo).
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
   const { cliente: empresaActual, puntosVenta } = useClienteActual();
   // Fase 11: mensaje del último intento de autorización ARCA (aprobado,
   // rechazado, o error técnico) -- se muestra arriba del listado hasta
@@ -308,6 +312,39 @@ export default function Comprobantes() {
     }
   };
 
+  // Fase 50e (28/08, a pedido de Carlos): "Desde presupuestos hasta
+  // Recibos" -- Comprobantes (Factura/Nota) se suma al mismo patrón de
+  // envío real ya probado en Presupuestos. Un comprobante viejo (motor
+  // Clásico) no se puede generar en base64 -- ver el error explícito en
+  // pdfComprobantes.ts -- así que directamente cae al wa.me de siempre.
+  const handleEnviarWhatsapp = async (comp: Comprobante) => {
+    const cliente = clienteById(comp.clienteId);
+    if (!cliente?.telefono || !empresaActual) return;
+    const numero = formatNumero(PREFIJO_COMPROBANTE[comp.tipo], comp.numero);
+    const cuerpo =
+      `Hola${cliente.nombre ? ` ${cliente.nombre}` : ''},\n\n` +
+      `Te enviamos el ${labelTipoComprobante(comp.tipo, comp.modoEmision)} N.º ${numero} por ${formatARS(comp.total)}.\n\n` +
+      `Cualquier consulta quedamos a disposición.\nSaludos.`;
+    setEnviandoWhatsappId(comp.id);
+    try {
+      const pdfBase64 = await generarComprobantePdfBase64(empresaActual, cliente, comp, clienteNombre(comp.clienteId), puntosVenta);
+      await enviarDocumentoWhatsapp({
+        clienteId: empresaActual.id,
+        telefono: cliente.telefono,
+        pdfBase64,
+        nombreArchivo: numero,
+        caption: cuerpo,
+      });
+    } catch (e) {
+      console.error('Comprobantes: no se pudo enviar por el agente, cae a wa.me', e);
+      const motivo = e instanceof Error ? e.message : 'error desconocido';
+      window.open(armarLinkWhatsapp(cliente.telefono, cuerpo), '_blank');
+      alert(`No se pudo enviar el PDF automáticamente por WhatsApp (${motivo}).\n\nSe intentó abrir un WhatsApp Web con el texto ya armado -- si no se abrió ninguna pestaña nueva, puede que el navegador haya bloqueado el pop-up.`);
+    } finally {
+      setEnviandoWhatsappId(null);
+    }
+  };
+
   const handleRegistrarCobro = (clienteId: string) => {
     setCobroClienteId(clienteId);
     setCobroDialogOpen(true);
@@ -493,6 +530,7 @@ export default function Comprobantes() {
                 <th className="px-4 py-3 font-medium">Emision</th>
                 <th className="px-4 py-3 w-10" />
                 <th className="px-4 py-3 w-10" />
+                <th className="px-4 py-3 w-10" />
               </tr>
             </thead>
             <tbody>
@@ -508,6 +546,7 @@ export default function Comprobantes() {
                     comprobante={comp}
                     isExpanded={isExpanded}
                     clienteNombre={clienteNombre(comp.clienteId)}
+                    clienteTelefono={clienteById(comp.clienteId)?.telefono ?? null}
                     ordenNumero={comp.ordenId ? ordenNumeroStr(comp.ordenId) : null}
                     cobros={cobrosComp}
                     onToggleExpand={() => setExpandedId(isExpanded ? null : comp.id)}
@@ -515,6 +554,8 @@ export default function Comprobantes() {
                     onRegistrarCobro={() => handleRegistrarCobro(comp.clienteId)}
                     onDescargarPdf={() => handleDescargarPdf(comp)}
                     generandoPdf={generandoPdfId === comp.id}
+                    onEnviarWhatsapp={() => handleEnviarWhatsapp(comp)}
+                    enviandoWhatsapp={enviandoWhatsappId === comp.id}
                   />
                 );
               })}
@@ -557,6 +598,7 @@ interface ComprobanteRowProps {
   comprobante: Comprobante;
   isExpanded: boolean;
   clienteNombre: string;
+  clienteTelefono: string | null;
   ordenNumero: string | null;
   cobros: Cobro[];
   onToggleExpand: () => void;
@@ -564,12 +606,15 @@ interface ComprobanteRowProps {
   onRegistrarCobro: () => void;
   onDescargarPdf: () => void;
   generandoPdf: boolean;
+  onEnviarWhatsapp: () => void;
+  enviandoWhatsapp: boolean;
 }
 
 function ComprobanteRow({
   comprobante,
   isExpanded,
   clienteNombre,
+  clienteTelefono,
   ordenNumero,
   cobros,
   onToggleExpand,
@@ -577,6 +622,8 @@ function ComprobanteRow({
   onRegistrarCobro,
   onDescargarPdf,
   generandoPdf,
+  onEnviarWhatsapp,
+  enviandoWhatsapp,
 }: ComprobanteRowProps) {
   const c = comprobante;
   const prefijo = PREFIJO_COMPROBANTE[c.tipo];
@@ -660,6 +707,23 @@ function ComprobanteRow({
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Download className="h-4 w-4" />
+            )}
+          </button>
+        </td>
+        <td className="px-4 py-3 text-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEnviarWhatsapp();
+            }}
+            disabled={!clienteTelefono || enviandoWhatsapp}
+            title={clienteTelefono ? `Enviar por WhatsApp a ${clienteTelefono}` : 'El cliente no tiene teléfono cargado'}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+          >
+            {enviandoWhatsapp ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MessageCircle className="h-4 w-4" />
             )}
           </button>
         </td>
