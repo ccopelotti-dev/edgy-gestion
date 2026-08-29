@@ -38,6 +38,8 @@ const ORDEN_PRINCIPALES = [
   'servicios',
   'ventas',
   'compras',
+  // Home Keep ("Kit Hogar") va justo debajo de Compras.
+  'home_keep',
   // Fase 33: Gastos Fijos y Fiscales va justo debajo de Compras.
   'gastos-fijos',
   // Fase 34: Impuestos va justo debajo de Gastos Fijos y Fiscales.

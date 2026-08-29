@@ -56,7 +56,7 @@ export default async (req) => {
 
   const { data: pendiente, error: pendienteError } = await supabaseAdmin
     .from('comprobantes_recibidos')
-    .select('id, datos_extraidos, es_prueba, cliente_id_compras')
+    .select('id, datos_extraidos, es_prueba, destino')
     .eq('cliente_id', agente.clienteId)
     .eq('admin_id', admin.id)
     .eq('pendiente_aclaracion', 'forma_pago')
@@ -85,14 +85,16 @@ export default async (req) => {
 
   const resultado = await intentarCargarComprobante({
     supabaseAdmin,
-    // Fase 55 -- si el comprobante original se desvió a Hogar (ver
-    // agente-comprobante-recibir.js), este segundo llamado tiene que
-    // seguir cargando ahí, no contra el negocio real del admin.
-    clienteId: pendiente.cliente_id_compras || agente.clienteId,
+    // Fase 56 -- siempre el mismo cliente_id del admin (Home Keep no es
+    // un tenant aparte); si el comprobante original se desvió a Home
+    // Keep (ver agente-comprobante-recibir.js), este segundo llamado
+    // tiene que seguir escribiendo en esas tablas, no en las de Compras.
+    clienteId: agente.clienteId,
     comprobanteRecibidoId: pendiente.id,
     datosExtraidos: pendiente.datos_extraidos,
     formaPagoRespuesta: formaPago,
     esPrueba: pendiente.es_prueba,
+    destino: pendiente.destino === 'hogar' ? 'hogar' : 'compras',
   })
 
   return new Response(

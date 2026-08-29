@@ -1,4 +1,21 @@
 -- ============================================================
+-- OBSOLETO -- ver Fase 56 (migraciones 0106+)
+-- ============================================================
+-- El tenant "Hogar" armado acá se dio de baja el mismo día: obligaba
+-- a un login de Auth separado del negocio real, lo cual generaba
+-- fricción (Carlos no podía simplemente "cambiar" de negocio con su
+-- login de siempre). Se reemplazó por un MÓDULO de plataforma ("Home
+-- Keep" / Kit Hogar) que corre bajo el mismo cliente_id y el mismo
+-- login -- ver 0106_fase56_modulo_home_keep.sql y siguientes.
+--
+-- El cliente Hogar (c279fb9a-...), su rol, cliente_modulos,
+-- permisos_rol, usuarios_cliente y categorias_gasto ya fueron
+-- eliminados a mano el 29/08 al migrar a la Fase 56. Este archivo
+-- queda solo como registro histórico de por qué se llegó al diseño
+-- final -- NO correrlo de nuevo en una base limpia sin saltear la
+-- sección 2 (creación del tenant) y el insert de usuarios_cliente.
+-- ============================================================
+--
 -- Fase 55: tenant "Hogar" + categorías de gasto personal
 -- Edgy Gestión · Núcleo + Compras
 -- ============================================================

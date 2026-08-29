@@ -35,6 +35,9 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   'productos-stock': Package,
   ventas: ShoppingCart,
   compras: ShoppingBag,
+  // Home Keep ("Kit Hogar") -- reusa el mismo ícono Home que ya se
+  // importa acá para IconoInicio.
+  home_keep: Home,
   'mesas-salon': Armchair,
   'comandas-cocina': ChefHat,
   'menu-qr': QrCode,

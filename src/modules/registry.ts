@@ -22,6 +22,10 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   'productos-stock': lazy(() => import('@/modules/productos-stock')),
   'ventas': lazy(() => import('./ventas')),
   'compras': lazy(() => import('./compras')),
+  // Home Keep ("Kit Hogar", ver migración de tablas *_hogar) -- clon
+  // recortado de Compras: solo Dashboard/Proveedores/Comprobantes/Pagos,
+  // sin Cotizaciones/OC ni catálogo de stock.
+  'home_keep': lazy(() => import('./home-keep')),
   'configuracion': lazy(() => import('./configuracion')),
   'reportes': lazy(() => import('./reportes')),
   'utilidades': lazy(() => import('./utilidades')),

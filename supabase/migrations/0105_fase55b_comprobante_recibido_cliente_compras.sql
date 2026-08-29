@@ -1,4 +1,15 @@
 -- ============================================================
+-- OBSOLETO -- ver Fase 56b (migración 0107)
+-- ============================================================
+-- La columna `cliente_id_compras` quedó sin uso al reemplazar el
+-- tenant Hogar por el módulo Home Keep (Fase 56): ya no hace falta
+-- cambiar de cliente_id, así que no hace falta guardar "a qué otro
+-- cliente" cargar el comprobante. La reemplaza la columna `destino`
+-- (texto simple: 'hogar' | null) -- ver 0107_fase56b_...sql. La
+-- columna vieja se deja en la tabla (comentada como obsoleta) para no
+-- romper filas históricas.
+-- ============================================================
+--
 -- Fase 55b: destino de carga (Hogar) persistido en comprobantes_recibidos
 -- ============================================================
 --
