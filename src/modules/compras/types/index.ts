@@ -49,6 +49,15 @@ export interface ItemCompra {
    */
   insumoId?: string;
   /**
+   * Categoría de gasto personal (ver tabla categorias_gasto, Fase 55) --
+   * pensada para el tenant Hogar, donde un ítem de comprobante no
+   * corresponde a ningún Insumo/Producto real del catálogo, pero igual
+   * se quiere poder clasificarlo (ej. "Alimentación y Supermercado").
+   * Independiente de `rubro` (que en Proveedor/Insumo/Producto sigue
+   * siendo la clasificación de catálogo de producción, no se mezclan).
+   */
+  categoriaGastoId?: string;
+  /**
    * Unidad en la que se cargó `cantidad` en esta línea. Puede diferir de la
    * unidad de stock real del insumo/producto vinculado (ej. compraste "kg"
    * de un insumo que lleva el stock en "gramo") -- se convierte con

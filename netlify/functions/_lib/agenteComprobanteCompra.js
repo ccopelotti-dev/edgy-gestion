@@ -95,6 +95,22 @@ export async function intentarCargarComprobante({
   // Todo resuelto -- se carga el comprobante.
   const tipo = TIPOS_VALIDOS.includes(datosExtraidos.tipo) ? datosExtraidos.tipo : 'factura'
 
+  // Categoría de gasto (Fase 55, tenant Hogar) -- si la IA sugirió una y
+  // matchea EXACTO (por nombre) contra las categorías cargadas para este
+  // cliente, se la asigna a todos los ítems. Si el cliente no tiene
+  // categorías (caso normal de Punto Tex/Charcutería) o no hay match,
+  // queda null -- no bloquea la carga, es solo un dato extra.
+  let categoriaGastoId = null
+  if (datosExtraidos.categoriaSugerida) {
+    const { data: categorias } = await supabaseAdmin
+      .from('categorias_gasto')
+      .select('id, nombre')
+      .eq('cliente_id', clienteId)
+    const buscado = String(datosExtraidos.categoriaSugerida).trim().toLowerCase()
+    const match = (categorias || []).find((c) => c.nombre.toLowerCase() === buscado)
+    categoriaGastoId = match ? match.id : null
+  }
+
   const { data: maxRow } = await supabaseAdmin
     .from('comprobantes_compra')
     .select('numero')
@@ -125,6 +141,7 @@ export async function intentarCargarComprobante({
       monto_iva: montoIvaItem,
       producto_id: null,
       insumo_id: null,
+      categoria_gasto_id: categoriaGastoId,
       unidad: null,
     }
   })

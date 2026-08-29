@@ -84,6 +84,13 @@ export default async (req) => {
   const tipo = body.tipo ? String(body.tipo).trim() : null
   const notas = body.notas ? String(body.notas).trim() : null
   const datosExtraidos = body.datosExtraidos && typeof body.datosExtraidos === 'object' ? body.datosExtraidos : null
+  // Fase 55 -- si el admin mandó la foto con "hogar" de pie de foto
+  // (ver n8n), n8n manda destino:"hogar" acá. El documento en sí sigue
+  // guardado bajo el tenant del admin (whitelist, storage) como
+  // siempre -- lo único que cambia es a qué cliente_id se carga el
+  // comprobante en Compras (proveedor, numeración, todo separado del
+  // negocio real).
+  const destino = body.destino ? String(body.destino).trim().toLowerCase() : null
 
   if (!telefono || !imagenBase64) {
     return new Response(JSON.stringify({ ok: false, error: 'Falta telefono o imagenBase64' }), { status: 400 })
@@ -132,10 +139,30 @@ export default async (req) => {
 
   const esPrueba = admin?.solo_prueba ?? false
 
+  // Fase 55 -- si el destino es "hogar", el comprobante en Compras se
+  // carga contra ese tenant (no el negocio del admin). Se resuelve ACÁ,
+  // antes del insert, para guardarlo en cliente_id_compras y que
+  // agente-comprobante-resolver.js (segundo llamado, cuando responde la
+  // forma de pago) lo lea directo sin tener que recalcularlo.
+  let clienteIdCompras = agente.clienteId
+  if (autorizado && destino === 'hogar') {
+    const { data: hogarCliente, error: hogarError } = await supabaseAdmin
+      .from('clientes')
+      .select('id')
+      .eq('slug', 'hogar-copelotti')
+      .maybeSingle()
+    if (hogarError) {
+      console.error('agente-comprobante-recibir: error buscando tenant Hogar', hogarError)
+    } else if (hogarCliente) {
+      clienteIdCompras = hogarCliente.id
+    }
+  }
+
   const { data: comprobante, error: insertError } = await supabaseAdmin
     .from('comprobantes_recibidos')
     .insert([{
       cliente_id: agente.clienteId,
+      cliente_id_compras: clienteIdCompras !== agente.clienteId ? clienteIdCompras : null,
       numero_whatsapp_remitente: telefono,
       admin_id: admin?.id ?? null,
       tipo,
@@ -166,7 +193,7 @@ export default async (req) => {
   if (autorizado && datosExtraidos) {
     resultadoCarga = await intentarCargarComprobante({
       supabaseAdmin,
-      clienteId: agente.clienteId,
+      clienteId: clienteIdCompras,
       comprobanteRecibidoId: comprobante.id,
       datosExtraidos,
       esPrueba,

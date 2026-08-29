@@ -56,7 +56,7 @@ export default async (req) => {
 
   const { data: pendiente, error: pendienteError } = await supabaseAdmin
     .from('comprobantes_recibidos')
-    .select('id, datos_extraidos, es_prueba')
+    .select('id, datos_extraidos, es_prueba, cliente_id_compras')
     .eq('cliente_id', agente.clienteId)
     .eq('admin_id', admin.id)
     .eq('pendiente_aclaracion', 'forma_pago')
@@ -85,7 +85,10 @@ export default async (req) => {
 
   const resultado = await intentarCargarComprobante({
     supabaseAdmin,
-    clienteId: agente.clienteId,
+    // Fase 55 -- si el comprobante original se desvió a Hogar (ver
+    // agente-comprobante-recibir.js), este segundo llamado tiene que
+    // seguir cargando ahí, no contra el negocio real del admin.
+    clienteId: pendiente.cliente_id_compras || agente.clienteId,
     comprobanteRecibidoId: pendiente.id,
     datosExtraidos: pendiente.datos_extraidos,
     formaPagoRespuesta: formaPago,
