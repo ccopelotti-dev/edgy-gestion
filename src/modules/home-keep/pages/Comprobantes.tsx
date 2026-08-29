@@ -6,7 +6,7 @@
 // maneja catálogo ni stock).
 // ============================================================
 
-import { Fragment, useState, useMemo } from 'react';
+import { Fragment, useState, useMemo, useEffect } from 'react';
 import {
   Search,
   Plus,
@@ -17,9 +17,14 @@ import {
   Receipt,
   Download,
   Loader2,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
+import {
+  obtenerImagenesComprobantesAgente,
+  abrirImagenComprobanteAgente,
+} from '@/lib/imagenComprobanteAgente';
 import { descargarComprobantePdf } from '../lib/pdfComprobantes';
 import {
   useComprobantes,
@@ -75,6 +80,27 @@ export default function Comprobantes() {
   const [pagoComprobanteId, setPagoComprobanteId] = useState<string | null>(null);
   const { cliente: empresaActual } = useClienteActual();
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
+  // Fase 57 -- comprobante.id -> path en el bucket "comprobantes-gastos"
+  // de la foto original de WhatsApp, para los comprobantes cargados vía
+  // el agente. Se trae una sola vez por carga de página, no por fila.
+  const [imagenesAgente, setImagenesAgente] = useState<Map<string, string>>(new Map());
+  const [abriendoImagenId, setAbriendoImagenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!empresaActual) return;
+    obtenerImagenesComprobantesAgente(empresaActual.id, 'comprobante_hogar_id').then(setImagenesAgente);
+  }, [empresaActual]);
+
+  const handleVerImagen = async (comprobanteId: string) => {
+    const path = imagenesAgente.get(comprobanteId);
+    if (!path) return;
+    setAbriendoImagenId(comprobanteId);
+    try {
+      await abrirImagenComprobanteAgente(path);
+    } finally {
+      setAbriendoImagenId(null);
+    }
+  };
 
   // ── KPIs ─────────────────────────────────────────────────
 
@@ -344,18 +370,34 @@ export default function Comprobantes() {
                       <td className="px-2 py-3 w-[96px]"><EstadoComprobanteBadge estado={comp.estado} /></td>
                       <td className="px-2 py-3 w-[110px]"><MedioPagoBadge medio={comp.medioPago} /></td>
                       <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleDescargarPdf(comp)}
-                          disabled={generandoPdfId === comp.id}
-                          title="Descargar PDF"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                        >
-                          {generandoPdfId === comp.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Download className="h-4 w-4" />
+                        <div className="flex items-center justify-center gap-1">
+                          {imagenesAgente.has(comp.id) && (
+                            <button
+                              onClick={() => handleVerImagen(comp.id)}
+                              disabled={abriendoImagenId === comp.id}
+                              title="Ver foto original (WhatsApp)"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                            >
+                              {abriendoImagenId === comp.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <ImageIcon className="h-4 w-4" />
+                              )}
+                            </button>
                           )}
-                        </button>
+                          <button
+                            onClick={() => handleDescargarPdf(comp)}
+                            disabled={generandoPdfId === comp.id}
+                            title="Descargar PDF"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                          >
+                            {generandoPdfId === comp.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
                       </td>
                       <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
