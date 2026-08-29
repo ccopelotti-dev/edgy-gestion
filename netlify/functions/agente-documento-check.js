@@ -23,6 +23,17 @@ import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
 // cualquier respuesta nueva de ese teléfono ya no es sobre aquel
 // documento (arbitrario pero razonable para el volumen de hoy; se puede
 // ajustar sin tocar el resto del flujo).
+//
+// Fase 52 (29/08, a pedido de Carlos) -- "estructura conversacional":
+// numeroSupervisor/evolutionInstance* ahora se devuelven SIEMPRE, tenga
+// o no un envío reciente. Antes solo viajaban cuando tieneEnvioReciente
+// era true, porque era el único motivo de escalamiento que existía. Con
+// la Función 2 ampliada (reclamo, pedido de condición especial,
+// producto no encontrado) el workflow necesita el número del
+// responsable en TODOS los casos de escalamiento, no solo cuando hay un
+// documento de por medio -- así que esta llamada, que n8n ya hace
+// siempre al principio del mensaje, queda como el único lugar que
+// resuelve ese dato.
 const VENTANA_DIAS = 30
 
 export default async (req) => {
@@ -65,13 +76,9 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: false, error: 'No se pudo consultar el historial de envíos' }), { status: 500 })
   }
 
-  if (!envio) {
-    return new Response(JSON.stringify({ ok: true, tieneEnvioReciente: false }), { status: 200 })
-  }
-
   // Marca la primera vez que se detecta esta respuesta -- no bloquea ni
   // cambia la respuesta si falla, es solo para tener el dato en la base.
-  if (!envio.escalado_at) {
+  if (envio && !envio.escalado_at) {
     await supabaseAdmin
       .from('documentos_enviados_agente')
       .update({ escalado_at: new Date().toISOString() })
@@ -92,12 +99,10 @@ export default async (req) => {
   return new Response(
     JSON.stringify({
       ok: true,
-      tieneEnvioReciente: true,
-      documento: {
-        tipoDocumento: envio.tipo_documento,
-        numeroDocumento: envio.numero_documento,
-        enviadoAt: envio.created_at,
-      },
+      tieneEnvioReciente: Boolean(envio),
+      documento: envio
+        ? { tipoDocumento: envio.tipo_documento, numeroDocumento: envio.numero_documento, enviadoAt: envio.created_at }
+        : null,
       numeroSupervisor: config?.numero_supervisor || null,
       // Se devuelven también acá -- n8n ya tiene la instancia cargada en
       // el nodo de turno, pero mandarla resuelta evita un segundo golpe
