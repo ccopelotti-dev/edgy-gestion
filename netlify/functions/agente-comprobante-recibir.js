@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
+import { intentarCargarComprobante } from './_lib/agenteComprobanteCompra.js'
 
 // Fase 50c -- rama administrativa del agente de WhatsApp (whitelist +
 // documentos recibidos, ver migración 0100 y el diagrama acordado con
@@ -157,6 +158,21 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: false, error: 'No se pudo guardar el documento' }), { status: 500 })
   }
 
+  // Fase 54 -- si vino datosExtraidos (la IA de visión ya corrió del
+  // lado de n8n antes de llamar acá), intentamos cargar directo en
+  // Compras. Si falta proveedor o forma de pago, queda pendiente en la
+  // bandeja -- ver _lib/agenteComprobanteCompra.js.
+  let resultadoCarga = { creado: false, motivo: 'sin_intento' }
+  if (autorizado && datosExtraidos) {
+    resultadoCarga = await intentarCargarComprobante({
+      supabaseAdmin,
+      clienteId: agente.clienteId,
+      comprobanteRecibidoId: comprobante.id,
+      datosExtraidos,
+      esPrueba,
+    })
+  }
+
   return new Response(
     JSON.stringify({
       ok: true,
@@ -165,6 +181,7 @@ export default async (req) => {
       comprobanteId: comprobante.id,
       estado: comprobante.estado,
       esPrueba,
+      cargaCompras: resultadoCarga,
     }),
     { status: 200 },
   )
