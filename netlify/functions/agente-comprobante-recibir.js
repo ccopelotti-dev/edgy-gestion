@@ -90,7 +90,7 @@ export default async (req) => {
 
   const { data: admin, error: adminError } = await supabaseAdmin
     .from('clientes_agente_admins')
-    .select('id, nombre')
+    .select('id, nombre, solo_prueba')
     .eq('cliente_id', agente.clienteId)
     .eq('numero_whatsapp', telefono)
     .eq('activo', true)
@@ -129,6 +129,8 @@ export default async (req) => {
     imagenPath = path
   }
 
+  const esPrueba = admin?.solo_prueba ?? false
+
   const { data: comprobante, error: insertError } = await supabaseAdmin
     .from('comprobantes_recibidos')
     .insert([{
@@ -140,6 +142,12 @@ export default async (req) => {
       datos_extraidos: datosExtraidos,
       estado: autorizado ? 'pendiente_revision' : 'rechazado_no_autorizado',
       notas,
+      // Fase 53 -- si el número está dado de alta como "solo prueba"
+      // (clientes_agente_admins.solo_prueba), este documento y todo lo
+      // que se genere a partir de él quedan marcados es_prueba=true
+      // para poder simular sin ensuciar datos reales (ver migración
+      // 0102, a pedido de Carlos antes de perfilar la Tarea #149).
+      es_prueba: esPrueba,
     }])
     .select('id, estado')
     .single()
@@ -156,6 +164,7 @@ export default async (req) => {
       remitenteNombre: admin?.nombre ?? null,
       comprobanteId: comprobante.id,
       estado: comprobante.estado,
+      esPrueba,
     }),
     { status: 200 },
   )
