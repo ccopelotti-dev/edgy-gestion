@@ -25,9 +25,18 @@
 --   cliente Hogar:      c279fb9a-aa61-48f7-9f8c-1a609052db84
 --   rol Dueño (Hogar):  1f948d5f-1f14-4e4b-87bc-ad525392bf87
 --   módulo Compras:     7f85c9e5-98d4-4fd8-90df-bc526fcfa3c1 (ya existente)
---   usuario (Carlos):   94e4477b-c660-4447-9f04-47c678c5e7af (mismo user_id
---                       de auth.users que ya usa como Dueño de La Charcutería,
---                       así entra a Hogar con la misma cuenta)
+--   usuario (Carlos):   165b38f5-d7b0-4f36-9ca8-5528ef063c62 (auth.users de
+--                       c.copelotti@gmail.com -- su identidad de
+--                       personal_edgy, NO el user_id de La Charcutería)
+--
+-- OJO -- versión corregida el mismo día: la primera vez este archivo
+-- reutilizaba el user_id de Carlos en La Charcutería
+-- (94e4477b-c660-4447-9f04-47c678c5e7af). Eso rompe
+-- src/hooks/useClienteActual.ts, que asume UN solo tenant por user_id
+-- (.single() sobre usuarios_cliente). Se detectó en vivo (2 filas para
+-- el mismo user_id) y se corrigió usando en cambio la identidad de
+-- Auth que Carlos ya tiene como personal_edgy (c.copelotti@gmail.com),
+-- que no estaba atada a ningún cliente todavía.
 -- ============================================================
 
 set search_path to edgy_gestion, public;
@@ -94,8 +103,8 @@ on conflict (rol_id, modulo_id) do nothing;
 insert into edgy_gestion.usuarios_cliente (cliente_id, user_id, email, rol, rol_id, auth_mode, nombre)
 values (
   'c279fb9a-aa61-48f7-9f8c-1a609052db84',
-  '94e4477b-c660-4447-9f04-47c678c5e7af', -- mismo user_id de Carlos en La Charcutería
-  'cmcopelotti@gmail.com',
+  '165b38f5-d7b0-4f36-9ca8-5528ef063c62', -- Carlos, identidad personal_edgy (c.copelotti@gmail.com), NO la de La Charcutería
+  'c.copelotti@gmail.com',
   'Dueño',
   '1f948d5f-1f14-4e4b-87bc-ad525392bf87',
   'full',
