@@ -16,14 +16,11 @@ import {
   Loader2,
   Factory,
   CheckCircle2,
-  Image as ImageIcon,
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
-import {
-  obtenerImagenesComprobantesAgente,
-  abrirImagenComprobanteAgente,
-} from '@/lib/imagenComprobanteAgente';
+import { obtenerImagenesComprobantesAgente } from '@/lib/imagenComprobanteAgente';
+import ImageLightbox from '@/components/ImageLightbox';
 import { descargarComprobanteCompraPdf } from '../lib/pdfComprobantes';
 import { actualizarStockPorCompra } from '../lib/actualizarStockCompra';
 import {
@@ -92,28 +89,18 @@ export default function Comprobantes() {
   // Conexión Compras -> Recepción: ícono de fila para comprobantes ya
   // guardados que todavía no empujaron su stock (ver handleActualizarStockExistente).
   const [actualizandoStockId, setActualizandoStockId] = useState<string | null>(null);
-  // Fase 57 -- comprobante.id -> path en el bucket "comprobantes-gastos"
-  // de la foto original de WhatsApp, para los comprobantes que se
-  // cargaron vía el agente (Tarea #149). Se trae una sola vez por
-  // carga de página, no por fila.
+  // Fase 57/57b -- comprobante.id -> URL ya firmada de la foto original
+  // de WhatsApp, para los comprobantes que se cargaron vía el agente
+  // (Tarea #149). Se trae una sola vez por carga de página, no por
+  // fila. Miniatura en la fila + click para ampliar (ImageLightbox),
+  // para poder controlar el data entry contra la foto.
   const [imagenesAgente, setImagenesAgente] = useState<Map<string, string>>(new Map());
-  const [abriendoImagenId, setAbriendoImagenId] = useState<string | null>(null);
+  const [imagenAmpliada, setImagenAmpliada] = useState<string | null>(null);
 
   useEffect(() => {
     if (!empresaActual) return;
     obtenerImagenesComprobantesAgente(empresaActual.id, 'comprobante_compra_id').then(setImagenesAgente);
   }, [empresaActual]);
-
-  const handleVerImagen = async (comprobanteId: string) => {
-    const path = imagenesAgente.get(comprobanteId);
-    if (!path) return;
-    setAbriendoImagenId(comprobanteId);
-    try {
-      await abrirImagenComprobanteAgente(path);
-    } finally {
-      setAbriendoImagenId(null);
-    }
-  };
 
   // ── KPIs ─────────────────────────────────────────────────
 
@@ -464,20 +451,15 @@ export default function Comprobantes() {
                       <td className="px-2 py-3 w-[96px]"><EstadoComprobanteBadge estado={comp.estado} /></td>
                       <td className="px-2 py-3 w-[110px]"><MedioPagoBadge medio={comp.medioPago} /></td>
                       <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="flex items-center justify-center gap-1.5">
                           {imagenesAgente.has(comp.id) && (
-                            <button
-                              onClick={() => handleVerImagen(comp.id)}
-                              disabled={abriendoImagenId === comp.id}
-                              title="Ver foto original (WhatsApp)"
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                            >
-                              {abriendoImagenId === comp.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <ImageIcon className="h-4 w-4" />
-                              )}
-                            </button>
+                            <img
+                              src={imagenesAgente.get(comp.id)}
+                              alt="Comprobante original (WhatsApp)"
+                              title="Ver foto original (click para ampliar)"
+                              onClick={() => setImagenAmpliada(imagenesAgente.get(comp.id) ?? null)}
+                              className="h-8 w-8 shrink-0 cursor-pointer rounded-md object-cover ring-1 ring-gray-200 hover:ring-2 hover:ring-gray-400"
+                            />
                           )}
                           <button
                             onClick={() => handleDescargarPdf(comp)}
@@ -644,6 +626,8 @@ export default function Comprobantes() {
           onSave={handleSavePago}
         />
       )}
+
+      <ImageLightbox src={imagenAmpliada} onClose={() => setImagenAmpliada(null)} />
     </div>
   );
 }
