@@ -1907,12 +1907,36 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
                     <span className="text-gray-500">Total imputado</span>
                     <span className="text-gray-900">{formatARS(totalImputado)}</span>
                   </div>
-                  <div className="flex justify-between font-medium">
-                    <span className="text-gray-500">Sin imputar</span>
-                    <span className={monto - totalImputado > 0.01 ? 'text-amber-600' : 'text-gray-900'}>
-                      {formatARS(monto - totalImputado)}
-                    </span>
-                  </div>
+                  {/* Fase 59b (30/08, a pedido de Carlos): "Sin imputar" es
+                      monto - totalImputado -- tiene sentido como número
+                      positivo (todavía queda plata del pago sin asignar a
+                      ninguna factura), pero si tildaste "Completo" en varias
+                      facturas SIN tildar "Igualar al total imputado" arriba,
+                      totalImputado termina siendo mayor que monto y esta
+                      resta da negativa -- no es "sin imputar" en negativo,
+                      es justo lo contrario: te comprometiste a pagar más de
+                      lo que dice "Monto a pagar". Se muestra como una
+                      advertencia aparte, con el monto en positivo, en vez de
+                      un "saldo espejo" negativo que no significa nada leído
+                      así. */}
+                  {monto - totalImputado >= -0.01 ? (
+                    <div className="flex justify-between font-medium">
+                      <span className="text-gray-500">Sin imputar</span>
+                      <span className={monto - totalImputado > 0.01 ? 'text-amber-600' : 'text-gray-900'}>
+                        {formatARS(monto - totalImputado)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex justify-between font-medium">
+                        <span className="text-red-600">Excede el monto a pagar</span>
+                        <span className="text-red-600">{formatARS(totalImputado - monto)}</span>
+                      </div>
+                      <p className="text-xs text-red-600 mt-0.5">
+                        Tildá "Igualar al total imputado" arriba, o ajustá el Monto a pagar a mano.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
