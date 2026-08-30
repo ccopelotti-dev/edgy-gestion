@@ -250,26 +250,33 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
 
       {/* Insumos */}
       <div className="space-y-1.5">
+        {lineasInsumo.length > 0 && (
+          <div className="grid grid-cols-[minmax(0,1fr)_3.5rem_5rem_4.5rem_1.75rem] gap-1.5 px-0.5 text-[10px] text-gray-400">
+            <span>Insumo</span>
+            <span className="text-right">Cant.</span>
+            <span className="text-right">Costo unit.</span>
+            <span className="text-right">Subtotal</span>
+            <span />
+          </div>
+        )}
         {lineasInsumo.map((l) => (
-          <div key={l.id} className="flex items-center gap-1.5">
-            <div className="flex-1">
-              <InsumoCombobox
-                value={l.insumoId ?? ''}
-                options={insumosCatalogo}
-                onSelect={(insumo) =>
-                  actualizarLinea(l.id, {
-                    insumoId: insumo?.id,
-                    descripcion: insumo?.nombre ?? l.descripcion,
-                    unidad: insumo?.unidad,
-                    costoUnitario: insumo?.costo ?? l.costoUnitario,
-                  })
-                }
-              />
-            </div>
+          <div key={l.id} className="grid grid-cols-[minmax(0,1fr)_3.5rem_5rem_4.5rem_1.75rem] items-center gap-1.5">
+            <InsumoCombobox
+              value={l.insumoId ?? ''}
+              options={insumosCatalogo}
+              onSelect={(insumo) =>
+                actualizarLinea(l.id, {
+                  insumoId: insumo?.id,
+                  descripcion: insumo?.nombre ?? l.descripcion,
+                  unidad: insumo?.unidad,
+                  costoUnitario: insumo?.costo ?? l.costoUnitario,
+                })
+              }
+            />
             <input
               type="text"
               inputMode="decimal"
-              className={inputClass + ' w-16 text-right'}
+              className={inputClass + ' text-right'}
               value={l.cantidad}
               title="Cantidad"
               onChange={(e) => actualizarLinea(l.id, { cantidad: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
@@ -277,18 +284,18 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
             <input
               type="text"
               inputMode="decimal"
-              className={inputClass + ' w-24 text-right'}
+              className={inputClass + ' text-right'}
               value={l.costoUnitario}
               title="Costo unitario"
               onChange={(e) => actualizarLinea(l.id, { costoUnitario: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
             />
-            <span className="w-20 shrink-0 text-right text-xs font-medium text-gray-600">
+            <span className="text-right text-xs font-medium text-gray-600">
               {formatARS(l.cantidad * l.costoUnitario)}
             </span>
             <button
               type="button"
               onClick={() => eliminarLinea(l.id)}
-              className="shrink-0 rounded-md p-1 text-gray-300 hover:bg-red-50 hover:text-red-500"
+              className="flex items-center justify-center rounded-md p-1 text-gray-300 hover:bg-red-50 hover:text-red-500"
               title="Quitar"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -307,13 +314,13 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
       {/* Mano de obra / otros costos */}
       <div className="mt-3 space-y-1.5">
         {lineasLibres.map((l) => (
-          <div key={l.id} className="flex items-center gap-1.5">
+          <div key={l.id} className="grid grid-cols-[6.5rem_minmax(0,1fr)_5.5rem_1.75rem] items-center gap-1.5">
             <button
               type="button"
               onClick={() =>
                 actualizarLinea(l.id, { tipo: l.tipo === 'mano_de_obra' ? 'costo_operativo' : 'mano_de_obra' })
               }
-              className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${
+              className={`rounded-full px-2 py-1 text-[10px] font-medium ${
                 l.tipo === 'mano_de_obra' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
               }`}
               title="Click para cambiar el tipo"
@@ -323,7 +330,7 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
             <input
               type="text"
               placeholder="Concepto (ej. Hechura, Traslado...)"
-              className={inputClass + ' flex-1'}
+              className={inputClass}
               value={l.descripcion}
               onChange={(e) => actualizarLinea(l.id, { descripcion: e.target.value })}
             />
@@ -331,14 +338,14 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
               type="text"
               inputMode="decimal"
               placeholder="Monto"
-              className={inputClass + ' w-24 text-right'}
+              className={inputClass + ' text-right'}
               value={l.costoUnitario || ''}
               onChange={(e) => actualizarLinea(l.id, { costoUnitario: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
             />
             <button
               type="button"
               onClick={() => eliminarLinea(l.id)}
-              className="shrink-0 rounded-md p-1 text-gray-300 hover:bg-red-50 hover:text-red-500"
+              className="flex items-center justify-center rounded-md p-1 text-gray-300 hover:bg-red-50 hover:text-red-500"
               title="Quitar"
             >
               <Trash2 className="h-3.5 w-3.5" />

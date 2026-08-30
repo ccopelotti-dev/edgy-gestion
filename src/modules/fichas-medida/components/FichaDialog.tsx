@@ -567,7 +567,23 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
-        <Dialog.Content className={contentClass}>
+        <Dialog.Content
+          className={contentClass}
+          // Fix (30/08, reportado por Carlos): "Cargar cliente nuevo" abre
+          // un segundo Dialog.Root (ClienteDialog) apilado arriba de este.
+          // Al guardar ese cliente y cerrarse, Radix a veces interpreta el
+          // click como "afuera" de ESTE Content (misma familia de bug que
+          // el comentario de ProductoCatalogoCombobox más arriba) y cierra
+          // toda la Ficha, perdiendo lo ya cargado. Mientras el diálogo de
+          // cliente esté abierto, este Content ignora cualquier intento de
+          // cierre por click/foco afuera.
+          onPointerDownOutside={(e) => {
+            if (clienteDialogOpen) e.preventDefault();
+          }}
+          onInteractOutside={(e) => {
+            if (clienteDialogOpen) e.preventDefault();
+          }}
+        >
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold text-gray-900">
               {ficha ? 'Editar ficha de medida' : 'Nueva ficha de medida'}
