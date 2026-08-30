@@ -46,7 +46,10 @@ export default function OrdenesPago() {
   const comprobantes = useComprobantesCompra();
   const pagos = usePagos();
   const dispatch = useComprasDispatch();
-  const { cliente: empresaActual } = useClienteActual();
+  const { cliente: empresaActual, puntosVenta } = useClienteActual();
+  // Fase 60: misma resolución que Cotizaciones/OrdenesCompra/Comprobantes --
+  // dirección de la Casa Central (punto de venta por defecto), no la fiscal.
+  const direccionCasaCentral = puntosVenta.find((pv) => pv.porDefecto && pv.activo)?.direccion ?? null;
 
   // ── Filtros ───────────────────────────────────────────────
 
@@ -143,7 +146,7 @@ export default function OrdenesPago() {
     setGenerandoPdfId(pago.id);
     try {
       const prov = proveedores.find((p) => p.id === pago.proveedorId);
-      await descargarComprobantePagoPdf(empresaActual, prov, pago, comprobantes, 'Proveedor');
+      await descargarComprobantePagoPdf(empresaActual, prov, pago, comprobantes, 'Proveedor', false, direccionCasaCentral);
     } finally {
       setGenerandoPdfId(null);
     }
@@ -163,7 +166,7 @@ export default function OrdenesPago() {
       `Cualquier consulta quedamos a disposición.\nSaludos.`;
     setEnviandoWhatsappId(pago.id);
     try {
-      const pdfBase64 = await generarComprobantePagoPdfBase64(empresaActual, prov, pago, comprobantes, 'Proveedor');
+      const pdfBase64 = await generarComprobantePagoPdfBase64(empresaActual, prov, pago, comprobantes, 'Proveedor', direccionCasaCentral);
       await enviarDocumentoWhatsapp({
         clienteId: empresaActual.id,
         telefono: prov.telefono,

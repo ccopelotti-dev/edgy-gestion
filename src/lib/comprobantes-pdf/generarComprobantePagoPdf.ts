@@ -55,6 +55,11 @@ export interface PagoParaPdf {
    * resumen de "Medio de pago" único. */
   lineasPago?: LineaPagoParaPdf[]
   notas?: string | null
+  /** Fase 60: dirección de la Casa Central (o punto de venta por
+   * defecto) del cliente -- mismo mecanismo que Cotización/OC/Comprobante
+   * de Compra (ver pdfComprobantes.ts de Compras). `null`/`undefined` si
+   * no aplica (ej. Home Keep, que no tiene puntos de venta). */
+  puntoVentaDireccion?: string | null
 }
 
 export async function generarComprobantePagoPdf(
@@ -72,11 +77,14 @@ export async function generarComprobantePagoPdf(
   const marginX = 15
 
   // Fase 43n (20/08): mismo panel único que el resto del sistema (ver
-  // comentario largo en generarReciboPdf.ts) -- sin dirección, no hay
-  // punto de venta que resolver acá.
+  // comentario largo en generarReciboPdf.ts).
+  // Fase 60 (30/08): igual que Cotización/OC/Comprobante de Compra --
+  // la dirección de Casa Central se resuelve del lado del caller
+  // (pdfComprobantes.ts) y llega en `pago.puntoVentaDireccion`; si no
+  // hay ninguna (ej. Home Keep), cae a la dirección fiscal de `empresa`.
   const { y: y0, color } = await dibujarEncabezadoConDatosFiscales(
     doc,
-    { ...empresa, direccion: null },
+    { ...empresa, direccion: pago.puntoVentaDireccion ?? empresa.direccion ?? null },
     'Comprobante de Pago',
     pago.numero,
     pago.fecha,

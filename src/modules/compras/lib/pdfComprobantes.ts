@@ -316,6 +316,10 @@ export async function descargarComprobantePagoPdf(
   proveedorNombreFallback: string,
   // Fase 50e (28/08): ver comentario homólogo en Ventas/pdfComprobantes.ts.
   soloBase64 = false,
+  // Fase 60 (30/08): mismo patrón que descargarComprobanteCompraPdf/
+  // descargarOrdenCompraPdf/descargarCotizacionPdf -- dirección de Casa
+  // Central (no la fiscal), resuelta por el caller vía useClienteActual().
+  direccionCasaCentral: string | null = null,
 ): Promise<void | string> {
   const numero = `PAG-${String(pago.numero).padStart(5, '0')}`;
   return generarComprobantePagoPdf(
@@ -343,6 +347,7 @@ export async function descargarComprobantePagoPdf(
             : null,
       })),
       notas: pago.notas ?? null,
+      puntoVentaDireccion: direccionCasaCentral,
     },
     numero,
     soloBase64,
@@ -357,6 +362,7 @@ export function generarComprobantePagoPdfBase64(
   pago: PagoCompra,
   comprobantes: ComprobanteCompra[],
   proveedorNombreFallback: string,
+  direccionCasaCentral: string | null = null,
 ): Promise<string> {
   return descargarComprobantePagoPdf(
     empresaActual,
@@ -365,5 +371,6 @@ export function generarComprobantePagoPdfBase64(
     comprobantes,
     proveedorNombreFallback,
     true,
+    direccionCasaCentral,
   ) as Promise<string>;
 }
