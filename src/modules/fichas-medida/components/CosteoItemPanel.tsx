@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Search, Calculator } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { formatARS } from '@/modules/ventas/lib/format';
+import { sanitizarDecimal, parsearDecimal, decimalATexto } from '@/lib/decimal';
 import type { CosteoItemFicha, LineaCosteoItem, ModoPrecioCosteoItem } from '../types';
 
 const inputClass =
@@ -28,15 +29,6 @@ interface InsumoCatalogoCosteo {
   nombre: string;
   unidad: string;
   costo: number;
-}
-
-function parseDecimal(texto: string): number {
-  const limpio = texto.replace(',', '.').trim();
-  const n = parseFloat(limpio);
-  return Number.isFinite(n) ? n : 0;
-}
-function sanitizarDecimal(valor: string): string {
-  return valor.replace(/[^0-9.,]/g, '');
 }
 
 function nuevaLineaInsumo(): LineaCosteoItem {
@@ -170,6 +162,21 @@ interface Props {
 export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
   const [insumosCatalogo, setInsumosCatalogo] = useState<InsumoCatalogoCosteo[]>([]);
 
+  // Bug reportado por Carlos (30/08): "no me deja fraccionar cantidades
+  // inferiores a enteros". Causa: los inputs de Cantidad/Costo unitario
+  // tenían su `value` atado directo al number (`value={l.cantidad}`) --
+  // en cuanto el usuario tipeaba la coma decimal ("0,"), parsearDecimal
+  // la convertía a 0 en el mismo tecleo y el input se "auto-corregía" a
+  // "0", borrando la coma antes de que pudiera escribir el resto.
+  // Mismo patrón que ya usa el resto de la app (Ventas/dialogs.tsx,
+  // Mostrador, etc. -- ver @/lib/decimal): el texto que el usuario está
+  // tipeando se guarda en un buffer SEPARADO del number real, y recién
+  // se convierte con parsearDecimal() al emitir el cambio hacia arriba.
+  // El buffer es local a este panel (no viaja a CosteoItemFicha) --
+  // cuando no hay nada tipeado a mano para una clave, se deriva del
+  // number guardado con decimalATexto().
+  const [textos, setTextos] = useState<Record<string, string>>({});
+
   useEffect(() => {
     if (!clienteTenantId) return;
     let activo = true;
@@ -235,6 +242,34 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
       return;
     }
     emitir({ lineas: restantes });
+    setTextos((prev) => {
+      const { [`${id}:cantidad`]: _a, [`${id}:costoUnitario`]: _b, ...resto } = prev;
+      return resto;
+    });
+  }
+
+  /** Texto a mostrar en un input decimal -- lo que el usuario esté
+   * tipeando ahora mismo, o si no hay nada, el number guardado formateado. */
+  function textoDe(key: string, valorGuardado: number): string {
+    return textos[key] ?? decimalATexto(valorGuardado);
+  }
+  /** Borra el buffer de una clave -- para cuando el number cambia por otra
+   * vía que no es el propio input (ej. autocompletar costo al elegir un
+   * insumo del catálogo), así el input refleja el valor nuevo y no un
+   * texto viejo que había quedado tipeado. */
+  function limpiarTexto(key: string) {
+    setTextos((prev) => {
+      const { [key]: _quitado, ...resto } = prev;
+      return resto;
+    });
+  }
+  /** Handler compartido para los inputs de Cantidad/Costo unitario de una
+   * línea: guarda el texto crudo (sostiene la coma mientras se tipea) y
+   * emite el number parseado para que el recálculo en vivo siga andando. */
+  function cambiarDecimalLinea(id: string, campo: 'cantidad' | 'costoUnitario', textoCrudo: string) {
+    const limpio = sanitizarDecimal(textoCrudo);
+    setTextos((prev) => ({ ...prev, [`${id}:${campo}`]: limpio }));
+    actualizarLinea(id, { [campo]: parsearDecimal(limpio) } as Partial<LineaCosteoItem>);
   }
 
   return (
@@ -264,30 +299,34 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
             <InsumoCombobox
               value={l.insumoId ?? ''}
               options={insumosCatalogo}
-              onSelect={(insumo) =>
+              onSelect={(insumo) => {
                 actualizarLinea(l.id, {
                   insumoId: insumo?.id,
                   descripcion: insumo?.nombre ?? l.descripcion,
                   unidad: insumo?.unidad,
                   costoUnitario: insumo?.costo ?? l.costoUnitario,
-                })
-              }
+                });
+                // El costo autocompletado no pasa por el input de texto --
+                // si había algo tipeado a mano antes, que no tape el valor
+                // nuevo que acaba de traer el catálogo.
+                if (insumo) limpiarTexto(`${l.id}:costoUnitario`);
+              }}
             />
             <input
               type="text"
               inputMode="decimal"
               className={inputClass + ' text-right'}
-              value={l.cantidad}
+              value={textoDe(`${l.id}:cantidad`, l.cantidad)}
               title="Cantidad"
-              onChange={(e) => actualizarLinea(l.id, { cantidad: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
+              onChange={(e) => cambiarDecimalLinea(l.id, 'cantidad', e.target.value)}
             />
             <input
               type="text"
               inputMode="decimal"
               className={inputClass + ' text-right'}
-              value={l.costoUnitario}
+              value={textoDe(`${l.id}:costoUnitario`, l.costoUnitario)}
               title="Costo unitario"
-              onChange={(e) => actualizarLinea(l.id, { costoUnitario: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
+              onChange={(e) => cambiarDecimalLinea(l.id, 'costoUnitario', e.target.value)}
             />
             <span className="text-right text-xs font-medium text-gray-600">
               {formatARS(l.cantidad * l.costoUnitario)}
@@ -339,8 +378,8 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
               inputMode="decimal"
               placeholder="Monto"
               className={inputClass + ' text-right'}
-              value={l.costoUnitario || ''}
-              onChange={(e) => actualizarLinea(l.id, { costoUnitario: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
+              value={textoDe(`${l.id}:costoUnitario`, l.costoUnitario)}
+              onChange={(e) => cambiarDecimalLinea(l.id, 'costoUnitario', e.target.value)}
             />
             <button
               type="button"
@@ -399,8 +438,12 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
                   type="text"
                   inputMode="decimal"
                   className={inputClass + ' w-20 text-right'}
-                  value={margenPorcentaje}
-                  onChange={(e) => emitir({ margenPorcentaje: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
+                  value={textoDe('margenPorcentaje', margenPorcentaje)}
+                  onChange={(e) => {
+                    const limpio = sanitizarDecimal(e.target.value);
+                    setTextos((prev) => ({ ...prev, margenPorcentaje: limpio }));
+                    emitir({ margenPorcentaje: parsearDecimal(limpio) });
+                  }}
                 />
                 <span className="text-xs text-gray-500">%</span>
               </div>
@@ -412,8 +455,12 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
                   type="text"
                   inputMode="decimal"
                   className={inputClass + ' w-28 text-right'}
-                  value={montoFijo}
-                  onChange={(e) => emitir({ montoFijo: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
+                  value={textoDe('montoFijo', montoFijo)}
+                  onChange={(e) => {
+                    const limpio = sanitizarDecimal(e.target.value);
+                    setTextos((prev) => ({ ...prev, montoFijo: limpio }));
+                    emitir({ montoFijo: parsearDecimal(limpio) });
+                  }}
                 />
               </div>
             )}
@@ -424,8 +471,12 @@ export function CosteoItemPanel({ clienteTenantId, value, onChange }: Props) {
                   type="text"
                   inputMode="decimal"
                   className={inputClass + ' w-28 text-right'}
-                  value={precioManual}
-                  onChange={(e) => emitir({ precioManual: parseDecimal(sanitizarDecimal(e.target.value)) || 0 })}
+                  value={textoDe('precioManual', precioManual)}
+                  onChange={(e) => {
+                    const limpio = sanitizarDecimal(e.target.value);
+                    setTextos((prev) => ({ ...prev, precioManual: limpio }));
+                    emitir({ precioManual: parsearDecimal(limpio) });
+                  }}
                 />
               </div>
             )}
