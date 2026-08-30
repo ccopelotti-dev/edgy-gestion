@@ -91,6 +91,13 @@ export async function descargarComprobanteCompraPdf(
   proveedor: Proveedor | undefined,
   comp: ComprobanteCompra,
   proveedorNombreFallback: string,
+  // Fase 58 (30/08, a pedido de Carlos): dirección del punto de venta
+  // "por defecto"/Casa Central del cliente -- Compras no tiene ningún
+  // punto de venta propio asociado (una compra no es "de un local" en
+  // particular, a diferencia de una venta), así que el llamador
+  // (Comprobantes.tsx) resuelve este dato una sola vez a partir de
+  // `useClienteActual().puntosVenta` y lo pasa acá.
+  direccionCasaCentral: string | null = null,
 ): Promise<void> {
   const numero = formatNumero(PREFIJO_COMPROBANTE_COMPRA[comp.tipo], comp.numero);
   await generarComprobantePdf(
@@ -111,6 +118,7 @@ export async function descargarComprobanteCompraPdf(
       montoIva: comp.montoIva,
       total: comp.total,
       notas: comp.notas ?? null,
+      puntoVentaDireccion: direccionCasaCentral,
     },
     numero,
   );
@@ -129,6 +137,8 @@ export async function descargarOrdenCompraPdf(
   oc: OrdenCompra,
   proveedorNombreFallback: string,
   soloBase64 = false,
+  // Fase 58: ver comentario homólogo en `descargarComprobanteCompraPdf`.
+  direccionCasaCentral: string | null = null,
 ): Promise<void | string> {
   const numero = formatNumero('OC', oc.numero);
   return generarComprobantePdf(
@@ -149,6 +159,7 @@ export async function descargarOrdenCompraPdf(
       subtotal: oc.subtotal,
       total: oc.total,
       notas: oc.notas ?? null,
+      puntoVentaDireccion: direccionCasaCentral,
     },
     numero,
     1,
@@ -164,8 +175,9 @@ export function generarOrdenCompraPdfBase64(
   proveedor: Proveedor | undefined,
   oc: OrdenCompra,
   proveedorNombreFallback: string,
+  direccionCasaCentral: string | null = null,
 ): Promise<string> {
-  return descargarOrdenCompraPdf(empresaActual, proveedor, oc, proveedorNombreFallback, true) as Promise<string>;
+  return descargarOrdenCompraPdf(empresaActual, proveedor, oc, proveedorNombreFallback, true, direccionCasaCentral) as Promise<string>;
 }
 
 /** Descarga el PDF de un Pedido de cotización (lo que se le manda al
@@ -179,6 +191,8 @@ export async function descargarCotizacionPdf(
   cot: PedidoCotizacion,
   proveedorNombreFallback: string,
   soloBase64 = false,
+  // Fase 58: ver comentario homólogo en `descargarComprobanteCompraPdf`.
+  direccionCasaCentral: string | null = null,
 ): Promise<void | string> {
   const numero = formatNumero('COT', cot.numero);
   return generarComprobantePdf(
@@ -199,6 +213,7 @@ export async function descargarCotizacionPdf(
       subtotal: cot.subtotal,
       total: cot.total,
       notas: cot.notas ?? null,
+      puntoVentaDireccion: direccionCasaCentral,
     },
     numero,
     1,
@@ -213,8 +228,9 @@ export function generarCotizacionPdfBase64(
   proveedor: Proveedor | undefined,
   cot: PedidoCotizacion,
   proveedorNombreFallback: string,
+  direccionCasaCentral: string | null = null,
 ): Promise<string> {
-  return descargarCotizacionPdf(empresaActual, proveedor, cot, proveedorNombreFallback, true) as Promise<string>;
+  return descargarCotizacionPdf(empresaActual, proveedor, cot, proveedorNombreFallback, true, direccionCasaCentral) as Promise<string>;
 }
 
 // ─── Fase 17b: Resumen de cuenta ─────────────────────────────

@@ -120,7 +120,9 @@ export default function OrdenesCompra() {
   // prop `ordenCompra`.
   const [ordenParaFacturar, setOrdenParaFacturar] = useState<(typeof ordenesCompra)[number] | null>(null);
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
-  const { cliente: empresaActual } = useClienteActual();
+  const { cliente: empresaActual, puntosVenta } = useClienteActual();
+  // Fase 58 (30/08): ver comentario homólogo en compras/pages/Comprobantes.tsx.
+  const direccionCasaCentral = puntosVenta.find((pv) => pv.porDefecto && pv.activo)?.direccion ?? null;
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
   // Fase 21 (punto 3 de Cotizaciones): una vez generada la OC desde una
@@ -587,7 +589,7 @@ export default function OrdenesCompra() {
     const { cuerpo, captionCorto } = armarTextoOC(oc);
     setEnviandoWhatsappId(oc.id);
     try {
-      const pdfBase64 = await generarOrdenCompraPdfBase64(empresaActual, proveedor, oc, nombreProveedor(oc.proveedorId));
+      const pdfBase64 = await generarOrdenCompraPdfBase64(empresaActual, proveedor, oc, nombreProveedor(oc.proveedorId), direccionCasaCentral);
       await enviarDocumentoWhatsapp({
         clienteId: empresaActual.id,
         telefono: proveedor.telefono,
@@ -612,7 +614,7 @@ export default function OrdenesCompra() {
     setGenerandoPdfId(oc.id);
     try {
       const proveedor = proveedores.find((p) => p.id === oc.proveedorId);
-      await descargarOrdenCompraPdf(empresaActual, proveedor, oc, nombreProveedor(oc.proveedorId));
+      await descargarOrdenCompraPdf(empresaActual, proveedor, oc, nombreProveedor(oc.proveedorId), false, direccionCasaCentral);
     } finally {
       setGenerandoPdfId(null);
     }

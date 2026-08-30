@@ -33,6 +33,12 @@ interface PuntoVentaLiviano {
    * el recuadro fiscal del PDF de factura (Anexo II RG 1415), en vez
    * de la dirección fiscal del cliente (que dejó de publicarse ahí). */
   direccion: string | null
+  /** Fase 58 (30/08): local "principal" del cliente (Configuración >
+   * Puntos de Venta) -- Compras usa esto para resolver qué dirección
+   * mostrar en sus PDF (Cotización/OC/Comprobante de Compra), que no
+   * tienen ningún punto de venta propio asociado (una compra no es de
+   * "un local" en particular). */
+  porDefecto: boolean
 }
 
 /** Fase 36: branding efectivo a mostrar en el header -- si el usuario
@@ -151,7 +157,7 @@ export function useClienteActual(): UseClienteActualResult {
       // no rompe nada).
       const { data: puntosVentaData } = await supabase
         .from('puntos_venta')
-        .select('id, alias, activo, logo_url, nombre_visible, color_marca, direccion')
+        .select('id, alias, activo, logo_url, nombre_visible, color_marca, direccion, por_defecto')
         .eq('cliente_id', usuarioCliente.cliente_id)
         .order('alias')
 
@@ -165,6 +171,7 @@ export function useClienteActual(): UseClienteActualResult {
         nombreVisible: fila.nombre_visible,
         colorMarca: fila.color_marca,
         direccion: fila.direccion,
+        porDefecto: fila.por_defecto,
       }))
 
       const puntoVentaUsuario = usuarioCliente.punto_venta_id

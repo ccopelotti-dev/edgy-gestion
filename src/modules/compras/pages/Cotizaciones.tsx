@@ -63,7 +63,9 @@ export default function Cotizaciones() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editCotizacion, setEditCotizacion] = useState<any>(null);
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
-  const { cliente: empresaActual } = useClienteActual();
+  const { cliente: empresaActual, puntosVenta } = useClienteActual();
+  // Fase 58 (30/08): ver comentario homólogo en compras/pages/Comprobantes.tsx.
+  const direccionCasaCentral = puntosVenta.find((pv) => pv.porDefecto && pv.activo)?.direccion ?? null;
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
 
@@ -207,7 +209,7 @@ export default function Cotizaciones() {
     const { cuerpo, captionCorto } = armarTextoCotizacion(cot);
     setEnviandoWhatsappId(cot.id);
     try {
-      const pdfBase64 = await generarCotizacionPdfBase64(empresaActual, proveedor, cot, nombreProveedor(cot.proveedorId));
+      const pdfBase64 = await generarCotizacionPdfBase64(empresaActual, proveedor, cot, nombreProveedor(cot.proveedorId), direccionCasaCentral);
       await enviarDocumentoWhatsapp({
         clienteId: empresaActual.id,
         telefono: proveedor.telefono,
@@ -234,7 +236,7 @@ export default function Cotizaciones() {
     setGenerandoPdfId(cot.id);
     try {
       const proveedor = proveedores.find((p) => p.id === cot.proveedorId);
-      await descargarCotizacionPdf(empresaActual, proveedor, cot, nombreProveedor(cot.proveedorId));
+      await descargarCotizacionPdf(empresaActual, proveedor, cot, nombreProveedor(cot.proveedorId), false, direccionCasaCentral);
     } finally {
       setGenerandoPdfId(null);
     }

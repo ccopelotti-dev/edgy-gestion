@@ -84,7 +84,11 @@ export default function Comprobantes() {
   const [pagoDialogOpen, setPagoDialogOpen] = useState(false);
   const [pagoComprobanteId, setPagoComprobanteId] = useState<string | null>(null);
   // Fase 17: ícono de descarga de PDF -- mismo motor compartido de Ventas.
-  const { cliente: empresaActual } = useClienteActual();
+  const { cliente: empresaActual, puntosVenta } = useClienteActual();
+  // Fase 58 (30/08): dirección de Casa Central (punto de venta "por
+  // defecto") -- Compras no tiene ningún punto de venta propio, así
+  // que sus PDF usan siempre este local en vez de la dirección fiscal.
+  const direccionCasaCentral = puntosVenta.find((pv) => pv.porDefecto && pv.activo)?.direccion ?? null;
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   // Conexión Compras -> Recepción: ícono de fila para comprobantes ya
   // guardados que todavía no empujaron su stock (ver handleActualizarStockExistente).
@@ -279,7 +283,7 @@ export default function Comprobantes() {
     setGenerandoPdfId(comp.id);
     try {
       const proveedor = proveedores.find((p) => p.id === comp.proveedorId);
-      await descargarComprobanteCompraPdf(empresaActual, proveedor, comp, nombreProveedor(comp.proveedorId));
+      await descargarComprobanteCompraPdf(empresaActual, proveedor, comp, nombreProveedor(comp.proveedorId), direccionCasaCentral);
     } finally {
       setGenerandoPdfId(null);
     }
