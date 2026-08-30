@@ -187,7 +187,12 @@ export async function generarPresupuestoDesdeFicha(
   }
 
   const filasItems = ficha.items.map((it) => {
-    const precio = precioReal(it) ?? (it.productoId ? precioPorProducto.get(it.productoId) ?? 0 : 0);
+    // Fase 62 (30/08): costeo manual "con calculadora en mano" (ver
+    // CosteoItemFicha) -- si el ítem lo tiene cargado, su precioVenta
+    // manda por sobre cualquier precio de producto/fórmula (no debería
+    // coexistir con productoId, pero por las dudas queda primero en la
+    // prioridad: es el número que el usuario acaba de calcular a mano).
+    const precio = it.costeo?.precioVenta ?? precioReal(it) ?? (it.productoId ? precioPorProducto.get(it.productoId) ?? 0 : 0);
     return {
       id: crypto.randomUUID(),
       presupuesto_id: presupuestoId,

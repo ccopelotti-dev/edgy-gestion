@@ -22,6 +22,7 @@ import {
   TIPOS_BARRAL,
   TIPOS_CORTINA,
   TIPO_FICHA_LABEL,
+  type CosteoItemFicha,
   type EstadoFicha,
   type FichaMedida,
   type ItemFichaMedida,
@@ -30,6 +31,7 @@ import {
   type TipoFicha,
 } from '../types';
 import type { NuevaFichaMedida } from '../data/useFichasMedida';
+import { CosteoItemPanel } from './CosteoItemPanel';
 
 const overlayClass =
   'fixed inset-0 bg-black/50 z-50 data-[state=open]:animate-in data-[state=open]:fade-in-0';
@@ -66,6 +68,8 @@ interface ItemFormRow {
   textoMedidaTotalAlto: string;
   notas: string;
   panos: { key: string; textoAncho: string; textoAlto: string }[];
+  /** Fase 62 (30/08): costeo manual transitorio -- ver CosteoItemPanel. */
+  costeo?: CosteoItemFicha;
 }
 
 function nuevaFilaItem(): ItemFormRow {
@@ -85,6 +89,7 @@ function nuevaFilaItem(): ItemFormRow {
     textoMedidaTotalAlto: '',
     notas: '',
     panos: [],
+    costeo: undefined,
   };
 }
 
@@ -113,6 +118,7 @@ function itemFormAFila(it: ItemFichaMedida): ItemFormRow {
       textoAncho: p.ancho !== null ? String(p.ancho) : '',
       textoAlto: p.alto !== null ? String(p.alto) : '',
     })),
+    costeo: it.costeo,
   };
 }
 
@@ -520,6 +526,10 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
         cantidad: parseDecimal(it.textoCantidad) || 1,
         medida: tipo === 'generica' ? it.medida.trim() || undefined : undefined,
         peso: tipo === 'generica' ? it.peso.trim() || undefined : undefined,
+        // Fase 62: costeo manual -- solo tiene sentido en ítems "Genérica"
+        // sin producto vinculado (si hay productoId, el precio real ya sale
+        // de la Fórmula de ese producto, ver generarPresupuesto.ts).
+        costeo: tipo === 'generica' && !it.productoId ? it.costeo : undefined,
         incluyeBarral: tipo === 'cortinas' ? it.incluyeBarral : undefined,
         tipoBarral: tipo === 'cortinas' ? it.tipoBarral || undefined : undefined,
         tipoCortina: tipo === 'cortinas' ? it.tipoCortina || undefined : undefined,
@@ -903,6 +913,18 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                         </>
                       )}
                     </div>
+
+                    {/* Fase 62 (30/08): costeo manual "con calculadora en
+                        mano" -- solo tiene sentido en Genérica sin producto
+                        vinculado (si hay productoId, el precio sale de la
+                        Fórmula real de ese producto, no de acá). */}
+                    {tipo === 'generica' && !it.productoId && (
+                      <CosteoItemPanel
+                        clienteTenantId={clienteTenantId ?? ''}
+                        value={it.costeo}
+                        onChange={(costeo) => actualizarItem(it.key, { costeo })}
+                      />
+                    )}
 
                     {tipo === 'cortinas' && (
                       <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">

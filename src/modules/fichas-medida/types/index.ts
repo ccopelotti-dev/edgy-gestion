@@ -55,6 +55,57 @@ export interface PanoMedida {
   alto: number | null
 }
 
+// ─── Fase 62 (30/08): costeo manual transitorio de un ítem ────────────
+//
+// Mientras se termina de cargar el catálogo real (insumos + fórmulas), el
+// presupuesto de un ítem "Genérica" se arma con calculadora en mano:
+// insumos + mano de obra + costos operativos, más un margen, dan el
+// precio de venta que se usa al convertir la Ficha en Presupuesto (ver
+// lib/generarPresupuesto.ts). A propósito NO crea ni toca ninguna
+// Fórmula/Producto real de Productos y Stock -- es solo un cálculo que
+// queda guardado dentro de ESTE ítem de ESTA ficha, para ese cliente
+// puntual, hasta que el catálogo esté completo y se pueda facturar por
+// fórmula real como cualquier otro producto (ver comentario de Carlos,
+// 30/08: "es algo transitorio, mientras ocurre el vínculo comercial").
+
+export type TipoLineaCosteoItem = 'insumo' | 'mano_de_obra' | 'costo_operativo'
+export type ModoPrecioCosteoItem = 'margen' | 'monto_fijo' | 'manual'
+
+export interface LineaCosteoItem {
+  id: string
+  tipo: TipoLineaCosteoItem
+  /** Solo si tipo === 'insumo' -- referencia al catálogo real (para poder
+   * traer el costo unitario de un solo click). El costo se copia a esta
+   * línea al elegirlo, no se relee en vivo si después cambia en el
+   * catálogo (mismo criterio que Formular Producto). */
+  insumoId?: string
+  descripcion: string
+  cantidad: number
+  /** Solo de referencia visual ("$500/m", "$120/unidad") -- copiada del
+   * insumo al elegirlo, o vacía en líneas de mano de obra/costo operativo.
+   * No hay conversión de unidades acá (a diferencia de Formular Producto):
+   * es una cuenta simple cantidad × costoUnitario. */
+  unidad?: string
+  costoUnitario: number
+}
+
+export interface CosteoItemFicha {
+  lineas: LineaCosteoItem[]
+  modoPrecio: ModoPrecioCosteoItem
+  /** % de ganancia sobre costo -- solo si modoPrecio === 'margen'. */
+  margenPorcentaje?: number
+  /** $ fijo que se suma al costo total -- solo si modoPrecio === 'monto_fijo'. */
+  montoFijo?: number
+  /** Precio de venta tipeado directo -- solo si modoPrecio === 'manual'. */
+  precioManual?: number
+  /** Snapshot del costo total (suma de líneas) al momento de guardar --
+   * solo de referencia/auditoría, no se recalcula solo. */
+  costoTotal: number
+  /** Precio de venta final resultante -- es el que se usa como precio de
+   * este ítem al convertir la Ficha en Presupuesto. */
+  precioVenta: number
+}
+
 export interface ItemFichaMedida {
   id: string
   producto: string
@@ -88,6 +139,11 @@ export interface ItemFichaMedida {
   /** Solo se usa si la ficha es tipo 'cortinas' -- varias ventanas/paños
    * con Ancho/Alto propios por ítem. */
   panos: PanoMedida[]
+  /** Fase 62 (30/08): costeo manual transitorio (insumos + mano de obra +
+   * margen) -- ver comentario de CosteoItemFicha más arriba. Solo aplica
+   * a ítems de ficha 'generica' sin Producto vinculado (si `productoId`
+   * está cargado, el precio real ya sale de la Fórmula de ese producto). */
+  costeo?: CosteoItemFicha
 }
 
 export interface FichaMedida {

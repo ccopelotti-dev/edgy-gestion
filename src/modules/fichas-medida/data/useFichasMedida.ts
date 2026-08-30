@@ -34,6 +34,9 @@ export function filaAFicha(row: any): FichaMedida {
       medidaTotalAncho: it.medida_total_ancho !== null && it.medida_total_ancho !== undefined ? Number(it.medida_total_ancho) : undefined,
       medidaTotalAlto: it.medida_total_alto !== null && it.medida_total_alto !== undefined ? Number(it.medida_total_alto) : undefined,
       notas: it.notas ?? undefined,
+      // Fase 62 (30/08): costeo manual transitorio -- se persiste tal cual
+      // como jsonb, sin transformar (ver CosteoItemFicha en ../types).
+      costeo: it.costeo ?? undefined,
       panos: (it.ficha_medida_panos ?? [])
         .slice()
         .sort((a: any, b: any) => (a.orden ?? 0) - (b.orden ?? 0))
@@ -190,6 +193,7 @@ export function useFichasMedida(): UseFichasMedidaResult {
         medida_total_ancho: it.medidaTotalAncho ?? null,
         medida_total_alto: it.medidaTotalAlto ?? null,
         notas: it.notas || null,
+        costeo: it.costeo ?? null,
         orden: i,
       })
       if (errItem) {
