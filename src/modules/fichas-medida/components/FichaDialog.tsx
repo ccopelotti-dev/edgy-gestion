@@ -569,20 +569,28 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
         <Dialog.Overlay className={overlayClass} />
         <Dialog.Content
           className={contentClass}
-          // Fix (30/08, reportado por Carlos): "Cargar cliente nuevo" abre
-          // un segundo Dialog.Root (ClienteDialog) apilado arriba de este.
-          // Al guardar ese cliente y cerrarse, Radix a veces interpreta el
-          // click como "afuera" de ESTE Content (misma familia de bug que
-          // el comentario de ProductoCatalogoCombobox más arriba) y cierra
-          // toda la Ficha, perdiendo lo ya cargado. Mientras el diálogo de
-          // cliente esté abierto, este Content ignora cualquier intento de
-          // cierre por click/foco afuera.
-          onPointerDownOutside={(e) => {
-            if (clienteDialogOpen) e.preventDefault();
-          }}
-          onInteractOutside={(e) => {
-            if (clienteDialogOpen) e.preventDefault();
-          }}
+          // Fix (30/08, reportado por Carlos -- el primer intento con un
+          // guard basado en `clienteDialogOpen` NO alcanzó, seguía
+          // cerrando la Ficha entera). Causa real: al guardar el cliente
+          // nuevo, `handleSaveClienteNuevo` hace `setClienteVentaId(...)`,
+          // lo que re-renderiza y REEMPLAZA el botón "Cargar cliente
+          // nuevo" (el trigger original) por el resumen de "cliente
+          // elegido" -- ese botón ya no existe en el DOM. Cuando el
+          // ClienteDialog (Dialog.Root anidado) se desmonta, Radix intenta
+          // devolver el foco a su trigger original; como ya no está,
+          // termina en un nodo fuera de este Content, y Radix lo lee como
+          // un "foco afuera" -- disparando el cierre de ESTE diálogo. Esa
+          // devolución de foco ocurre en un tick posterior al render (no
+          // en el mismo evento de click), así que cualquier guard basado
+          // en estado (`clienteDialogOpen`) ya se apagó para cuando pasa
+          // -- de ahí que el primer fix no funcionara.
+          //
+          // Solución robusta: este Content, al ser un formulario largo
+          // (perder los datos cargados es costoso), directamente ignora
+          // SIEMPRE los intentos de cierre por click/foco afuera --
+          // Cancelar, la X y Escape siguen cerrándolo normalmente.
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
         >
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold text-gray-900">
