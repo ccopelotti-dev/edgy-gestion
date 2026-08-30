@@ -62,10 +62,11 @@ const PAGE_HEIGHT = 297
 export interface EmpresaParaPdf {
   nombre: string
   cuit?: string | null
-  /** Domicilio FISCAL -- Fase 38b: dejó de imprimirse en el PDF (era
-   * un dato que Carlos no quería publicar). Se mantiene en el tipo por
-   * si algún otro documento del motor lo sigue necesitando, pero
-   * `generarComprobantePdf` ya no lo dibuja en ningún lado. */
+  /** Domicilio FISCAL. Fase 38b lo había sacado de los PDF (Carlos no
+   * quería publicarlo); Fase 58 (30/08) revierte esa decisión a pedido
+   * explícito de Carlos -- ahora es el fallback de la línea de Dirección
+   * cuando el documento no tiene una dirección de punto de venta más
+   * específica (ver el uso de este campo en `generarComprobantePdf`). */
   direccion?: string | null
   telefono?: string | null
   /** URL pública (Supabase Storage). Si falla la descarga o el
@@ -345,15 +346,21 @@ export async function generarComprobantePdf(
   // panel (domicilio del punto de venta, condición de IVA, contactos)
   // que antes solo tenía el recuadro fiscal.
   //
-  // La dirección que se muestra es la del PUNTO DE VENTA que emitió
-  // este comprobante (`comprobante.puntoVentaDireccion`, resuelta en
-  // pdfComprobantes.ts a partir de `Comprobante.puntoVentaId`) --
-  // NUNCA `empresa.direccion` (domicilio fiscal, dejó de publicarse,
-  // ver el comentario en `EmpresaParaPdf.direccion` más arriba). Mismo
-  // criterio que ya usa Toma de Pedidos.
+  // La dirección que se muestra es, en primer lugar, la del PUNTO DE
+  // VENTA que emitió este comprobante (`comprobante.puntoVentaDireccion`,
+  // resuelta en pdfComprobantes.ts a partir de `Comprobante.puntoVentaId`).
+  //
+  // Fase 58 (30/08, a pedido explícito de Carlos -- reversa la Fase 38b):
+  // cuando no hay dirección de punto de venta (Cotización, Orden de
+  // Compra, Comprobante de Compra y Presupuesto NUNCA la tienen -- esos
+  // tipos ni siquiera cargan un `puntoVentaId`), antes se omitía la línea
+  // de Dirección directamente. Ahora cae a `empresa.direccion` (domicilio
+  // fiscal de Configuración > Empresa) en vez de mostrar el documento sin
+  // ninguna dirección -- Carlos pidió que "debajo de [nombre de la
+  // empresa] siempre" haya una línea de Dirección.
   const empresaParaHeader: EmpresaParaPdf = {
     ...empresa,
-    direccion: comprobante.puntoVentaDireccion ?? null,
+    direccion: comprobante.puntoVentaDireccion ?? empresa.direccion ?? null,
   }
   const numeroParaHeader = comprobante.afip
     ? formatNumeroFiscal(comprobante.afip.puntoVenta, comprobante.afip.numeroComprobante)

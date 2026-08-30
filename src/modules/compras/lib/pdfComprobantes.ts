@@ -38,6 +38,13 @@ import type {
 } from '../types';
 import { TIPO_COMPROBANTE_COMPRA_LABEL, MEDIO_PAGO_COMPRA_LABEL } from '../types';
 
+// Fase 58 (30/08, a pedido de Carlos): antes esta función solo mapeaba
+// nombre/cuit/direccion/telefono/logoUrl/colorMarca -- por eso Cotización,
+// Comprobante de Compra y Orden de Compra salían "pelados" (sin WhatsApp/
+// Instagram/Sitio web ni IIBB/Inicio de actividades) comparados con
+// Presupuesto (Ventas), que ya mapeaba todo esto desde Fase 38b. Ahora
+// mapea los mismos campos que `empresaParaPdf` de Ventas -- mismo objeto
+// `ClienteEmpresa`, los datos ya estaban ahí, solo faltaba pasarlos.
 function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
   return {
     nombre: empresaActual.nombre,
@@ -46,6 +53,19 @@ function empresaParaPdf(empresaActual: ClienteEmpresa): EmpresaParaPdf {
     telefono: empresaActual.telefono,
     logoUrl: empresaActual.logo_url,
     colorMarca: empresaActual.color_marca,
+    titular: empresaActual.titular,
+    ingresosBrutosCondicion: empresaActual.ingresos_brutos_condicion,
+    ingresosBrutosNumero: empresaActual.ingresos_brutos_numero,
+    inicioActividades: empresaActual.inicio_actividades,
+    provincia: empresaActual.provincia,
+    mostrarIibbAlicuota: empresaActual.mostrar_iibb_alicuota,
+    iibbAlicuota: empresaActual.iibb_alicuota,
+    sitioWeb: empresaActual.sitio_web,
+    instagram: empresaActual.instagram,
+    whatsappComercial: empresaActual.whatsapp_comercial,
+    sitioWebIconoUrl: empresaActual.sitio_web_icono_url,
+    instagramIconoUrl: empresaActual.instagram_icono_url,
+    whatsappIconoUrl: empresaActual.whatsapp_icono_url,
   };
 }
 
