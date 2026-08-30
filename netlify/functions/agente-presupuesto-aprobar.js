@@ -66,6 +66,21 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: false, error: error.message || 'No se pudo aprobar el presupuesto' }), { status: 400 })
   }
 
+  // Fix (30/08, reportado por Carlos): data.total es el neto guardado en
+  // presupuestos.total -- igual que hace el flujo humano (Presupuestos.tsx
+  // / CONVERTIR_PRESUPUESTO_A_ORDEN, ver store.tsx), que también crea la
+  // Orden con el total neto. Pero el precio que el cliente vio en el
+  // Presupuesto (pantalla y PDF) es CON IVA incluido (conIvaIncluido() en
+  // ventas/lib/format.ts, Fase 42) -- por eso el monto que le mencionamos
+  // acá tiene que ser el mismo, o el cliente lee un número que no reconoce.
+  // ivaDefault hoy es un valor fijo (SEED_STATE.config.ivaDefault = 21,
+  // ventas/data/seed.ts) -- UPDATE_CONFIG ni siquiera persiste en Supabase
+  // todavía, así que 21 es efectivamente la única alícuota que existe en
+  // todo el sistema por ahora. Si eso cambia (config real por tenant), hay
+  // que traer ese valor acá en vez de este literal.
+  const IVA_DEFAULT = 21
+  const totalConIva = Math.round(Number(data.total) * (1 + IVA_DEFAULT / 100) * 100) / 100
+
   // Nota en el historial de la conversación -- mismo criterio que
   // agente-ordenes-crear.js.
   const { error: notaError } = await supabaseAdmin.from('chat_messages').insert([
@@ -75,7 +90,7 @@ export default async (req) => {
       sender: 'system',
       content: data.yaAprobado
         ? `Presupuesto ${numeroDocumento} ya estaba aprobado (Orden ${data.numeroOrden})`
-        : `Presupuesto ${numeroDocumento} confirmado por el cliente -- Orden ${data.numeroOrden} generada por $${data.total}`,
+        : `Presupuesto ${numeroDocumento} confirmado por el cliente -- Orden ${data.numeroOrden} generada por $${totalConIva}`,
     },
   ])
   if (notaError) {
@@ -96,9 +111,10 @@ export default async (req) => {
       ordenId: data.ordenId,
       numeroOrden: data.numeroOrden,
       total: data.total,
+      totalConIva,
       clienteNombre: data.clienteNombre,
       mensajeCliente,
-      mensajeSupervisor: `${numeroDocumento} confirmado por el cliente -- pedido ${data.numeroOrden} generado por $${data.total}.`,
+      mensajeSupervisor: `${numeroDocumento} confirmado por el cliente -- pedido ${data.numeroOrden} generado por $${totalConIva}.`,
     }),
     { status: 200 },
   )
