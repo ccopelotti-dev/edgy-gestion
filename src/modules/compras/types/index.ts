@@ -306,6 +306,14 @@ export interface ComprobanteCompra {
   /** id de la Recepción generada en Productos y Stock, si stockActualizado. */
   recepcionId?: string;
   notas?: string;
+  /** Fase 61 (30/08): path en Storage (bucket privado "comprobantes-gastos")
+   * de una foto/scan adjuntada A MANO al cargar el comprobante desde el
+   * formulario. Se firma al leer, igual que la foto que llega por el
+   * agente de WhatsApp (ver src/lib/imagenComprobanteAgente.ts) -- las dos
+   * fuentes terminan mostrándose con la misma miniatura/lightbox en el
+   * listado. Undefined si no se adjuntó nada (o si la foto vino del
+   * agente, que no usa este campo sino comprobantes_recibidos). */
+  imagenUrl?: string;
   createdAt: string;
   updatedAt: string;
 }

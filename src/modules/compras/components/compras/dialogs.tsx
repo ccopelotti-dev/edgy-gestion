@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2, Search, Factory } from 'lucide-react';
+import { X, Plus, Trash2, Search, Factory, ImagePlus, Loader2, ZoomIn } from 'lucide-react';
 
 import type {
   Proveedor,
@@ -38,6 +38,13 @@ import { esCuitValido } from '@/lib/validarCuit';
 import { TIPOS_COMPROBANTE_ARCA } from '@/modules/impuestos/lib/arcaReferencia';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
+import {
+  subirImagenComprobanteManual,
+  eliminarImagenComprobanteManual,
+  ACCEPT_IMAGEN_COMPROBANTE,
+  TAMANIO_MAXIMO_IMAGEN_COMPROBANTE,
+} from '@/lib/imagenComprobanteAgente';
+import ImageLightbox from '@/components/ImageLightbox';
 import { UNIDADES, unidadAbrev, presentacionDefault, type UnidadMedida, type InsumoPresentacion } from '@/modules/productos-stock/types';
 
 // ─── Shared styles ───────────────────────────────────────────
@@ -716,6 +723,13 @@ interface ComprobanteCompraDialogProps {
    * comprobante resultante a esa OC. Sin esto, el modal arranca en blanco
    * (alta manual, como siempre). */
   ordenCompra?: OrdenCompra;
+  /** Fase 61 (30/08): cuando el modal se abre "en blanco" (sin `ordenCompra`
+   * preseleccionada -- ej. desde el botón "Nuevo comprobante" de
+   * Comprobantes.tsx), esta lista ofrece elegir una Orden de Compra ya
+   * `recibida` y sin factura vinculada todavía, para facturarla desde acá
+   * en vez de tener que ir a Órdenes de Compra > "Registrar factura". Al
+   * elegir una, se precargan proveedor + items igual que con `ordenCompra`. */
+  ordenesCompraDisponibles?: OrdenCompra[];
   onSave: (data: {
     tipo: TipoComprobanteCompra;
     proveedorId: string;
@@ -737,9 +751,13 @@ interface ComprobanteCompraDialogProps {
     /** Percepciones/impuestos adicionales -- mismo criterio que en la OC
      * (Fase 21): Ganancias, IIBB, débitos y créditos bancarios, etc. */
     otrosImpuestos: ImpuestoOrdenCompra[];
-    /** Si el comprobante viene de "Registrar factura" en una OC, el id de
-     * esa OC para vincularlos (ver ComprobanteCompra.ordenCompraId). */
+    /** Si el comprobante viene de "Registrar factura" en una OC (o se eligió
+     * una desde `ordenesCompraDisponibles`), el id de esa OC para
+     * vincularlos (ver ComprobanteCompra.ordenCompraId). */
     ordenCompraId?: string;
+    /** Fase 61: path en Storage de la foto/scan adjuntada a mano (ver
+     * ComprobanteCompra.imagenUrl). Undefined si no se adjuntó nada. */
+    imagenUrl?: string;
   }) => void;
 }
 
@@ -803,7 +821,7 @@ function soloDigitos(raw: string, max: number): string {
   return raw.replace(/\D/g, '').slice(0, max);
 }
 
-export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, ordenCompra, onSave }: ComprobanteCompraDialogProps) {
+export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, ordenCompra, ordenesCompraDisponibles, onSave }: ComprobanteCompraDialogProps) {
   const [tipo, setTipo] = useState<TipoComprobanteCompra>('factura');
   const [proveedorId, setProveedorId] = useState('');
   const [fecha, setFecha] = useState(todayISO());
@@ -879,6 +897,85 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
   const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalogoCompra[]>([]);
   const [busquedaCatalogo, setBusquedaCatalogo] = useState('');
 
+  // Fase 61 (30/08): elegir una OC "recibida" y sin factura todavía desde
+  // acá mismo, sin tener que ir a Órdenes de Compra > "Registrar factura".
+  // Solo tiene sentido cuando el modal se abrió en blanco (sin `ordenCompra`
+  // ya preseleccionada por el caller).
+  const [ordenCompraSeleccionadaId, setOrdenCompraSeleccionadaId] = useState('');
+
+  // Fase 61: foto/scan adjuntado a mano (bucket privado "comprobantes-gastos").
+  const [imagenPath, setImagenPath] = useState<string | null>(null);
+  const [imagenPreviewUrl, setImagenPreviewUrl] = useState<string | null>(null);
+  const [subiendoImagen, setSubiendoImagen] = useState(false);
+  const [errorImagen, setErrorImagen] = useState('');
+  const [imagenAmpliadaPreview, setImagenAmpliadaPreview] = useState<string | null>(null);
+  const fileInputImagenRef = useRef<HTMLInputElement>(null);
+  // Recuerda si la imagen actual se subió DURANTE esta apertura del modal --
+  // si se cierra sin guardar (o se reemplaza por otra), se borra el archivo
+  // huérfano del bucket (best-effort, ver eliminarImagenComprobanteManual).
+  const imagenSubidaEnEstaSesionRef = useRef<string | null>(null);
+
+  /** Precarga proveedor + items + otros impuestos desde una OC -- mismo
+   * criterio tanto si viene por prop (`ordenCompra`, ej. "Registrar
+   * factura" en Órdenes de Compra) como si se elige del selector nuevo. */
+  function aplicarOrdenCompra(oc: OrdenCompra) {
+    setProveedorId(oc.proveedorId);
+    setItems(
+      oc.items.length
+        ? oc.items.map((it) => ({
+            key: generarId(), descripcion: it.descripcion, cantidad: it.cantidad,
+            precioUnitario: it.precioUnitario, descuento: it.descuento,
+            alicuotaIva: it.alicuotaIva ?? 21,
+            insumoId: it.insumoId, productoId: it.productoId, unidad: it.unidad ?? 'unidad',
+          }))
+        : [newComprobanteItemRow()],
+    );
+    setOtrosImpuestos(
+      (oc.otrosImpuestos ?? []).map((imp) => ({ key: imp.id, concepto: imp.concepto, monto: imp.monto })),
+    );
+  }
+
+  const handleSeleccionarOrdenCompra = (id: string) => {
+    setOrdenCompraSeleccionadaId(id);
+    if (!id) return;
+    const oc = ordenesCompraDisponibles?.find((o) => o.id === id);
+    if (oc) aplicarOrdenCompra(oc);
+  };
+
+  const handleImagenSeleccionada = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !clienteTenant?.id) return;
+    setErrorImagen('');
+    setSubiendoImagen(true);
+    try {
+      const { path, signedUrl } = await subirImagenComprobanteManual(file, clienteTenant.id);
+      // Si ya había una imagen subida en esta misma sesión del modal (el
+      // usuario reemplazó la foto), se borra la anterior para no dejar
+      // archivos sueltos en el bucket.
+      if (imagenSubidaEnEstaSesionRef.current) {
+        eliminarImagenComprobanteManual(imagenSubidaEnEstaSesionRef.current);
+      }
+      imagenSubidaEnEstaSesionRef.current = path;
+      setImagenPath(path);
+      setImagenPreviewUrl(signedUrl);
+    } catch (err) {
+      setErrorImagen(err instanceof Error ? err.message : 'No se pudo subir la imagen.');
+    } finally {
+      setSubiendoImagen(false);
+    }
+  };
+
+  const handleQuitarImagen = () => {
+    if (imagenSubidaEnEstaSesionRef.current) {
+      eliminarImagenComprobanteManual(imagenSubidaEnEstaSesionRef.current);
+      imagenSubidaEnEstaSesionRef.current = null;
+    }
+    setImagenPath(null);
+    setImagenPreviewUrl(null);
+    setErrorImagen('');
+  };
+
   useEffect(() => {
     if (open) {
       setTipo('factura');
@@ -894,27 +991,26 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
       setRemitoPtoVta('');
       setRemitoNumero('');
       setBusquedaCatalogo('');
+      // Fase 61: cada apertura arranca sin OC elegida ni imagen adjunta --
+      // si quedó algo subido de una apertura anterior que se cerró sin
+      // guardar, se limpia (best-effort).
+      setOrdenCompraSeleccionadaId(ordenCompra?.id ?? '');
+      setImagenPath(null);
+      setImagenPreviewUrl(null);
+      setErrorImagen('');
+      if (imagenSubidaEnEstaSesionRef.current) {
+        eliminarImagenComprobanteManual(imagenSubidaEnEstaSesionRef.current);
+        imagenSubidaEnEstaSesionRef.current = null;
+      }
       if (ordenCompra) {
-        setProveedorId(ordenCompra.proveedorId);
-        setItems(
-          ordenCompra.items.length
-            ? ordenCompra.items.map((it) => ({
-                key: generarId(), descripcion: it.descripcion, cantidad: it.cantidad,
-                precioUnitario: it.precioUnitario, descuento: it.descuento,
-                alicuotaIva: it.alicuotaIva ?? 21,
-                insumoId: it.insumoId, productoId: it.productoId, unidad: it.unidad ?? 'unidad',
-              }))
-            : [newComprobanteItemRow()],
-        );
-        setOtrosImpuestos(
-          (ordenCompra.otrosImpuestos ?? []).map((imp) => ({ key: imp.id, concepto: imp.concepto, monto: imp.monto })),
-        );
+        aplicarOrdenCompra(ordenCompra);
       } else {
         setProveedorId('');
         setItems([newComprobanteItemRow()]);
         setOtrosImpuestos([]);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, ordenCompra]);
 
   useEffect(() => {
@@ -1123,13 +1219,30 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
       otrosImpuestos: otrosImpuestos
         .filter((imp) => imp.concepto.trim() || imp.monto)
         .map((imp) => ({ id: generarId(), concepto: imp.concepto.trim() || 'Otro impuesto', monto: imp.monto })),
-      ordenCompraId: ordenCompra?.id,
+      ordenCompraId: ordenCompra?.id ?? (ordenCompraSeleccionadaId || undefined),
+      imagenUrl: imagenPath ?? undefined,
     });
+    // La imagen ya quedó vinculada al comprobante recién guardado -- se
+    // "suelta" la referencia de limpieza para que handleOpenChange no la
+    // borre del bucket al cerrar el modal.
+    imagenSubidaEnEstaSesionRef.current = null;
     onOpenChange(false);
   };
 
+  /** Fase 61: si el modal se cierra (Cancelar, X, Escape, click afuera) SIN
+   * haber pasado por handleSave, cualquier imagen recién subida en esta
+   * apertura queda huérfana en el bucket -- se borra (best-effort). */
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && imagenSubidaEnEstaSesionRef.current) {
+      eliminarImagenComprobanteManual(imagenSubidaEnEstaSesionRef.current);
+      imagenSubidaEnEstaSesionRef.current = null;
+    }
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
         <Dialog.Content className={contentComprobanteClass}>
@@ -1192,6 +1305,30 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
               </div>
             </div>
 
+            {/* Fase 61: solo cuando el modal se abrió en blanco (no vino ya
+                atado a una OC puntual desde "Registrar factura") y hay
+                órdenes de compra recibidas todavía sin facturar. */}
+            {!ordenCompra && !!ordenesCompraDisponibles?.length && (
+              <div>
+                <label className={labelClass}>Facturar una Orden de Compra recibida (opcional)</label>
+                <select
+                  className={selectClass}
+                  value={ordenCompraSeleccionadaId}
+                  onChange={(e) => handleSeleccionarOrdenCompra(e.target.value)}
+                >
+                  <option value="">Sin vincular -- carga manual</option>
+                  {ordenesCompraDisponibles.map((oc) => (
+                    <option key={oc.id} value={oc.id}>
+                      OC-{String(oc.numero).padStart(5, '0')} · {proveedores.find((p) => p.id === oc.proveedorId)?.nombre ?? 'Proveedor'} · {formatARS(oc.total)}
+                    </option>
+                  ))}
+                </select>
+                {ordenCompraSeleccionadaId && (
+                  <p className="text-xs text-gray-500 mt-1">Se precargaron el proveedor y los ítems de esa OC -- se pueden editar antes de guardar.</p>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className={labelClass}>Letra/Tipo (ARCA)</label>
@@ -1217,6 +1354,59 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
                     <option key={val} value={val}>{label}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* Fase 61: foto/scan del comprobante -- queda visible en el
+                listado con la misma miniatura/lightbox que ya existe para
+                los comprobantes que llegan por el agente de WhatsApp. */}
+            <div>
+              <label className={labelClass}>Foto del comprobante (opcional)</label>
+              <div className="flex items-center gap-3">
+                {imagenPreviewUrl ? (
+                  <div className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-gray-200">
+                    <img src={imagenPreviewUrl} alt="Comprobante adjunto" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setImagenAmpliadaPreview(imagenPreviewUrl)}
+                      className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100"
+                      title="Ver más grande"
+                    >
+                      <ZoomIn className="h-5 w-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-gray-300 text-gray-300">
+                    <ImagePlus className="h-6 w-6" />
+                  </div>
+                )}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputImagenRef.current?.click()}
+                      disabled={subiendoImagen}
+                      className={`${btnSecondary} flex items-center gap-1.5 text-xs py-1.5 px-3 disabled:opacity-50`}
+                    >
+                      {subiendoImagen ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+                      {imagenPreviewUrl ? 'Reemplazar' : 'Adjuntar foto'}
+                    </button>
+                    {imagenPreviewUrl && (
+                      <button type="button" onClick={handleQuitarImagen} className="text-xs text-gray-400 hover:text-red-600">
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">JPG, PNG o WEBP -- hasta 8 MB.</p>
+                  {errorImagen && <p className="text-xs text-red-600">{errorImagen}</p>}
+                </div>
+                <input
+                  ref={fileInputImagenRef}
+                  type="file"
+                  accept={ACCEPT_IMAGEN_COMPROBANTE}
+                  className="hidden"
+                  onChange={handleImagenSeleccionada}
+                />
               </div>
             </div>
 
@@ -1600,6 +1790,8 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+    <ImageLightbox src={imagenAmpliadaPreview} onClose={() => setImagenAmpliadaPreview(null)} />
+    </>
   );
 }
 

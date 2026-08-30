@@ -639,6 +639,8 @@ export default function OrdenesCompra() {
     otrosImpuestos?: ImpuestoOrdenCompra[];
     /** Si viene de "Registrar factura" en una OC puntual, la vincula. */
     ordenCompraId?: string;
+    /** Fase 61: path en Storage de la foto/scan adjuntada a mano. */
+    imagenUrl?: string;
   }) => {
     const now = nowISO();
     const subtotal = data.items.reduce((s, i) => s + i.subtotal, 0);
@@ -672,6 +674,7 @@ export default function OrdenesCompra() {
         numeroComprobanteProveedor: data.numeroComprobanteProveedor || undefined,
         tipoComprobanteCodigo: data.tipoComprobanteCodigo || undefined,
         stockActualizado: false,
+        imagenUrl: data.imagenUrl,
         createdAt: now,
         updatedAt: now,
       },

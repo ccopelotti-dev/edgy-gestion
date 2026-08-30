@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 import { useClienteActual } from '@/hooks/useClienteActual';
-import { obtenerImagenesComprobantesAgente } from '@/lib/imagenComprobanteAgente';
+import { obtenerImagenesComprobantesAgente, obtenerImagenesComprobantesManuales } from '@/lib/imagenComprobanteAgente';
 import ImageLightbox from '@/components/ImageLightbox';
 import { descargarComprobanteCompraPdf } from '../lib/pdfComprobantes';
 import { actualizarStockPorCompra } from '../lib/actualizarStockCompra';
@@ -54,6 +54,7 @@ import type {
   ItemComprobanteCompra,
   ControlRemision,
   PagoCompra,
+  OrdenCompra,
 } from '../types';
 import {
   TIPO_COMPROBANTE_COMPRA_LABEL,
@@ -103,8 +104,23 @@ export default function Comprobantes() {
 
   useEffect(() => {
     if (!empresaActual) return;
-    obtenerImagenesComprobantesAgente(empresaActual.id, 'comprobante_compra_id').then(setImagenesAgente);
+    obtenerImagenesComprobantesAgente(empresaActual.id, 'comprobante_compra_id').then((mapaAgente) => {
+      setImagenesAgente(mapaAgente);
+    });
   }, [empresaActual]);
+
+  // Fase 61 (30/08): mismo mapa de miniatura/lightbox, pero para las fotos
+  // adjuntadas A MANO desde el formulario (no las que llegan por el agente
+  // de WhatsApp) -- se mezclan en el mismo estado para que el render de la
+  // fila no tenga que distinguir el origen. Depende de comprobantes (no solo
+  // de empresaActual) porque el set de imagenUrl cambia con cada guardado.
+  useEffect(() => {
+    const conImagen = comprobantes.filter((c) => c.imagenUrl);
+    if (conImagen.length === 0) return;
+    obtenerImagenesComprobantesManuales(conImagen).then((mapaManual) => {
+      setImagenesAgente((prev) => new Map([...prev, ...mapaManual]));
+    });
+  }, [comprobantes]);
 
   // ── KPIs ─────────────────────────────────────────────────
 
@@ -148,6 +164,17 @@ export default function Comprobantes() {
     });
   }, [comprobantes, busqueda, filtroTipo, filtroEstado, proveedores]);
 
+  // Fase 61 (30/08): OCs que se pueden facturar directo desde "Nuevo
+  // comprobante" -- mismo criterio que "Registrar factura" en Órdenes de
+  // Compra (recibida y sin ningún comprobante vinculado todavía).
+  const ordenesCompraDisponibles: OrdenCompra[] = useMemo(
+    () =>
+      ordenesCompra.filter(
+        (oc) => oc.estado === 'recibida' && !comprobantes.some((c) => c.ordenCompraId === oc.id),
+      ),
+    [ordenesCompra, comprobantes],
+  );
+
   // ── Helpers ───────────────────────────────────────────────
 
   const nombreProveedor = (proveedorId: string) =>
@@ -182,6 +209,11 @@ export default function Comprobantes() {
     // "Guardar" (solo el registro fiscal -- el stock se actualiza después,
     // a mano en Recepción o con el ícono de la fila).
     actualizarStock: boolean;
+    /** Fase 61: si se eligió una OC recibida desde el selector nuevo, su id
+     * -- para vincular el comprobante recién creado con esa OC. */
+    ordenCompraId?: string;
+    /** Fase 61: path en Storage de la foto/scan adjuntada a mano. */
+    imagenUrl?: string;
   }) => {
     const now = nowISO();
     const subtotal = data.items.reduce((s, i) => s + i.subtotal, 0);
@@ -211,6 +243,8 @@ export default function Comprobantes() {
         numeroComprobanteProveedor: data.numeroComprobanteProveedor || undefined,
         tipoComprobanteCodigo: data.tipoComprobanteCodigo || undefined,
         stockActualizado: false,
+        ordenCompraId: data.ordenCompraId,
+        imagenUrl: data.imagenUrl,
         createdAt: now,
         updatedAt: now,
       },
@@ -616,6 +650,7 @@ export default function Comprobantes() {
         open={comprobanteDialogOpen}
         onOpenChange={setComprobanteDialogOpen}
         proveedores={proveedores.filter((p) => p.activo)}
+        ordenesCompraDisponibles={ordenesCompraDisponibles}
         onSave={handleSaveComprobante}
       />
 

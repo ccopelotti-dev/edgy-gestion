@@ -487,6 +487,7 @@ function comprobanteToRow(c: ComprobanteCompra, clienteId: string) {
     stock_actualizado: c.stockActualizado,
     recepcion_id: c.recepcionId ?? null,
     notas: c.notas ?? null,
+    imagen_url: c.imagenUrl ?? null,
   };
 }
 
@@ -940,6 +941,7 @@ async function fetchComprasState(): Promise<ComprasState> {
     stockActualizado: r.stock_actualizado ?? false,
     recepcionId: r.recepcion_id ?? undefined,
     notas: r.notas ?? undefined,
+    imagenUrl: r.imagen_url ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
