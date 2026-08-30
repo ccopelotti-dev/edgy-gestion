@@ -219,6 +219,14 @@ export interface ComprobanteParaPdf {
    * más páginas si lo necesita (mismo `doc`, se sigue escribiendo
    * encima del mismo documento). */
   bloqueAdicional?: (doc: jsPDF, y: number, pageWidth: number, marginX: number) => number
+  /** Fase 58c (30/08, a pedido de Carlos): línea (o párrafo corto) libre,
+   * dibujada entre los datos del cliente/proveedor y la tabla de ítems --
+   * pensada para una frase de apertura fija, ej. "Sr. proveedor, solicito
+   * la cotización de los siguientes productos y/o servicios:" en Pedido
+   * de Cotización. Genérico a propósito (no atado a Cotización) por si
+   * otro documento necesita el mismo tipo de introducción más adelante;
+   * si se omite, el motor sigue exactamente igual que antes. */
+  textoIntroductorio?: string | null
 }
 
 function formatARS(n: number): string {
@@ -432,6 +440,16 @@ export async function generarComprobantePdf(
     y += 4
   }
   y += 1
+
+  // ─── Texto introductorio (Fase 58c) ──────────────────────────
+  if (comprobante.textoIntroductorio) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.setTextColor('#333333')
+    const lineasIntro = doc.splitTextToSize(comprobante.textoIntroductorio, pageWidth - marginX * 2)
+    doc.text(lineasIntro, marginX, y)
+    y += 4.5 * (Array.isArray(lineasIntro) ? lineasIntro.length : 1) + 2
+  }
 
   // ─── Tabla de ítems ─────────────────────────────────────────
   const colDesc = marginX

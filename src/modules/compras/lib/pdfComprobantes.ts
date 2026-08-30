@@ -214,6 +214,9 @@ export async function descargarCotizacionPdf(
       total: cot.total,
       notas: cot.notas ?? null,
       puntoVentaDireccion: direccionCasaCentral,
+      // Fase 58c (30/08, a pedido de Carlos): frase de apertura fija --
+      // ver comentario en ComprobanteParaPdf.textoIntroductorio.
+      textoIntroductorio: 'Sr. proveedor, solicito la cotización de los siguientes productos y/o servicios:',
     },
     numero,
     1,
