@@ -106,6 +106,10 @@ export async function descargarComprobanteCompraPdf(
       tipoLabel: TIPO_COMPROBANTE_COMPRA_LABEL[comp.tipo],
       numero,
       fecha: formatDate(comp.fecha),
+      // Fase 58d (30/08, a pedido de Carlos): "Proveedor", no "Cliente" --
+      // mismo criterio que ya tenían Orden de compra y Cotización (Fase
+      // 45f/tarea #57), pero a este documento se le había pasado por alto.
+      clienteLabel: 'Proveedor',
       clienteNombre: nombreProveedorFallback(proveedor, proveedorNombreFallback),
       clienteDocumento: proveedor?.cuit ?? null,
       items: comp.items.map((i) => ({

@@ -844,6 +844,22 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
   // es un tilde: si está marcado, "Guardar" hace las dos cosas en el orden
   // correcto (primero guarda, después actualiza stock); si no, guarda nomás.
   const [actualizarStockChecked, setActualizarStockChecked] = useState(false);
+  // Fase 58e (30/08, a pedido de Carlos -- caso real Punto Tex/Gla & Co.):
+  // la mayoría de los proveedores facturan con el IVA ya metido adentro del
+  // precio unitario ("precio final", sin discriminar). Antes la única forma
+  // de cargar eso sin que el motor sumara un 21% de más era poner la
+  // alícuota en 0% -- pero entonces el comprobante quedaba con "IVA: $0",
+  // sin ningún crédito fiscal computable para el libro IVA Compras (dato
+  // que Carlos SÍ necesita, aunque el total de la factura no cambie).
+  // Con este tilde activado, "Precio" pasa a interpretarse como el precio
+  // FINAL (con IVA) tal cual figura impreso en la factura del proveedor --
+  // la alícuota de cada línea se sigue eligiendo igual que siempre, pero
+  // ahora se usa para DESAGREGAR (precioNeto = precioFinal / (1+alícuota))
+  // en vez de para sumar arriba de un precio que ya la traía adentro. Lo
+  // que se guarda en la base (`precioUnitario`) sigue siendo el neto -- el
+  // resto del sistema (costeo de insumos, stock, márgenes) asume siempre
+  // precio sin IVA, y este comprobante no debe ser la excepción.
+  const [precioConIva, setPrecioConIva] = useState(false);
   const [controlRemision, setControlRemision] = useState<ControlRemision>('no');
   // Nro. de remito partido en dos campos (Pto. Vta 4 díg. + Número 8 díg.)
   // para carga rápida: el operador tipea "1" + Enter (pasa de campo y
@@ -1021,7 +1037,14 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
   const addItem = () => setItems((prev) => [...prev, newComprobanteItemRow()]);
   const removeItem = (index: number) => { if (items.length > 1) setItems((prev) => prev.filter((_, i) => i !== index)); };
 
-  const getSubtotal = (item: ComprobanteItemRow) => calcularSubtotalItem(item.cantidad, item.precioUnitario, item.descuento);
+  // Fase 58e: si `precioConIva` está activo, `item.precioUnitario` es el
+  // precio FINAL (con IVA) tal cual lo tipeó el operador -- hay que
+  // desagregarlo a neto ANTES de aplicar descuento/calcular subtotal, para
+  // que el resto de la cuenta (subtotal, IVA, y lo que termina guardado en
+  // la base) siga siendo consistente con el resto del sistema (siempre neto).
+  const precioNetoUnitario = (item: ComprobanteItemRow) =>
+    precioConIva ? item.precioUnitario / (1 + item.alicuotaIva / 100) : item.precioUnitario;
+  const getSubtotal = (item: ComprobanteItemRow) => calcularSubtotalItem(item.cantidad, precioNetoUnitario(item), item.descuento);
   const getIva = (item: ComprobanteItemRow) => getSubtotal(item) * (item.alicuotaIva / 100);
 
   const totalNeto = items.reduce((sum, item) => sum + getSubtotal(item), 0);
@@ -1070,7 +1093,11 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
       const montoIva = getIva(item);
       return {
         descripcion: item.descripcion.trim(), cantidad: item.cantidad,
-        precioUnitario: item.precioUnitario, descuento: item.descuento,
+        // Fase 58e: lo que se guarda es siempre el precio NETO -- si el
+        // operador tipeó el precio con IVA incluido (`precioConIva`), acá
+        // se persiste ya desagregado, para que el resto del sistema
+        // (costeo de insumos, valuación de stock) no vea la diferencia.
+        precioUnitario: precioNetoUnitario(item), descuento: item.descuento,
         subtotal, alicuotaIva: item.alicuotaIva, montoIva,
         insumoId: item.insumoId, productoId: item.productoId, unidad: item.unidad,
       };
@@ -1200,6 +1227,18 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
                   <Plus className="w-3.5 h-3.5" /> Agregar
                 </button>
               </div>
+              {/* Fase 58e: la mayoría de los proveedores facturan con el
+                  precio final (IVA ya adentro) -- este tilde le dice al
+                  motor que desagregue en vez de sumar arriba. */}
+              <label className="mb-2 flex items-center gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={precioConIva}
+                  onChange={(e) => setPrecioConIva(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                Los precios de esta factura ya incluyen IVA (desagregar por alícuota de cada línea)
+              </label>
               {errors.items && (
                 <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 mb-2">
                   <p className="text-xs text-red-700">{errors.items}</p>
@@ -1269,7 +1308,7 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
                       <th className="text-left px-3 py-2 font-medium">Descripcion</th>
                       <th className="text-right px-3 py-2 font-medium w-20">Cant.</th>
                       <th className="text-left px-3 py-2 font-medium w-24">UM</th>
-                      <th className="text-right px-3 py-2 font-medium w-24">Precio</th>
+                      <th className="text-right px-3 py-2 font-medium w-24">{precioConIva ? 'Precio (c/IVA)' : 'Precio'}</th>
                       <th className="text-right px-3 py-2 font-medium w-16">Dto.%</th>
                       <th className="text-right px-3 py-2 font-medium w-20">IVA</th>
                       <th className="text-right px-3 py-2 font-medium w-24">Subtotal</th>
@@ -1346,6 +1385,11 @@ export function ComprobanteCompraDialog({ open, onOpenChange, proveedores, orden
                               value={item.precioUnitario || ''}
                               onChange={(e) => updateItem(idx, 'precioUnitario', Number(e.target.value))}
                             />
+                            {precioConIva && item.precioUnitario > 0 && (
+                              <p className="text-[10px] text-muted-foreground leading-tight text-right">
+                                neto {formatARS(precioNetoUnitario(item))}
+                              </p>
+                            )}
                           </td>
                           <td className="px-2 py-1.5">
                             <input
