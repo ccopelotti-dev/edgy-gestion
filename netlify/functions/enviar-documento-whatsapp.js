@@ -147,7 +147,12 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: false, error: 'Número de teléfono inválido' }), { status: 400 })
   }
 
-  // 4) Mandar el PDF por Evolution API
+  // 4) Mandar el PDF por Evolution API -- SIN caption (Fase 63c, 30/08, a
+  // pedido de Carlos): antes el texto de cortesía iba pegado como caption
+  // del documento; ahora el documento va solo y el texto se manda aparte,
+  // como mensaje de WhatsApp separado, inmediatamente después (ver paso 5
+  // más abajo) -- se lee más natural, como si alguien mandara el archivo y
+  // después escribiera "cualquier consulta, avisanos".
   const url = `https://evolution.edgysistemas.tech/message/sendMedia/${config.evolution_instance_nombre}`
   let evolutionRes
   try {
@@ -159,7 +164,6 @@ export default async (req) => {
         mediatype: 'document',
         mimetype: 'application/pdf',
         fileName: `${nombreArchivo}.pdf`,
-        caption,
         media: pdfBase64,
       }),
     })
@@ -175,6 +179,25 @@ export default async (req) => {
       JSON.stringify({ ok: false, error: `Evolution API respondió ${evolutionRes.status}`, detalle: evolutionBody }),
       { status: 502 },
     )
+  }
+
+  // 4b) Mensaje de cortesía posterior al adjunto (el mismo texto que antes
+  // era el caption). Si esto falla, no se corta la respuesta al panel --
+  // el documento (lo importante) ya salió bien; perder el texto de
+  // cortesía es un mal menor, igual criterio que el log de más abajo.
+  if (caption) {
+    try {
+      const textoRes = await fetch(`https://evolution.edgysistemas.tech/message/sendText/${config.evolution_instance_nombre}`, {
+        method: 'POST',
+        headers: { apikey: config.evolution_instance_apikey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number: telefono, text: caption }),
+      })
+      if (!textoRes.ok) {
+        console.error('enviar-documento-whatsapp: Evolution respondió error al mandar el mensaje de cortesía', textoRes.status, await textoRes.text())
+      }
+    } catch (e) {
+      console.error('enviar-documento-whatsapp: error de red al mandar el mensaje de cortesía', e)
+    }
   }
 
   // 5) Fase 51: dejar registro para poder correlacionar la respuesta.
