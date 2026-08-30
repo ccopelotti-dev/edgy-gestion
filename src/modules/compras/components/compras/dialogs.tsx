@@ -33,6 +33,7 @@ import {
 } from '../../types';
 
 import { formatARS, todayISO } from '../../lib/format';
+import { sanitizarDecimal, parsearDecimal, decimalATexto } from '@/lib/decimal';
 import { esCuitValido } from '@/lib/validarCuit';
 import { TIPOS_COMPROBANTE_ARCA } from '@/modules/impuestos/lib/arcaReferencia';
 import { supabase } from '@/lib/supabase';
@@ -1630,7 +1631,14 @@ interface ImputacionRow {
   numero: number;
   fecha: string;
   saldoPendiente: number;
-  montoImputado: number;
+  // Fase 59 (30/08, a pedido de Carlos): guardado como texto, no number --
+  // mismo criterio que CobroDialog (Ventas, tarea #36): un <input
+  // type="number"> ni acepta la coma decimal del teclado en español ni se
+  // le pueden sacar las flechitas de verdad (el truco CSS para eso rompe
+  // en algunos navegadores). Con type="text" + inputMode="decimal" se
+  // resuelven los dos problemas de una vez -- se parsea a number recién
+  // donde hace falta (sumas, validación, guardado).
+  textoImputado: string;
 }
 
 interface LineaPagoFormRow {
@@ -1648,17 +1656,26 @@ function nuevaLineaPagoRow(monto = 0): LineaPagoFormRow {
 
 export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPendientes, onSave }: PagoDialogProps) {
   const [fecha, setFecha] = useState(todayISO());
-  const [monto, setMonto] = useState(0);
+  const [montoTexto, setMontoTexto] = useState('');
   const [imputaciones, setImputaciones] = useState<ImputacionRow[]>([]);
   const [lineasPago, setLineasPago] = useState<LineaPagoFormRow[]>([nuevaLineaPagoRow()]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Fase 59: si está tildado, "Monto a pagar" deja de ser un campo manual y
+  // pasa a seguir automáticamente la suma de lo que se va tildando/tipeando
+  // en la columna Imputar -- para el flujo "elijo qué facturas pago
+  // completas y el total se arma solo", inverso al flujo de siempre (tipear
+  // un monto y que se reparta automático entre las facturas más viejas).
+  const [seguirTotalImputado, setSeguirTotalImputado] = useState(false);
+
+  const monto = parsearDecimal(montoTexto);
 
   useEffect(() => {
     if (open) {
       setFecha(todayISO());
-      setMonto(0);
+      setMontoTexto('');
       setLineasPago([nuevaLineaPagoRow()]);
       setErrors({});
+      setSeguirTotalImputado(false);
 
       const pendientes = comprobantesPendientes
         .filter((c) => c.estado === 'pendiente' || c.estado === 'pagado_parcial')
@@ -1668,30 +1685,51 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
           numero: c.numero,
           fecha: c.fecha,
           saldoPendiente: c.saldoPendiente,
-          montoImputado: 0,
+          textoImputado: '',
         }));
       setImputaciones(pendientes);
     }
   }, [open, comprobantesPendientes]);
 
-  const distribuirMonto = useCallback((nuevoMonto: number) => {
-    setMonto(nuevoMonto);
-    let restante = nuevoMonto;
+  const distribuirMonto = useCallback((montoTextoNuevo: string) => {
+    setMontoTexto(montoTextoNuevo);
+    let restante = parsearDecimal(montoTextoNuevo);
     setImputaciones((prev) =>
       prev.map((imp) => {
-        if (restante <= 0) return { ...imp, montoImputado: 0 };
+        if (restante <= 0) return { ...imp, textoImputado: '' };
         const asignar = Math.min(restante, imp.saldoPendiente);
         restante -= asignar;
-        return { ...imp, montoImputado: Math.round(asignar * 100) / 100 };
+        return { ...imp, textoImputado: decimalATexto(Math.round(asignar * 100) / 100) };
       }),
     );
     // La primer línea de pago sigue al monto total mientras sea la única --
     // en cuanto el usuario agrega otra línea, cada una se edita por separado.
-    setLineasPago((prev) => (prev.length === 1 ? [{ ...prev[0], monto: nuevoMonto }] : prev));
+    const montoNumero = parsearDecimal(montoTextoNuevo);
+    setLineasPago((prev) => (prev.length === 1 ? [{ ...prev[0], monto: montoNumero }] : prev));
   }, []);
 
-  const updateImputacion = (index: number, value: number) => {
-    setImputaciones((prev) => prev.map((imp, i) => (i === index ? { ...imp, montoImputado: value } : imp)));
+  const updateImputacion = (index: number, textoNuevo: string) => {
+    setImputaciones((prev) => prev.map((imp, i) => (i === index ? { ...imp, textoImputado: textoNuevo } : imp)));
+  };
+
+  // Fase 59: tilde "pagar completo" por fila -- carga el saldo pendiente
+  // tal cual (sirve igual para una factura nueva entera que para el resto
+  // que le queda a una vieja ya cobrada en parte) sin tener que retipear el
+  // número a mano. Se calcula "tildado" comparando contra lo que hay
+  // cargado en vez de guardar un booleano aparte, así destildar (por
+  // ejemplo, para cargar un monto parcial distinto) es tan simple como
+  // editar el campo -- no hay dos fuentes de verdad que puedan desincronizarse.
+  const filaPagadaCompleta = (imp: ImputacionRow) =>
+    imp.saldoPendiente > 0 && Math.abs(parsearDecimal(imp.textoImputado) - imp.saldoPendiente) < 0.01;
+
+  const togglePagarCompleto = (index: number, marcar: boolean) => {
+    setImputaciones((prev) =>
+      prev.map((imp, i) =>
+        i === index
+          ? { ...imp, textoImputado: marcar ? decimalATexto(Math.round(imp.saldoPendiente * 100) / 100) : '' }
+          : imp,
+      ),
+    );
   };
 
   const addLineaPago = () => setLineasPago((prev) => [...prev, nuevaLineaPagoRow()]);
@@ -1700,14 +1738,25 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
     setLineasPago((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   };
 
-  const totalImputado = imputaciones.reduce((sum, imp) => sum + imp.montoImputado, 0);
+  const totalImputado = imputaciones.reduce((sum, imp) => sum + parsearDecimal(imp.textoImputado), 0);
   const totalLineasPago = lineasPago.reduce((sum, l) => sum + (l.monto || 0), 0);
+
+  // Fase 59: con el tilde de cabecera activo, "Monto a pagar" se recalcula
+  // solo cada vez que cambia la imputación -- y también empuja la línea de
+  // pago única, mismo criterio que `distribuirMonto` de arriba.
+  useEffect(() => {
+    if (!seguirTotalImputado) return;
+    const textoNuevo = decimalATexto(Math.round(totalImputado * 100) / 100);
+    setMontoTexto(textoNuevo);
+    setLineasPago((prev) => (prev.length === 1 ? [{ ...prev[0], monto: totalImputado }] : prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seguirTotalImputado, totalImputado]);
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     if (monto <= 0) next.monto = 'El monto debe ser mayor a 0';
     if (totalImputado > monto + 0.01) next.imputaciones = 'La suma de imputaciones excede el monto';
-    if (imputaciones.some((imp) => imp.montoImputado > imp.saldoPendiente + 0.01)) next.imputaciones = 'Una imputacion excede el saldo pendiente';
+    if (imputaciones.some((imp) => parsearDecimal(imp.textoImputado) > imp.saldoPendiente + 0.01)) next.imputaciones = 'Una imputacion excede el saldo pendiente';
     if (Math.abs(totalLineasPago - monto) > 0.01) next.lineasPago = 'La suma de las líneas de pago debe ser igual al monto';
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -1724,8 +1773,8 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
     onSave({
       fecha, monto, medioPago,
       imputaciones: imputaciones
-        .filter((imp) => imp.montoImputado > 0)
-        .map(({ comprobanteId, montoImputado }) => ({ comprobanteId, montoImputado })),
+        .map((imp) => ({ comprobanteId: imp.comprobanteId, montoImputado: parsearDecimal(imp.textoImputado) }))
+        .filter((imp) => imp.montoImputado > 0),
       lineasPago: lineasPago
         .filter((l) => l.monto > 0)
         .map((l) => ({
@@ -1763,8 +1812,30 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
                 <input className={inputClass} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
               <div>
-                <label className={labelClass}>Monto a pagar *</label>
-                <input className={inputClass} type="number" min={0} step={0.01} value={monto} onChange={(e) => distribuirMonto(Number(e.target.value))} />
+                <div className="flex items-center justify-between">
+                  <label className={labelClass}>Monto a pagar *</label>
+                  {/* Fase 59: tilde para que el monto siga a lo imputado en
+                      vez de tipearlo -- útil cuando ya tildaste "completo"
+                      en una o varias facturas de abajo. */}
+                  <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={seguirTotalImputado}
+                      onChange={(e) => setSeguirTotalImputado(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    Igualar al total imputado
+                  </label>
+                </div>
+                <input
+                  className={inputClass}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  disabled={seguirTotalImputado}
+                  value={seguirTotalImputado ? decimalATexto(Math.round(totalImputado * 100) / 100) : montoTexto}
+                  onChange={(e) => distribuirMonto(sanitizarDecimal(e.target.value))}
+                />
                 {errors.monto && <p className="text-xs text-red-600 mt-1">{errors.monto}</p>}
               </div>
             </div>
@@ -1787,6 +1858,11 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
                         <th className="text-left px-3 py-2 font-medium">Fecha</th>
                         <th className="text-right px-3 py-2 font-medium">Saldo pend.</th>
                         <th className="text-right px-3 py-2 font-medium w-32">Imputar</th>
+                        {/* Fase 59: tilde "pagar completo" -- carga el saldo
+                            pendiente de esa fila sin retipearlo (sirve igual
+                            para una factura nueva que para lo que le queda a
+                            una vieja ya cobrada en parte). */}
+                        <th className="text-center px-2 py-2 font-medium w-16">Completo</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1798,9 +1874,20 @@ export function OrdenPagoDialog({ open, onOpenChange, proveedor, comprobantesPen
                           <td className="px-2 py-1.5">
                             <input
                               className="w-full text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900/20"
-                              type="number" min={0} max={imp.saldoPendiente} step={0.01}
-                              value={imp.montoImputado}
-                              onChange={(e) => updateImputacion(idx, Number(e.target.value))}
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="0,00"
+                              value={imp.textoImputado}
+                              onChange={(e) => updateImputacion(idx, sanitizarDecimal(e.target.value))}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-center">
+                            <input
+                              type="checkbox"
+                              title="Pagar completo"
+                              checked={filaPagadaCompleta(imp)}
+                              onChange={(e) => togglePagarCompleto(idx, e.target.checked)}
+                              className="rounded border-gray-300"
                             />
                           </td>
                         </tr>
