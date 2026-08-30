@@ -34,6 +34,17 @@ import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
 // documento de por medio -- así que esta llamada, que n8n ya hace
 // siempre al principio del mensaje, queda como el único lugar que
 // resuelve ese dato.
+//
+// Fase 63 (30/08, a pedido de Carlos) -- "agente conversacional en
+// Ventas": además de chequear el envío reciente, esta función ahora
+// también resuelve si ESE teléfono tiene una conversación en pausa
+// (escenario 2 del diseño -- ver migración 0111). Se devuelve
+// `pausado: true` para que n8n corte el flujo entero y NO conteste nada
+// (el supervisor está atendiendo a mano desde la misma línea) -- salvo
+// que ya se haya mandado un documento nuevo a ese mismo teléfono
+// DESPUÉS de que se pausó, en cuyo caso la pausa quedó obsoleta y se
+// resuelve sola acá mismo (despausado_por = 'documento_nuevo'), sin que
+// el supervisor tenga que escribir ningún comando.
 const VENTANA_DIAS = 30
 
 export default async (req) => {
@@ -85,6 +96,36 @@ export default async (req) => {
       .eq('id', envio.id)
   }
 
+  // Fase 63: ¿este teléfono tiene una conversación en pausa? (ver
+  // comentario arriba). `envio` ya es el envío MÁS RECIENTE a este
+  // teléfono -- si es posterior a cuando se pausó, la pausa quedó
+  // obsoleta sola (el vendedor le mandó algo nuevo) y se cierra acá.
+  let pausado = false
+  const { data: pausaActiva, error: errPausa } = await supabaseAdmin
+    .from('agente_conversaciones_pausadas')
+    .select('id, pausado_en, numero_documento_referencia')
+    .eq('cliente_id', agente.clienteId)
+    .eq('telefono', telefono)
+    .is('despausado_en', null)
+    .maybeSingle()
+
+  if (errPausa) {
+    console.error('agente-documento-check: error consultando pausas', errPausa)
+    // No corta el flujo -- si esto falla, mejor tratar como "no
+    // pausado" (el agente sigue respondiendo) que dejar al cliente sin
+    // respuesta por un problema de infraestructura ajeno a su mensaje.
+  } else if (pausaActiva) {
+    const huboEnvioPosterior = envio && new Date(envio.created_at) > new Date(pausaActiva.pausado_en)
+    if (huboEnvioPosterior) {
+      await supabaseAdmin
+        .from('agente_conversaciones_pausadas')
+        .update({ despausado_en: new Date().toISOString(), despausado_por: 'documento_nuevo' })
+        .eq('id', pausaActiva.id)
+    } else {
+      pausado = true
+    }
+  }
+
   const { data: config, error: errConfig } = await supabaseAdmin
     .from('clientes_agente_config')
     .select('numero_supervisor, evolution_instance_nombre, evolution_instance_apikey')
@@ -99,6 +140,7 @@ export default async (req) => {
   return new Response(
     JSON.stringify({
       ok: true,
+      pausado,
       tieneEnvioReciente: Boolean(envio),
       documento: envio
         ? { tipoDocumento: envio.tipo_documento, numeroDocumento: envio.numero_documento, enviadoAt: envio.created_at }
