@@ -99,6 +99,9 @@ type VentasAction =
   | { type: 'SET_AFIP_COMPROBANTE'; payload: { id: string; afip: DatosAfip } }
   | { type: 'ACTUALIZAR_COBRO_COMPROBANTE'; payload: { comprobanteId: string; montoCobrado: number } }
   | { type: 'ADD_COBRO'; payload: Omit<Cobro, 'numero'> }
+  // Fase 64b: adjuntar/reemplazar a posteriori la foto de un Cobro ya
+  // guardado, desde el listado de Cobranzas (ver Cobranzas.tsx).
+  | { type: 'SET_IMAGEN_COBRO'; payload: { id: string; imagenUrl: string } }
   // Fase 41.2: imputa un Cobro YA EXISTENTE (ej. una seña cobrada al
   // aprobar el presupuesto, antes de que hubiera factura) contra un
   // Comprobante recién emitido. A diferencia de ADD_COBRO, acá NO entra
@@ -425,6 +428,18 @@ function ventasReducer(state: VentasState, action: VentasAction): VentasState {
       );
 
       return { ...state, cobros: [...state.cobros, cobro], nextNumeroCobro: numero + 1, comprobantes, clientes };
+    }
+
+    // Fase 64b (31/08, a pedido de Carlos): adjuntar (o reemplazar) la foto
+    // de un Cobro YA guardado, desde el listado de Cobranzas -- a
+    // diferencia del alta (CobroDialog), acá no hay nada más que cambiar
+    // en el estado, solo el path de la imagen.
+    case 'SET_IMAGEN_COBRO': {
+      const { id, imagenUrl } = action.payload;
+      return {
+        ...state,
+        cobros: state.cobros.map((c) => (c.id === id ? { ...c, imagenUrl } : c)),
+      };
     }
 
     case 'IMPUTAR_COBRO': {
@@ -854,6 +869,15 @@ function syncToSupabase(action: VentasAction, nextState: VentasState, clienteId:
         .update({ monto_cobrado: c.montoCobrado, saldo_pendiente: c.saldoPendiente, estado: c.estado })
         .eq('id', c.id)
         .then(logErr('actualización de cobro'));
+      return;
+    }
+
+    case 'SET_IMAGEN_COBRO': {
+      supabase
+        .from('cobros')
+        .update({ imagen_url: action.payload.imagenUrl })
+        .eq('id', action.payload.id)
+        .then(logErr('adjuntar imagen a cobro'));
       return;
     }
 

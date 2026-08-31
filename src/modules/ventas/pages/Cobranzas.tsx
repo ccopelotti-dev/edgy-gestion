@@ -2,7 +2,7 @@
 // Módulo Ventas — Cobranzas
 // ============================================================
 
-import { useState, useMemo, useEffect, Fragment } from 'react';
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
 import { useVentas, useVentasDispatch, useCobros } from '../data/store';
 import { CobroDialog } from '../components/ventas/dialogs';
 import { MedioPagoBadge, Amount, EmptyState, KpiCard } from '../components/ventas/display';
@@ -11,7 +11,7 @@ import type { Cobro, Cliente, Comprobante, MedioPago, ImputacionCobro } from '..
 import { MEDIO_PAGO_LABEL, generarId } from '../types';
 import {
   Receipt, Search, Plus, ChevronDown, ChevronRight,
-  DollarSign, Clock, TrendingUp, FileText, Download, Loader2, MessageCircle,
+  DollarSign, Clock, TrendingUp, FileText, Download, Loader2, MessageCircle, ImagePlus,
 } from 'lucide-react';
 import { useClienteActual } from '@/hooks/useClienteActual';
 import { supabase } from '@/lib/supabase';
@@ -21,8 +21,10 @@ import { descargarReciboPdf, generarReciboPdfBase64 } from '../lib/pdfComprobant
 // Fase 64 (31/08, a pedido de Carlos): mismo mecanismo de miniatura +
 // lightbox que ya existe en Comprobantes de Compras (Fase 61), pero para
 // la foto (ej. ticket de posnet) que se puede adjuntar a mano al
-// registrar un Cobro acá.
-import { obtenerImagenesComprobantesManuales } from '@/lib/imagenComprobanteAgente';
+// registrar un Cobro acá. Fase 64b: además, subirImagenComprobanteManual
+// se reutiliza para adjuntar la foto a un Cobro YA guardado, directo
+// desde el listado (sin reabrir el formulario de alta).
+import { obtenerImagenesComprobantesManuales, subirImagenComprobanteManual, ACCEPT_IMAGEN_COMPROBANTE } from '@/lib/imagenComprobanteAgente';
 import ImageLightbox from '@/components/ImageLightbox';
 
 export default function Cobranzas() {
@@ -59,6 +61,37 @@ export default function Cobranzas() {
       setImagenesCobros(mapa);
     });
   }, [cobros]);
+
+  // Fase 64b (31/08, a pedido de Carlos): adjuntar la foto DESPUÉS de que
+  // el cobro ya está guardado y en el listado -- un solo input de archivo
+  // compartido por toda la tabla; `cobroParaAdjuntarImagen` recuerda a
+  // qué fila corresponde la próxima selección de archivo.
+  const fileInputCobroImagenRef = useRef<HTMLInputElement>(null);
+  const [cobroParaAdjuntarImagen, setCobroParaAdjuntarImagen] = useState<string | null>(null);
+  const [subiendoImagenCobroId, setSubiendoImagenCobroId] = useState<string | null>(null);
+
+  function handleAdjuntarImagenClick(cobroId: string) {
+    setCobroParaAdjuntarImagen(cobroId);
+    fileInputCobroImagenRef.current?.click();
+  }
+
+  async function handleImagenCobroSeleccionada(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const cobroId = cobroParaAdjuntarImagen;
+    setCobroParaAdjuntarImagen(null);
+    if (!file || !cobroId || !empresaActual?.id) return;
+    setSubiendoImagenCobroId(cobroId);
+    try {
+      const { path, signedUrl } = await subirImagenComprobanteManual(file, empresaActual.id);
+      dispatch({ type: 'SET_IMAGEN_COBRO', payload: { id: cobroId, imagenUrl: path } });
+      setImagenesCobros((prev) => new Map(prev).set(cobroId, signedUrl));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'No se pudo subir la imagen.');
+    } finally {
+      setSubiendoImagenCobroId(null);
+    }
+  }
 
   // ─── KPIs ─────────────────────────────────────────────────
   const hoy = todayISO();
@@ -332,7 +365,7 @@ export default function Cobranzas() {
                       <td className="px-4 py-3 text-right"><Amount value={cobro.monto} /></td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1.5">
-                          {imagenesCobros.has(cobro.id) && (
+                          {imagenesCobros.has(cobro.id) ? (
                             <img
                               src={imagenesCobros.get(cobro.id)}
                               alt="Foto del cobro (ej. ticket de posnet)"
@@ -340,6 +373,15 @@ export default function Cobranzas() {
                               onClick={(e) => { e.stopPropagation(); setImagenAmpliada(imagenesCobros.get(cobro.id) ?? null); }}
                               className="h-8 w-8 shrink-0 cursor-pointer rounded-md object-cover ring-1 ring-gray-200 hover:ring-2 hover:ring-gray-400"
                             />
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleAdjuntarImagenClick(cobro.id); }}
+                              disabled={subiendoImagenCobroId === cobro.id}
+                              title="Adjuntar foto (ej. ticket de posnet)"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                            >
+                              {subiendoImagenCobroId === cobro.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                            </button>
                           )}
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDescargarPdf(cobro); }}
@@ -415,6 +457,14 @@ export default function Cobranzas() {
           onSave={handleSaveCobro}
         />
       )}
+
+      <input
+        ref={fileInputCobroImagenRef}
+        type="file"
+        accept={ACCEPT_IMAGEN_COMPROBANTE}
+        className="hidden"
+        onChange={handleImagenCobroSeleccionada}
+      />
 
       <ImageLightbox src={imagenAmpliada} onClose={() => setImagenAmpliada(null)} />
     </div>
