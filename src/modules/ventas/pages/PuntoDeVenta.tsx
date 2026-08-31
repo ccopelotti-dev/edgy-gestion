@@ -17,6 +17,7 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  UserPlus,
 } from 'lucide-react';
 
 import {
@@ -25,6 +26,7 @@ import {
   useVentasDispatch,
 } from '../data/store';
 import { Amount, EmptyState } from '../components/ventas/display';
+import { ClienteDialog } from '../components/ventas/dialogs';
 import {
   formatARS,
   formatDateTime,
@@ -43,6 +45,7 @@ import {
   type MedioPago,
   type ModoEmision,
   type ComprobanteItem,
+  type Cliente,
 } from '../types';
 import { supabase } from '@/lib/supabase';
 import { useClienteActual } from '@/hooks/useClienteActual';
@@ -116,6 +119,11 @@ export default function PuntoDeVenta() {
 
   const [lineas, setLineas] = useState<LineaVenta[]>([]);
   const [clienteId, setClienteId] = useState<string>(CONSUMIDOR_FINAL_ID);
+  // Fase 65 (31/08, a pedido de Carlos): alta rápida de cliente sin salir de
+  // Factura Rápida. Arranca con Tipo doc. = DNI (no el CUIT de siempre) porque
+  // acá casi siempre se factura a un consumidor final, y ARCA necesita el
+  // documento correcto para identificarlo en la factura electrónica.
+  const [nuevoClienteDialogOpen, setNuevoClienteDialogOpen] = useState(false);
   const [medioPago, setMedioPago] = useState<MedioPago>('efectivo');
   const [modoEmision, setModoEmision] = useState<ModoEmision>(config.modoEmisionDefault);
   // Fase: mismo criterio que ComprobanteDialog -- solo importa si el cliente
@@ -483,6 +491,21 @@ export default function PuntoDeVenta() {
   const necesitaContactoGarantia = lineasConGarantia.length > 0 && clienteId === CONSUMIDOR_FINAL_ID;
   const faltaContactoGarantia =
     necesitaContactoGarantia && (!contactoNombre.trim() || !contactoTelefono.trim());
+
+  // ── Cliente nuevo (Fase 65) ────────────────────────────────
+
+  function handleSaveNuevoCliente(
+    data: Omit<Cliente, 'id' | 'saldoCuentaCorriente' | 'activo' | 'createdAt' | 'updatedAt'>,
+  ) {
+    const now = nowISO();
+    const nuevoId = generarId();
+    dispatch({
+      type: 'ADD_CLIENTE',
+      payload: { ...data, id: nuevoId, saldoCuentaCorriente: 0, activo: true, createdAt: now, updatedAt: now },
+    });
+    setClienteId(nuevoId);
+    setNuevoClienteDialogOpen(false);
+  }
 
   // ── Handlers de líneas ────────────────────────────────────
 
@@ -1085,6 +1108,14 @@ export default function PuntoDeVenta() {
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={() => setNuevoClienteDialogOpen(true)}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+                Agregar cliente
+              </button>
             </div>
 
             {/* Fase: selector de Punto de venta -- mismo criterio que
@@ -1325,6 +1356,16 @@ export default function PuntoDeVenta() {
           </div>
         </div>
       )}
+
+      {/* Fase 65: alta rápida de cliente desde Factura Rápida -- Tipo doc.
+          arranca en DNI (no CUIT) porque acá casi siempre se factura a un
+          consumidor final identificado por su documento. */}
+      <ClienteDialog
+        open={nuevoClienteDialogOpen}
+        onOpenChange={setNuevoClienteDialogOpen}
+        onSave={handleSaveNuevoCliente}
+        tipoDocumentoInicial="dni"
+      />
     </div>
   );
 }

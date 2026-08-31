@@ -79,6 +79,13 @@ interface ClienteDialogProps {
   onOpenChange: (open: boolean) => void;
   cliente?: Cliente;
   onSave: (data: Omit<Cliente, 'id' | 'saldoCuentaCorriente' | 'activo' | 'createdAt' | 'updatedAt'>) => void;
+  // Fase 65 (31/08, a pedido de Carlos): Punto de Venta ("Factura
+  // Rápida") carga sobre todo consumidores finales identificados por
+  // DNI (no CUIT) -- para que ARCA pueda vincular la factura electrónica
+  // a esa persona hace falta el documento correcto ya seleccionado, sin
+  // que el operador tenga que acordarse de cambiarlo en cada venta.
+  // Undefined = comportamiento de siempre (CUIT), ver emptyClienteForm.
+  tipoDocumentoInicial?: TipoDocumento;
 }
 
 interface ClienteForm {
@@ -111,7 +118,7 @@ const emptyClienteForm: ClienteForm = {
   notas: '',
 };
 
-export function ClienteDialog({ open, onOpenChange, cliente, onSave }: ClienteDialogProps) {
+export function ClienteDialog({ open, onOpenChange, cliente, onSave, tipoDocumentoInicial }: ClienteDialogProps) {
   const [form, setForm] = useState<ClienteForm>(emptyClienteForm);
   const [errors, setErrors] = useState<Partial<Record<keyof ClienteForm, string>>>({});
 
@@ -133,11 +140,11 @@ export function ClienteDialog({ open, onOpenChange, cliente, onSave }: ClienteDi
           notas: cliente.notas ?? '',
         });
       } else {
-        setForm(emptyClienteForm);
+        setForm({ ...emptyClienteForm, tipoDocumento: tipoDocumentoInicial ?? emptyClienteForm.tipoDocumento });
       }
       setErrors({});
     }
-  }, [open, cliente]);
+  }, [open, cliente, tipoDocumentoInicial]);
 
   const update = <K extends keyof ClienteForm>(key: K, value: ClienteForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
