@@ -5,7 +5,13 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2, Search, ShieldCheck, Tag, Check, Briefcase } from 'lucide-react';
+import { X, Plus, Trash2, Search, ShieldCheck, Tag, Check, Briefcase, ImagePlus, Loader2, ZoomIn } from 'lucide-react';
+import {
+  subirImagenComprobanteManual,
+  eliminarImagenComprobanteManual,
+  ACCEPT_IMAGEN_COMPROBANTE,
+} from '@/lib/imagenComprobanteAgente';
+import ImageLightbox from '@/components/ImageLightbox';
 
 import type {
   Cliente,
@@ -1386,6 +1392,7 @@ interface CobroDialogProps {
     monto: number;
     medioPago: MedioPago;
     imputaciones: ImputacionCobro[];
+    imagenUrl?: string;
   }) => void;
 }
 
@@ -1416,6 +1423,22 @@ export function CobroDialog({
   const [medioPago, setMedioPago] = useState<MedioPago>('efectivo');
   const [imputaciones, setImputaciones] = useState<ImputacionRow[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const { cliente: clienteTenant } = useClienteActual();
+
+  // Fase 64 (31/08, a pedido de Carlos): foto adjunta a mano al registrar
+  // el cobro (ej. ticket del posnet) -- mismo bucket privado
+  // "comprobantes-gastos" y mismo patrón de subida/lightbox que ya usa
+  // "Nuevo comprobante de compra" (Fase 61) en el módulo Compras.
+  const [imagenPath, setImagenPath] = useState<string | null>(null);
+  const [imagenPreviewUrl, setImagenPreviewUrl] = useState<string | null>(null);
+  const [subiendoImagen, setSubiendoImagen] = useState(false);
+  const [errorImagen, setErrorImagen] = useState('');
+  const [imagenAmpliadaPreview, setImagenAmpliadaPreview] = useState<string | null>(null);
+  const fileInputImagenRef = useRef<HTMLInputElement>(null);
+  // Recuerda si la imagen actual se subió DURANTE esta apertura del modal --
+  // si se cierra sin guardar (o se reemplaza por otra), se borra el archivo
+  // huérfano del bucket (best-effort, ver eliminarImagenComprobanteManual).
+  const imagenSubidaEnEstaSesionRef = useRef<string | null>(null);
 
   const monto = parsearDecimal(montoTexto);
 
@@ -1426,6 +1449,10 @@ export function CobroDialog({
       setMontoTexto('');
       setMedioPago('efectivo');
       setErrors({});
+      setImagenPath(null);
+      setImagenPreviewUrl(null);
+      setErrorImagen('');
+      imagenSubidaEnEstaSesionRef.current = null;
 
       const pendientes = comprobantesCliente
         .filter((c) => c.estado === 'emitido' || c.estado === 'cobrado_parcial')
@@ -1488,6 +1515,40 @@ export function CobroDialog({
     return Object.keys(next).length === 0;
   };
 
+  const handleImagenSeleccionada = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !clienteTenant?.id) return;
+    setErrorImagen('');
+    setSubiendoImagen(true);
+    try {
+      const { path, signedUrl } = await subirImagenComprobanteManual(file, clienteTenant.id);
+      // Si ya había una imagen subida en esta misma sesión del modal (el
+      // usuario reemplazó la foto), se borra la anterior para no dejar
+      // archivos sueltos en el bucket.
+      if (imagenSubidaEnEstaSesionRef.current) {
+        eliminarImagenComprobanteManual(imagenSubidaEnEstaSesionRef.current);
+      }
+      imagenSubidaEnEstaSesionRef.current = path;
+      setImagenPath(path);
+      setImagenPreviewUrl(signedUrl);
+    } catch (err) {
+      setErrorImagen(err instanceof Error ? err.message : 'No se pudo subir la imagen.');
+    } finally {
+      setSubiendoImagen(false);
+    }
+  };
+
+  const handleQuitarImagen = () => {
+    if (imagenSubidaEnEstaSesionRef.current) {
+      eliminarImagenComprobanteManual(imagenSubidaEnEstaSesionRef.current);
+      imagenSubidaEnEstaSesionRef.current = null;
+    }
+    setImagenPath(null);
+    setImagenPreviewUrl(null);
+    setErrorImagen('');
+  };
+
   const handleSave = () => {
     if (!validate()) return;
     onSave({
@@ -1497,12 +1558,30 @@ export function CobroDialog({
       imputaciones: imputaciones
         .map((imp) => ({ comprobanteId: imp.comprobanteId, montoImputado: parsearDecimal(imp.textoImputado) }))
         .filter((imp) => imp.montoImputado > 0),
+      imagenUrl: imagenPath ?? undefined,
     });
+    // La imagen ya quedó vinculada al cobro recién guardado -- se "suelta"
+    // la referencia de limpieza para que handleOpenChange no la borre del
+    // bucket al cerrar el modal.
+    imagenSubidaEnEstaSesionRef.current = null;
     onOpenChange(false);
   };
 
+  /** Si el modal se cierra (Cancelar, X, Escape, click afuera) SIN haber
+   * pasado por handleSave, cualquier imagen recién subida en esta apertura
+   * queda huérfana en el bucket -- se borra (best-effort). Mismo criterio
+   * que NuevoComprobanteDialog en Compras (Fase 61). */
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && imagenSubidaEnEstaSesionRef.current) {
+      eliminarImagenComprobanteManual(imagenSubidaEnEstaSesionRef.current);
+      imagenSubidaEnEstaSesionRef.current = null;
+    }
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={overlayClass} />
         <Dialog.Content className={contentWideClass}>
@@ -1552,6 +1631,59 @@ export function CobroDialog({
                     ),
                   )}
                 </select>
+              </div>
+            </div>
+
+            {/* Fase 64: foto del cobro (ej. ticket de posnet) -- queda
+                visible en el listado con la misma miniatura/lightbox que
+                ya existe para los comprobantes de Compras (Fase 61). */}
+            <div>
+              <label className={labelClass}>Foto del cobro (opcional)</label>
+              <div className="flex items-center gap-3">
+                {imagenPreviewUrl ? (
+                  <div className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-gray-200">
+                    <img src={imagenPreviewUrl} alt="Foto del cobro" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setImagenAmpliadaPreview(imagenPreviewUrl)}
+                      className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100"
+                      title="Ver más grande"
+                    >
+                      <ZoomIn className="h-5 w-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-gray-300 text-gray-300">
+                    <ImagePlus className="h-6 w-6" />
+                  </div>
+                )}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputImagenRef.current?.click()}
+                      disabled={subiendoImagen}
+                      className={`${btnSecondary} flex items-center gap-1.5 text-xs py-1.5 px-3 disabled:opacity-50`}
+                    >
+                      {subiendoImagen ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+                      {imagenPreviewUrl ? 'Reemplazar' : 'Adjuntar foto'}
+                    </button>
+                    {imagenPreviewUrl && (
+                      <button type="button" onClick={handleQuitarImagen} className="text-xs text-gray-400 hover:text-red-600">
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">JPG, PNG o WEBP -- hasta 8 MB.</p>
+                  {errorImagen && <p className="text-xs text-red-600">{errorImagen}</p>}
+                </div>
+                <input
+                  ref={fileInputImagenRef}
+                  type="file"
+                  accept={ACCEPT_IMAGEN_COMPROBANTE}
+                  className="hidden"
+                  onChange={handleImagenSeleccionada}
+                />
               </div>
             </div>
 
@@ -1638,6 +1770,8 @@ export function CobroDialog({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+    <ImageLightbox src={imagenAmpliadaPreview} onClose={() => setImagenAmpliadaPreview(null)} />
+    </>
   );
 }
 

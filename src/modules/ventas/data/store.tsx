@@ -631,6 +631,7 @@ function cobroToRow(c: Cobro, clienteId: string) {
     medio_pago: c.medioPago,
     presupuesto_id: c.presupuestoId ?? null,
     notas: c.notas ?? null,
+    imagen_url: c.imagenUrl ?? null,
   };
 }
 
@@ -1180,6 +1181,7 @@ async function fetchVentasState(): Promise<VentasState> {
     imputaciones: impByCobro.get(r.id) ?? [],
     presupuestoId: r.presupuesto_id ?? undefined,
     notas: r.notas ?? undefined,
+    imagenUrl: r.imagen_url ?? undefined,
     createdAt: r.created_at,
   }));
 

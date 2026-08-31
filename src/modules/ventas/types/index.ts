@@ -414,6 +414,12 @@ export interface Cobro {
    * y se imputa recién ahí (ver IMPUTAR_COBRO en data/store.tsx). */
   presupuestoId?: string;
   notas?: string;
+  /** Fase 64 (31/08, a pedido de Carlos): path en el bucket privado
+   * "comprobantes-gastos" de una foto adjuntada a mano al registrar el
+   * cobro (ej. ticket del posnet) -- mismo criterio que
+   * ComprobanteCompra.imagenUrl (Fase 61). Undefined si no se adjuntó
+   * nada. */
+  imagenUrl?: string;
   createdAt: string;
 }
 

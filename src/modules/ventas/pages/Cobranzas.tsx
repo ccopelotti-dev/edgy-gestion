@@ -18,6 +18,12 @@ import { supabase } from '@/lib/supabase';
 import { armarLinkWhatsapp, normalizarTelefonoArgentina } from '@/lib/whatsapp';
 import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { descargarReciboPdf, generarReciboPdfBase64 } from '../lib/pdfComprobantes';
+// Fase 64 (31/08, a pedido de Carlos): mismo mecanismo de miniatura +
+// lightbox que ya existe en Comprobantes de Compras (Fase 61), pero para
+// la foto (ej. ticket de posnet) que se puede adjuntar a mano al
+// registrar un Cobro acá.
+import { obtenerImagenesComprobantesManuales } from '@/lib/imagenComprobanteAgente';
+import ImageLightbox from '@/components/ImageLightbox';
 
 export default function Cobranzas() {
   const { clientes, comprobantes, cobros, config } = useVentas();
@@ -37,6 +43,22 @@ export default function Cobranzas() {
   // acá faltaba para cualquier cobro, no solo señas.
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
+
+  // Fase 64 (31/08, a pedido de Carlos): miniatura + lightbox de la foto
+  // adjuntada a mano al registrar el cobro (ej. ticket del posnet) --
+  // mismo criterio que Comprobantes.tsx de Compras (Fase 61): cobro.id ->
+  // URL ya firmada, traída una sola vez por cambio en `cobros` (no por
+  // fila) y mezclada en un Map para que el render no distinga origen.
+  const [imagenesCobros, setImagenesCobros] = useState<Map<string, string>>(new Map());
+  const [imagenAmpliada, setImagenAmpliada] = useState<string | null>(null);
+
+  useEffect(() => {
+    const conImagen = cobros.filter((c) => c.imagenUrl);
+    if (conImagen.length === 0) return;
+    obtenerImagenesComprobantesManuales(conImagen).then((mapa) => {
+      setImagenesCobros(mapa);
+    });
+  }, [cobros]);
 
   // ─── KPIs ─────────────────────────────────────────────────
   const hoy = todayISO();
@@ -134,7 +156,7 @@ export default function Cobranzas() {
     }
   }
 
-  function handleSaveCobro(data: { fecha: string; monto: number; medioPago: MedioPago; imputaciones: ImputacionCobro[]; notas?: string }) {
+  function handleSaveCobro(data: { fecha: string; monto: number; medioPago: MedioPago; imputaciones: ImputacionCobro[]; notas?: string; imagenUrl?: string }) {
     const id = generarId();
     dispatch({
       type: 'ADD_COBRO',
@@ -146,6 +168,7 @@ export default function Cobranzas() {
         medioPago: data.medioPago,
         imputaciones: data.imputaciones,
         notas: data.notas,
+        imagenUrl: data.imagenUrl,
         createdAt: nowISO(),
       },
     });
@@ -308,14 +331,25 @@ export default function Cobranzas() {
                       <td className="px-4 py-3"><MedioPagoBadge medio={cobro.medioPago} /></td>
                       <td className="px-4 py-3 text-right"><Amount value={cobro.monto} /></td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDescargarPdf(cobro); }}
-                          disabled={generandoPdf}
-                          title="Descargar recibo"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
-                        >
-                          {generandoPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          {imagenesCobros.has(cobro.id) && (
+                            <img
+                              src={imagenesCobros.get(cobro.id)}
+                              alt="Foto del cobro (ej. ticket de posnet)"
+                              title="Ver foto adjunta (click para ampliar)"
+                              onClick={(e) => { e.stopPropagation(); setImagenAmpliada(imagenesCobros.get(cobro.id) ?? null); }}
+                              className="h-8 w-8 shrink-0 cursor-pointer rounded-md object-cover ring-1 ring-gray-200 hover:ring-2 hover:ring-gray-400"
+                            />
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDescargarPdf(cobro); }}
+                            disabled={generandoPdf}
+                            title="Descargar recibo"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+                          >
+                            {generandoPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                          </button>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <button
@@ -381,6 +415,8 @@ export default function Cobranzas() {
           onSave={handleSaveCobro}
         />
       )}
+
+      <ImageLightbox src={imagenAmpliada} onClose={() => setImagenAmpliada(null)} />
     </div>
   );
 }
