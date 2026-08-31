@@ -523,13 +523,24 @@ export default function Comprobantes() {
                               <CheckCircle2 className="h-3 w-3" /> Stock
                             </span>
                           ) : (
-                            comp.controlRemision === 'no' &&
+                            // Fase 66 (31/08, a pedido de Carlos): antes este ícono solo
+                            // aparecía con Control de Remisión = No -- si el comprobante
+                            // tenía remito pendiente, había que ir a cargar la recepción
+                            // a mano en Productos y Stock. Ahora, con el remito ya en
+                            // la mano (o la foto ya cargada por el agente), este mismo
+                            // ícono confirma la recepción y suma el stock desde acá,
+                            // sin importar Control de Remisión -- ver
+                            // actualizarStockPorCompra, que no distingue ese campo.
                             comp.items.some((i) => i.insumoId || i.productoId) && (
                               <button
                                 onClick={() => handleActualizarStockExistente(comp)}
                                 disabled={actualizandoStockId === comp.id}
                                 className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"
-                                title="Actualizar stock (generar recepción)"
+                                title={
+                                  comp.controlRemision === 'si'
+                                    ? 'Confirmar recepción del remito y actualizar stock'
+                                    : 'Actualizar stock (generar recepción)'
+                                }
                               >
                                 {actualizandoStockId === comp.id ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
