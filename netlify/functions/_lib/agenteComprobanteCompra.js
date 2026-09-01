@@ -266,10 +266,17 @@ export async function intentarCargarComprobante({
 async function marcarPendiente(supabaseAdmin, comprobanteRecibidoId, { pendienteAclaracion = null, notaExtra = null } = {}) {
   const update = { pendiente_aclaracion: pendienteAclaracion }
   if (notaExtra) update.notas = notaExtra
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('comprobantes_recibidos')
     .update(update)
     .eq('id', comprobanteRecibidoId)
+  // Fase 68a -- antes este error se tragaba en silencio (un CHECK
+  // constraint que rechazaba un valor nuevo de pendienteAclaracion podía
+  // dejar el comprobante mudo, sin ninguna pista de por qué). Ahora
+  // queda logueado para poder diagnosticarlo desde Netlify.
+  if (error) {
+    console.error('marcarPendiente: error actualizando comprobantes_recibidos', comprobanteRecibidoId, error)
+  }
 }
 
 export { normalizarFormaPago }
