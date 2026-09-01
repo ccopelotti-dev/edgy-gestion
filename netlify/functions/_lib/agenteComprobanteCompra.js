@@ -100,6 +100,27 @@ export async function intentarCargarComprobante({
     }
   }
 
+  // Fase 68a (fix) -- si el proveedor se resolvió gracias a un CUIT
+  // manual (el admin lo tipeó porque la IA lo leyó mal o no lo vio), hay
+  // que PERSISTIR esa corrección en datos_extraidos ya mismo. Si no se
+  // hace, el próximo llamado a este mismo comprobante (p.ej. cuando el
+  // admin responde la forma de pago) vuelve a leer datos_extraidos tal
+  // cual estaba guardado -- con el CUIT viejo/mal leído -- y repite el
+  // mismo fallo de matcheo, haciendo que pendiente_aclaracion vuelva a
+  // 'cuit' en loop aunque el admin ya lo haya corregido.
+  if (cuitManual && proveedor && cuitOriginalExtraido !== cuit) {
+    const datosCorregidos = { ...datosExtraidos, proveedorCuit: cuit }
+    const { error: fixError } = await supabaseAdmin
+      .from('comprobantes_recibidos')
+      .update({ datos_extraidos: datosCorregidos })
+      .eq('id', comprobanteRecibidoId)
+    if (fixError) {
+      console.error('intentarCargarComprobante: error persistiendo CUIT corregido', fixError)
+    } else {
+      datosExtraidos = datosCorregidos
+    }
+  }
+
   // Sin proveedor identificado: se deja pendiente, no se carga nada. Se
   // marca pendienteAclaracion='cuit' para que el próximo mensaje de
   // TEXTO del admin (ver agente-comprobante-resolver.js) se interprete
