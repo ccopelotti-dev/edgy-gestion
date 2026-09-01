@@ -128,6 +128,233 @@ async function intentarVincularTicketPagoACredito({ supabaseAdmin, clienteId, de
   }
 }
 
+// Fase 68c (extensión, 01/09) -- sintaxis de caption acordada con Carlos
+// para registrar, en un solo mensaje de WhatsApp, un PAGO NUEVO contra el
+// saldo pendiente de una factura YA cargada, más el reintegro esperado de
+// esa tarjeta/promo (ej. "Promo Pampa"): el admin manda la foto del
+// ticket de pago (tarjeta/MP) con el pie de foto:
+//   "factura 123 reintegro 5000"   (reintegro en pesos)
+//   "factura 123 reintegro 10%"    (reintegro como % del monto del ticket)
+// Si el caption no matchea este patrón (o falta alguna de las dos
+// partes), se sigue el camino viejo de Fase 68c: vincular el ticket a un
+// crédito YA existente por coincidencia exacta de monto.
+function parsearMontoArg(s) {
+  let str = String(s || '').trim()
+  if (str.includes(',') && str.includes('.')) {
+    str = str.replace(/\./g, '').replace(',', '.')
+  } else if (str.includes(',')) {
+    str = str.replace(',', '.')
+  } else {
+    const partes = str.split('.')
+    if (partes.length > 2) str = partes.slice(0, -1).join('') + '.' + partes[partes.length - 1]
+  }
+  return Number(str)
+}
+
+function parseCaptionPagoFactura(captionTexto) {
+  const texto = String(captionTexto || '')
+  const matchFactura = texto.match(/factura\s*n?[°ºo]?\.?\s*#?\s*(\d+)/i)
+  const matchReintegro = texto.match(/reintegro\s*(?:de|del)?\s*\$?\s*([\d.,]+)\s*(%)?/i)
+  if (!matchFactura || !matchReintegro) return null
+  const numeroFactura = parseInt(matchFactura[1], 10)
+  const reintegroValor = parsearMontoArg(matchReintegro[1])
+  const reintegroEsPorcentaje = Boolean(matchReintegro[2])
+  if (!Number.isFinite(numeroFactura) || !Number.isFinite(reintegroValor)) return null
+  return { numeroFactura, reintegroValor, reintegroEsPorcentaje }
+}
+
+const TABLAS_PAGOS_POR_DESTINO = {
+  compras: { pagos: 'pagos_compra', imputaciones: 'pago_compra_imputaciones' },
+  hogar: { pagos: 'pagos_hogar', imputaciones: 'pago_hogar_imputaciones' },
+}
+
+// Registra el pago nuevo + el crédito de reintegro esperado. Replica a
+// mano, con supabaseAdmin, la misma cascada que dispara CONFIRMAR_PAGO en
+// src/modules/compras/data/store.tsx (y su espejo en Home Keep):
+// comprobante (monto_pagado/saldo_pendiente/estado, tolerancia $0.01),
+// saldo_cuenta_corriente del proveedor, y el movimiento de egreso en
+// Tesorería (ver src/lib/tesoreriaSync.ts -- no se puede importar ese
+// archivo acá porque usa el cliente de supabase del browser con RLS, así
+// que el movimiento de caja se inserta directo). Mismo criterio
+// conservador de siempre: si la factura no existe, o el ticket supera el
+// saldo pendiente (tolerancia $1 por redondeo), no se carga nada.
+async function intentarRegistrarPagoConReintegro({
+  supabaseAdmin,
+  clienteId,
+  destino,
+  numeroFactura,
+  montoTicket,
+  fechaTicket,
+  reintegroValor,
+  reintegroEsPorcentaje,
+  ticketImagenUrl,
+}) {
+  const tablas = TABLAS_POR_DESTINO[destino] || TABLAS_POR_DESTINO.compras
+  const tablasPago = TABLAS_PAGOS_POR_DESTINO[destino] || TABLAS_PAGOS_POR_DESTINO.compras
+  const modulo = destino === 'hogar' ? 'home_keep' : 'compras'
+
+  if (montoTicket == null || !Number.isFinite(montoTicket) || montoTicket <= 0) {
+    return { creado: false, motivo: 'monto_ticket_invalido' }
+  }
+
+  const { data: comprobante, error: errComprobante } = await supabaseAdmin
+    .from(tablas.comprobantes)
+    .select('id, numero, proveedor_id, total, monto_pagado, saldo_pendiente, estado')
+    .eq('cliente_id', clienteId)
+    .eq('tipo', 'factura')
+    .eq('numero', numeroFactura)
+    .maybeSingle()
+
+  if (errComprobante) {
+    console.error('intentarRegistrarPagoConReintegro: error buscando factura', errComprobante)
+    return { creado: false, motivo: 'error_buscando_factura', error: errComprobante.message }
+  }
+  if (!comprobante) {
+    return { creado: false, motivo: 'factura_no_encontrada', numeroFactura }
+  }
+
+  const TOLERANCIA = 1 // $1 de margen por redondeo (mismo criterio que el resto de Fase 68c)
+  if (montoTicket > Number(comprobante.saldo_pendiente) + TOLERANCIA) {
+    return {
+      creado: false,
+      motivo: 'saldo_insuficiente',
+      numeroFactura,
+      saldoPendiente: Number(comprobante.saldo_pendiente),
+      montoTicket,
+    }
+  }
+
+  const { data: proveedor } = await supabaseAdmin
+    .from(tablas.proveedores)
+    .select('id, nombre, nombre_fantasia, saldo_cuenta_corriente')
+    .eq('id', comprobante.proveedor_id)
+    .maybeSingle()
+
+  const { data: maxPago } = await supabaseAdmin
+    .from(tablasPago.pagos)
+    .select('numero')
+    .eq('cliente_id', clienteId)
+    .order('numero', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const nuevoNumeroPago = numero(maxPago?.numero, 0) + 1
+
+  const fecha = fechaTicket || new Date().toISOString().slice(0, 10)
+  const reintegroMonto = reintegroEsPorcentaje ? montoTicket * (reintegroValor / 100) : reintegroValor
+  const proveedorNombre = proveedor?.nombre_fantasia || proveedor?.nombre || 'Proveedor'
+  const notaTrazabilidad = 'Cargado automáticamente por el agente de WhatsApp (ticket de pago con reintegro, Fase 68c).'
+
+  // 'otro' -- mismo criterio que la UI de Compras: tarjeta/MercadoPago no
+  // son un medioPago propio de LineaPago (ver MedioPagoCompra), quedan
+  // como 'otro' y tesoreriaSync.mapMedioPago los cae a 'efectivo' en Caja.
+  const lineaPago = {
+    id: crypto.randomUUID(),
+    medioPago: 'otro',
+    monto: montoTicket,
+    imagenUrl: ticketImagenUrl || undefined,
+    reintegroConcepto: `Reintegro tarjeta - Factura N.º ${numeroFactura}`,
+    reintegroMonto,
+  }
+
+  const { data: pago, error: errPago } = await supabaseAdmin
+    .from(tablasPago.pagos)
+    .insert([{
+      cliente_id: clienteId,
+      numero: nuevoNumeroPago,
+      proveedor_id: comprobante.proveedor_id,
+      fecha,
+      estado: 'pagada',
+      monto: montoTicket,
+      medio_pago: 'otro',
+      lineas_pago: [lineaPago],
+      fecha_confirmacion: fecha,
+      notas: notaTrazabilidad,
+    }])
+    .select('id, numero')
+    .single()
+
+  if (errPago) {
+    console.error('intentarRegistrarPagoConReintegro: error creando pago', errPago)
+    return { creado: false, motivo: 'error_al_crear_pago', error: errPago.message }
+  }
+
+  const { error: errImputacion } = await supabaseAdmin
+    .from(tablasPago.imputaciones)
+    .insert([{ pago_id: pago.id, comprobante_id: comprobante.id, monto_imputado: montoTicket }])
+  if (errImputacion) {
+    console.error('intentarRegistrarPagoConReintegro: error creando imputación', errImputacion)
+  }
+
+  const nuevoMontoPagado = Number(comprobante.monto_pagado) + montoTicket
+  const nuevoSaldoPendiente = Math.max(0, Number(comprobante.total) - nuevoMontoPagado)
+  let nuevoEstado = comprobante.estado
+  if (comprobante.estado !== 'anulado') {
+    if (nuevoSaldoPendiente <= 0.01) nuevoEstado = 'pagado'
+    else if (nuevoMontoPagado > 0) nuevoEstado = 'pagado_parcial'
+  }
+  const { error: errUpdateComprobante } = await supabaseAdmin
+    .from(tablas.comprobantes)
+    .update({ monto_pagado: nuevoMontoPagado, saldo_pendiente: nuevoSaldoPendiente, estado: nuevoEstado })
+    .eq('id', comprobante.id)
+  if (errUpdateComprobante) {
+    console.error('intentarRegistrarPagoConReintegro: error actualizando comprobante', errUpdateComprobante)
+  }
+
+  if (proveedor) {
+    const { error: errProveedor } = await supabaseAdmin
+      .from(tablas.proveedores)
+      .update({ saldo_cuenta_corriente: Number(proveedor.saldo_cuenta_corriente) - montoTicket })
+      .eq('id', proveedor.id)
+    if (errProveedor) {
+      console.error('intentarRegistrarPagoConReintegro: error actualizando saldo del proveedor', errProveedor)
+    }
+  }
+
+  // Tesorería -- reimplementación server-side de registrarMovimientoTesoreria
+  // (src/lib/tesoreriaSync.ts usa el cliente de supabase del browser, no
+  // sirve en un contexto de Netlify Function con service_role). 'otro'
+  // mapea a 'efectivo' -- no genera espejo bancario, solo caja.
+  const { error: errCaja } = await supabaseAdmin.from('movimientos_caja').insert([{
+    cliente_id: clienteId,
+    fecha,
+    tipo: 'egreso',
+    concepto: `Pago N.º ${pago.numero} — ${proveedorNombre}`,
+    categoria: 'Pago a proveedores',
+    medio_pago: 'efectivo',
+    monto: montoTicket,
+    cuenta_id: null,
+    link_id: crypto.randomUUID(),
+    punto_venta_id: null,
+  }])
+  if (errCaja) {
+    console.error('intentarRegistrarPagoConReintegro: error registrando movimiento de caja', errCaja)
+  }
+
+  // Fase 67 -- crédito esperado (reintegro), a la espera de que el banco lo acredite.
+  const { error: errCredito } = await supabaseAdmin.from('creditos_pendientes').insert([{
+    cliente_id: clienteId,
+    modulo,
+    pago_id: pago.id,
+    proveedor_id: comprobante.proveedor_id,
+    concepto: `Reintegro tarjeta - Factura N.º ${numeroFactura}`,
+    monto_esperado: reintegroMonto,
+  }])
+  if (errCredito) {
+    console.error('intentarRegistrarPagoConReintegro: error creando credito pendiente', errCredito)
+  }
+
+  return {
+    creado: true,
+    pagoId: pago.id,
+    pagoNumero: pago.numero,
+    numeroFactura,
+    montoTicket,
+    saldoPendienteRestante: nuevoSaldoPendiente,
+    proveedorNombre,
+    reintegroMonto,
+  }
+}
+
 // Intenta cargar el comprobante en Compras (o en Home Keep, según
 // `destino`) a partir de lo que se pudo extraer de la imagen. Devuelve
 // siempre un resultado -- nunca lanza por datos incompletos, eso es
@@ -141,6 +368,8 @@ export async function intentarCargarComprobante({
   cuitManual, // Fase 68a -- si viene de la respuesta del admin a la aclaración de CUIT
   esPrueba,
   destino = 'compras', // 'compras' (default) | 'hogar' (Fase 56, Home Keep)
+  captionTexto, // Fase 68c (extensión) -- pie de foto de WhatsApp, ver parseCaptionPagoFactura
+  ticketImagenUrl, // path en el bucket del ticket recién subido (comprobantes_recibidos.imagen_url)
 }) {
   if (!datosExtraidos || typeof datosExtraidos !== 'object') {
     return { creado: false, motivo: 'sin_datos_extraidos' }
@@ -156,6 +385,36 @@ export async function intentarCargarComprobante({
   // partir del número de operación). Se deja marcado en la bandeja para
   // que la Fase 68c lo vincule a un pago existente.
   if (datosExtraidos.tipoDocumento === 'ticket_pago') {
+    const montoTicket = numero(datosExtraidos.montoTicketPago, null)
+    const fechaTicket = datosExtraidos.fechaTicketPago || null
+
+    // Fase 68c (extensión) -- si el admin puso "factura N reintegro M"
+    // en el pie de foto, es un PAGO NUEVO contra esa factura puntual (no
+    // un intento de vincular a un crédito ya existente). Se prueba este
+    // camino primero porque es una instrucción explícita del admin.
+    const captionParseado = parseCaptionPagoFactura(captionTexto)
+    if (captionParseado) {
+      const resultadoPago = await intentarRegistrarPagoConReintegro({
+        supabaseAdmin,
+        clienteId,
+        destino,
+        numeroFactura: captionParseado.numeroFactura,
+        montoTicket,
+        fechaTicket,
+        reintegroValor: captionParseado.reintegroValor,
+        reintegroEsPorcentaje: captionParseado.reintegroEsPorcentaje,
+        ticketImagenUrl,
+      })
+      if (resultadoPago.creado) {
+        return { creado: false, motivo: 'pago_registrado_con_reintegro', ...resultadoPago }
+      }
+      // La instrucción del caption era explícita y no se pudo cumplir
+      // (factura inexistente, saldo insuficiente, error) -- se informa
+      // el motivo puntual en vez de caer silenciosamente al camino viejo,
+      // para que Carlos vea exactamente qué faltó resolver.
+      return { creado: false, motivo: resultadoPago.motivo, ...resultadoPago }
+    }
+
     // Fase 68c -- intentamos vincular el ticket a un crédito pendiente
     // de Fase 67 (ver src/lib/creditos.ts / tabla creditos_pendientes).
     // Mismo criterio conservador que el matcheo de proveedor por CUIT
@@ -166,8 +425,8 @@ export async function intentarCargarComprobante({
       supabaseAdmin,
       clienteId,
       destino,
-      montoTicket: numero(datosExtraidos.montoTicketPago, null),
-      fechaTicket: datosExtraidos.fechaTicketPago || null,
+      montoTicket,
+      fechaTicket,
     })
     if (resultadoVinculo.vinculado) {
       return { creado: false, motivo: 'ticket_pago_vinculado', ...resultadoVinculo }

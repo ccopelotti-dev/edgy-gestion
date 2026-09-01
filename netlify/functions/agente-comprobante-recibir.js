@@ -93,6 +93,11 @@ export default async (req) => {
   // tenant aparte; se dejó de lado por la fricción de manejar un login
   // separado -- ver agenteComprobanteCompra.js.
   const destino = body.destino ? String(body.destino).trim().toLowerCase() : null
+  // Fase 68c (extensión) -- mismo pie de foto que ya se usa para "hogar"
+  // (ver n8n: nodo "Guardar Comprobante {Tenant}"), ahora también se manda
+  // el texto completo del caption para que intentarCargarComprobante
+  // pueda leer una instrucción tipo "factura 123 reintegro 5000".
+  const captionTexto = body.captionTexto ? String(body.captionTexto) : null
 
   if (!telefono || !imagenBase64) {
     return new Response(JSON.stringify({ ok: false, error: 'Falta telefono o imagenBase64' }), { status: 400 })
@@ -200,6 +205,8 @@ export default async (req) => {
       datosExtraidos,
       esPrueba,
       destino: destinoValido || 'compras',
+      captionTexto,
+      ticketImagenUrl: imagenPath,
     })
   }
 
