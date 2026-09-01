@@ -56,10 +56,10 @@ export default async (req) => {
 
   const { data: pendiente, error: pendienteError } = await supabaseAdmin
     .from('comprobantes_recibidos')
-    .select('id, datos_extraidos, es_prueba, destino')
+    .select('id, datos_extraidos, es_prueba, destino, pendiente_aclaracion')
     .eq('cliente_id', agente.clienteId)
     .eq('admin_id', admin.id)
-    .eq('pendiente_aclaracion', 'forma_pago')
+    .in('pendiente_aclaracion', ['forma_pago', 'cuit'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -73,12 +73,44 @@ export default async (req) => {
     return new Response(JSON.stringify({ ok: true, huboPendiente: false }), { status: 200 })
   }
 
+  const tipoAclaracion = pendiente.pendiente_aclaracion
+
+  // Fase 68a -- rama CUIT: el admin responde con el CUIT del proveedor
+  // (11 dígitos, con o sin guiones/puntos) para completar un comprobante
+  // que se había quedado pendiente por "proveedor_no_encontrado".
+  if (tipoAclaracion === 'cuit') {
+    const cuitTexto = texto.replace(/\D/g, '')
+    if (cuitTexto.length !== 11) {
+      // No parece un CUIT -- se le vuelve a preguntar, no se toca nada.
+      return new Response(
+        JSON.stringify({ ok: true, huboPendiente: true, entendido: false, pendienteAclaracion: 'cuit' }),
+        { status: 200 },
+      )
+    }
+
+    const resultado = await intentarCargarComprobante({
+      supabaseAdmin,
+      clienteId: agente.clienteId,
+      comprobanteRecibidoId: pendiente.id,
+      datosExtraidos: pendiente.datos_extraidos,
+      cuitManual: cuitTexto,
+      esPrueba: pendiente.es_prueba,
+      destino: pendiente.destino === 'hogar' ? 'hogar' : 'compras',
+    })
+
+    return new Response(
+      JSON.stringify({ ok: true, huboPendiente: true, entendido: true, pendienteAclaracion: 'cuit', cargaCompras: resultado }),
+      { status: 200 },
+    )
+  }
+
+  // Rama forma de pago (comportamiento original, Fase 54).
   const formaPago = normalizarFormaPago(texto)
   if (!formaPago) {
     // No se entendió la respuesta -- se le vuelve a preguntar, no se
     // toca nada del registro pendiente.
     return new Response(
-      JSON.stringify({ ok: true, huboPendiente: true, entendido: false }),
+      JSON.stringify({ ok: true, huboPendiente: true, entendido: false, pendienteAclaracion: 'forma_pago' }),
       { status: 200 },
     )
   }
@@ -98,7 +130,7 @@ export default async (req) => {
   })
 
   return new Response(
-    JSON.stringify({ ok: true, huboPendiente: true, entendido: true, cargaCompras: resultado }),
+    JSON.stringify({ ok: true, huboPendiente: true, entendido: true, pendienteAclaracion: 'forma_pago', cargaCompras: resultado }),
     { status: 200 },
   )
 }

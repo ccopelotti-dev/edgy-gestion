@@ -69,6 +69,7 @@ export async function intentarCargarComprobante({
   comprobanteRecibidoId,
   datosExtraidos,
   formaPagoRespuesta, // si viene de la respuesta del admin (texto libre)
+  cuitManual, // Fase 68a -- si viene de la respuesta del admin a la aclaración de CUIT
   esPrueba,
   destino = 'compras', // 'compras' (default) | 'hogar' (Fase 56, Home Keep)
 }) {
@@ -81,7 +82,11 @@ export async function intentarCargarComprobante({
 
   const formaPago = normalizarFormaPago(formaPagoRespuesta) || normalizarFormaPago(datosExtraidos.formaPagoDetectada)
 
-  const cuit = soloDigitos(datosExtraidos.proveedorCuit)
+  // Fase 68a -- el CUIT manual (respuesta del admin a la aclaración) pisa
+  // al extraído por la IA: si el admin lo escribe a mano es porque la
+  // extracción falló o matcheó mal.
+  const cuitOriginalExtraido = soloDigitos(datosExtraidos.proveedorCuit)
+  const cuit = soloDigitos(cuitManual) || cuitOriginalExtraido
   let proveedor = null
   if (cuit) {
     const { data: proveedores, error } = await supabaseAdmin
@@ -95,22 +100,24 @@ export async function intentarCargarComprobante({
     }
   }
 
-  // Sin proveedor identificado: se deja pendiente, no se carga nada.
+  // Sin proveedor identificado: se deja pendiente, no se carga nada. Se
+  // marca pendienteAclaracion='cuit' para que el próximo mensaje de
+  // TEXTO del admin (ver agente-comprobante-resolver.js) se interprete
+  // como el CUIT correcto, en vez de perderse.
   if (!proveedor) {
     await marcarPendiente(supabaseAdmin, comprobanteRecibidoId, {
-      motivo: 'proveedor_no_encontrado',
+      pendienteAclaracion: 'cuit',
       notaExtra: cuit
-        ? `El agente extrajo el CUIT ${datosExtraidos.proveedorCuit} pero no matchea ningún proveedor cargado -- completar a mano.`
+        ? `El agente extrajo/recibió el CUIT ${cuit} pero no matchea ningún proveedor cargado -- completar a mano.`
         : 'El agente no pudo leer el CUIT del proveedor en la imagen -- completar a mano.',
     })
-    return { creado: false, motivo: 'proveedor_no_encontrado' }
+    return { creado: false, motivo: 'proveedor_no_encontrado', cuitDetectado: Boolean(cuitOriginalExtraido) }
   }
 
   // Proveedor sí, pero falta la forma de pago: se le pregunta al admin
   // y se deja pendiente hasta que responda.
   if (!formaPago) {
     await marcarPendiente(supabaseAdmin, comprobanteRecibidoId, {
-      motivo: 'forma_pago',
       pendienteAclaracion: 'forma_pago',
     })
     return { creado: false, motivo: 'forma_pago_pendiente', proveedorNombre: proveedor.nombre_fantasia || proveedor.nombre }
