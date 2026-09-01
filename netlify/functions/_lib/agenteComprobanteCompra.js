@@ -59,6 +59,75 @@ const TABLAS_POR_DESTINO = {
   },
 }
 
+// Fase 68c -- cuando el ticket recibido es un comprobante de PAGO (no
+// una factura), tratamos de vincularlo a un crédito pendiente de Fase
+// 67 (creditos_pendientes: reintegros/promos bancarias que Carlos ya
+// carga a mano desde Compras/Home Keep -- ver src/lib/creditos.ts).
+//
+// Mismo criterio conservador que el resto del agente (Fase 54/68a):
+// solo se marca "acreditado" automáticamente si hay UN ÚNICO crédito
+// pendiente, del mismo módulo (compras/home_keep) y cliente, cuyo
+// monto esperado coincide (redondeado al peso) con el monto del
+// ticket. Si hay cero o más de un candidato, no se adivina -- queda
+// pendiente para que Carlos lo vincule a mano desde Tesorería >
+// Créditos y Reintegros.
+async function intentarVincularTicketPagoACredito({ supabaseAdmin, clienteId, destino, montoTicket, fechaTicket }) {
+  const modulo = destino === 'hogar' ? 'home_keep' : 'compras'
+
+  const { data: pendientes, error } = await supabaseAdmin
+    .from('creditos_pendientes')
+    .select('id, proveedor_id, concepto, monto_esperado')
+    .eq('cliente_id', clienteId)
+    .eq('modulo', modulo)
+    .eq('estado', 'pendiente')
+
+  if (error) {
+    console.error('intentarVincularTicketPagoACredito: error consultando creditos_pendientes', error)
+    return { vinculado: false, pendientesCount: null }
+  }
+
+  const lista = pendientes || []
+  if (montoTicket == null || !Number.isFinite(montoTicket)) {
+    return { vinculado: false, pendientesCount: lista.length }
+  }
+
+  const candidatos = lista.filter((c) => Math.round(Number(c.monto_esperado)) === Math.round(montoTicket))
+  if (candidatos.length !== 1) {
+    return { vinculado: false, pendientesCount: lista.length, candidatosPorMonto: candidatos.length }
+  }
+
+  const credito = candidatos[0]
+  const fechaAcreditacion = fechaTicket || new Date().toISOString().slice(0, 10)
+  const { error: updateError } = await supabaseAdmin
+    .from('creditos_pendientes')
+    .update({ estado: 'acreditado', monto_acreditado: montoTicket, fecha_acreditacion: fechaAcreditacion })
+    .eq('id', credito.id)
+
+  if (updateError) {
+    console.error('intentarVincularTicketPagoACredito: error marcando acreditado', updateError)
+    return { vinculado: false, pendientesCount: lista.length }
+  }
+
+  let proveedorNombre = null
+  if (credito.proveedor_id) {
+    const tablas = TABLAS_POR_DESTINO[destino] || TABLAS_POR_DESTINO.compras
+    const { data: proveedor } = await supabaseAdmin
+      .from(tablas.proveedores)
+      .select('nombre, nombre_fantasia')
+      .eq('id', credito.proveedor_id)
+      .maybeSingle()
+    proveedorNombre = proveedor?.nombre_fantasia || proveedor?.nombre || null
+  }
+
+  return {
+    vinculado: true,
+    creditoId: credito.id,
+    concepto: credito.concepto,
+    proveedorNombre,
+    montoAcreditado: montoTicket,
+  }
+}
+
 // Intenta cargar el comprobante en Compras (o en Home Keep, según
 // `destino`) a partir de lo que se pudo extraer de la imagen. Devuelve
 // siempre un resultado -- nunca lanza por datos incompletos, eso es
@@ -87,9 +156,25 @@ export async function intentarCargarComprobante({
   // partir del número de operación). Se deja marcado en la bandeja para
   // que la Fase 68c lo vincule a un pago existente.
   if (datosExtraidos.tipoDocumento === 'ticket_pago') {
+    // Fase 68c -- intentamos vincular el ticket a un crédito pendiente
+    // de Fase 67 (ver src/lib/creditos.ts / tabla creditos_pendientes).
+    // Mismo criterio conservador que el matcheo de proveedor por CUIT
+    // (Fase 54/68a): si no hay UN ÚNICO crédito pendiente cuyo monto
+    // esperado coincida con el monto del ticket, no se adivina --
+    // queda pendiente para vincular a mano desde Tesorería.
+    const resultadoVinculo = await intentarVincularTicketPagoACredito({
+      supabaseAdmin,
+      clienteId,
+      destino,
+      montoTicket: numero(datosExtraidos.montoTicketPago, null),
+      fechaTicket: datosExtraidos.fechaTicketPago || null,
+    })
+    if (resultadoVinculo.vinculado) {
+      return { creado: false, motivo: 'ticket_pago_vinculado', ...resultadoVinculo }
+    }
     // tipo_documento ya quedó guardado en el alta (agente-comprobante-recibir.js);
     // acá solo cortamos el flujo antes de tocar proveedores/comprobantes.
-    return { creado: false, motivo: 'es_ticket_pago' }
+    return { creado: false, motivo: 'es_ticket_pago', ...resultadoVinculo }
   }
 
   const tablas = TABLAS_POR_DESTINO[destino] || TABLAS_POR_DESTINO.compras
