@@ -5,6 +5,7 @@ import {
   Landmark,
   FileCheck,
   CalendarClock,
+  BadgePercent,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -18,6 +19,7 @@ export function TesoreriaLayout() {
     { to: `${base}/bancos`, label: 'Bancos', icon: Landmark, end: false },
     { to: `${base}/cheques`, label: 'Cheques', icon: FileCheck, end: false },
     { to: `${base}/vencimientos`, label: 'Vencimientos', icon: CalendarClock, end: false },
+    { to: `${base}/creditos`, label: 'Créditos y Reintegros', icon: BadgePercent, end: false },
   ]
 
   return (

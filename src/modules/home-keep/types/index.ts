@@ -150,6 +150,14 @@ export interface LineaPago {
   chequeFechaPago?: string;
   /** Id del Cheque ya creado en Tesorería -- se completa al confirmar. */
   chequeId?: string;
+  /** Fase 67 (01/09): foto del ticket/comprobante de ESTA línea de pago
+   * en particular -- mismo criterio que en Compras (ver
+   * modules/compras/types/index.ts y src/lib/creditos.ts). */
+  imagenUrl?: string;
+  /** Si esta línea generó un reintegro/crédito esperado (ej. Promo
+   * Pampa) -- borrador de formulario, no se persiste en la línea. */
+  reintegroConcepto?: string;
+  reintegroMonto?: number;
 }
 
 export interface Pago {

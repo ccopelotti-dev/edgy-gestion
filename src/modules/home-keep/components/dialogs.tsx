@@ -18,7 +18,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, Plus, Trash2 } from 'lucide-react';
+import { X, Plus, Trash2, ImagePlus, Loader2 } from 'lucide-react';
 
 import type {
   Proveedor,
@@ -44,6 +44,13 @@ import {
 import { formatARS, todayISO } from '../lib/format';
 import { esCuitValido } from '@/lib/validarCuit';
 import { UNIDADES, type UnidadMedida } from '@/modules/productos-stock/types';
+import {
+  subirImagenComprobanteManual,
+  eliminarImagenComprobanteManual,
+  firmarUrlsDeTickets,
+  ACCEPT_IMAGEN_COMPROBANTE,
+  TAMANIO_MAXIMO_IMAGEN_COMPROBANTE,
+} from '@/lib/imagenComprobanteAgente';
 
 // ─── Shared styles ───────────────────────────────────────────
 
@@ -1039,11 +1046,18 @@ interface ConfirmarPagoDialogProps {
   proveedorNombre?: string;
   cuentas: CuentaBancariaOpcionDialog[];
   onConfirm: (data: { fecha: string; lineasPago: LineaPago[] }) => void;
+  /** Fase 67 (01/09): necesario para subir el ticket de pago al bucket
+   * privado (path {clienteId}/manual-...) -- ver src/lib/imagenComprobanteAgente.ts. */
+  clienteId?: string;
 }
 
-interface LineaPagoConfirmRow extends LineaPago {}
+interface LineaPagoConfirmRow extends LineaPago {
+  subiendoTicket?: boolean;
+  ticketPreviewUrl?: string;
+  mostrarReintegro?: boolean;
+}
 
-export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre, cuentas, onConfirm }: ConfirmarPagoDialogProps) {
+export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre, cuentas, onConfirm, clienteId }: ConfirmarPagoDialogProps) {
   const [fecha, setFecha] = useState(todayISO());
   const [lineas, setLineas] = useState<LineaPagoConfirmRow[]>([]);
   const [error, setError] = useState('');
@@ -1051,13 +1065,43 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
   useEffect(() => {
     if (open && pago) {
       setFecha(todayISO());
-      setLineas(pago.lineasPago.map((l) => ({ ...l, cuentaBancariaId: l.cuentaBancariaId ?? cuentas[0]?.id })));
+      const filas = pago.lineasPago.map((l) => ({
+        ...l,
+        cuentaBancariaId: l.cuentaBancariaId ?? cuentas[0]?.id,
+        mostrarReintegro: Boolean(l.reintegroMonto),
+      }));
+      setLineas(filas);
       setError('');
+
+      const paths = filas.map((l) => l.imagenUrl).filter((p): p is string => Boolean(p));
+      if (paths.length > 0) {
+        firmarUrlsDeTickets(paths).then((mapa) => {
+          setLineas((prev) => prev.map((l) => (l.imagenUrl ? { ...l, ticketPreviewUrl: mapa.get(l.imagenUrl) } : l)));
+        });
+      }
     }
   }, [open, pago, cuentas]);
 
-  const updateLinea = (index: number, field: keyof LineaPago, value: string) => {
+  const updateLinea = (index: number, field: keyof LineaPagoConfirmRow, value: string | number | boolean | undefined) => {
     setLineas((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+  };
+
+  const handleAdjuntarTicket = async (index: number, file: File | undefined) => {
+    if (!file || !clienteId) return;
+    updateLinea(index, 'subiendoTicket', true);
+    try {
+      const { path, signedUrl } = await subirImagenComprobanteManual(file, clienteId);
+      setLineas((prev) => prev.map((l, i) => (i === index ? { ...l, imagenUrl: path, ticketPreviewUrl: signedUrl, subiendoTicket: false } : l)));
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo subir el ticket.');
+      updateLinea(index, 'subiendoTicket', false);
+    }
+  };
+
+  const handleQuitarTicket = (index: number) => {
+    const path = lineas[index]?.imagenUrl;
+    if (path) eliminarImagenComprobanteManual(path);
+    setLineas((prev) => prev.map((l, i) => (i === index ? { ...l, imagenUrl: undefined, ticketPreviewUrl: undefined } : l)));
   };
 
   const handleConfirm = () => {
@@ -1069,7 +1113,12 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
 
     onConfirm({
       fecha,
-      lineasPago: lineas.map((l) => (l.medioPago === 'cheque' ? { ...l, chequeId: l.chequeId ?? generarId() } : l)),
+      lineasPago: lineas.map(({ subiendoTicket, ticketPreviewUrl, mostrarReintegro, ...l }) => ({
+        ...l,
+        chequeId: l.medioPago === 'cheque' ? (l.chequeId ?? generarId()) : l.chequeId,
+        reintegroMonto: mostrarReintegro && l.reintegroMonto ? l.reintegroMonto : undefined,
+        reintegroConcepto: mostrarReintegro && l.reintegroMonto ? l.reintegroConcepto : undefined,
+      })),
     });
     onOpenChange(false);
   };
@@ -1155,6 +1204,63 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
                       </div>
                     </div>
                   )}
+
+                  <div className="pt-1 space-y-2">
+                    {linea.ticketPreviewUrl ? (
+                      <div className="flex items-center gap-2">
+                        <a href={linea.ticketPreviewUrl} target="_blank" rel="noreferrer">
+                          <img src={linea.ticketPreviewUrl} alt="Ticket de pago" className="w-12 h-12 object-cover rounded border border-gray-200" />
+                        </a>
+                        <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => handleQuitarTicket(idx)}>
+                          Quitar ticket
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 cursor-pointer">
+                        {linea.subiendoTicket ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
+                        {linea.subiendoTicket ? 'Subiendo...' : 'Adjuntar ticket'}
+                        <input
+                          type="file"
+                          accept={ACCEPT_IMAGEN_COMPROBANTE}
+                          className="hidden"
+                          disabled={!clienteId || linea.subiendoTicket}
+                          onChange={(e) => handleAdjuntarTicket(idx, e.target.files?.[0])}
+                        />
+                      </label>
+                    )}
+
+                    <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(linea.mostrarReintegro)}
+                        onChange={(e) => updateLinea(idx, 'mostrarReintegro', e.target.checked)}
+                      />
+                      Esta línea genera un reintegro/crédito esperado (ej. promo bancaria)
+                    </label>
+
+                    {linea.mostrarReintegro && (
+                      <div className="grid grid-cols-2 gap-2 pl-5">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Concepto</label>
+                          <input
+                            className={inputClass}
+                            placeholder="Ej. Promo Pampa"
+                            value={linea.reintegroConcepto ?? ''}
+                            onChange={(e) => updateLinea(idx, 'reintegroConcepto', e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Monto esperado</label>
+                          <input
+                            className={inputClass}
+                            type="number"
+                            value={linea.reintegroMonto ?? ''}
+                            onChange={(e) => updateLinea(idx, 'reintegroMonto', Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

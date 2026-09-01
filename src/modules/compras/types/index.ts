@@ -359,6 +359,20 @@ export interface LineaPago {
   chequeFechaPago?: string;
   /** Id del Cheque ya creado en Tesorería -- se completa al confirmar. */
   chequeId?: string;
+  /** Fase 67 (01/09): foto del ticket/comprobante de ESTA línea de pago
+   * en particular (ej. cupón de tarjeta, comprobante de MercadoPago) --
+   * path en el bucket privado "comprobantes-gastos", mismo criterio que
+   * `ComprobanteCompra.imagenUrl`. Útil cuando un pago se hizo en varias
+   * partes (efectivo + 2 tarjetas, por ej.) y cada una tiene su propio
+   * papelito. */
+  imagenUrl?: string;
+  /** Fase 67: si esta línea generó un reintegro/crédito esperado (ej.
+   * Promo Pampa), estos dos campos alcanzan para crear la fila en
+   * `creditos_pendientes` (ver src/lib/creditos.ts) al guardar el pago
+   * -- no se persisten en la línea en sí, son solo el borrador del
+   * formulario mientras se arma la Orden de Pago. */
+  reintegroConcepto?: string;
+  reintegroMonto?: number;
 }
 
 export interface PagoCompra {

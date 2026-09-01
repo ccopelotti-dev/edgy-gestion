@@ -6,6 +6,7 @@ import { Caja } from './pages/Caja'
 import { Bancos } from './pages/Bancos'
 import { Cheques } from './pages/Cheques'
 import { Vencimientos } from './pages/Vencimientos'
+import { CreditosReintegros } from './pages/CreditosReintegros'
 
 export default function TesoreriaModule() {
   return (
@@ -17,6 +18,7 @@ export default function TesoreriaModule() {
           <Route path="bancos" element={<Bancos />} />
           <Route path="cheques" element={<Cheques />} />
           <Route path="vencimientos" element={<Vencimientos />} />
+          <Route path="creditos" element={<CreditosReintegros />} />
         </Route>
       </Routes>
     </TreasuryProvider>

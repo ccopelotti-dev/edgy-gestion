@@ -159,3 +159,32 @@ export async function eliminarImagenComprobanteManual(path: string): Promise<voi
     // Best-effort.
   }
 }
+
+/**
+ * Fase 67 (01/09): firma en batch una lista suelta de paths del mismo
+ * bucket -- pensado para los tickets de pago adjuntos a cada
+ * LineaPago (Compras y Home Keep), que no tienen una tabla propia
+ * como `comprobantes_compra` para reusar `firmarUrlsPorComprobante`
+ * (viven adentro del jsonb `lineas_pago`). Devuelve un mapa
+ * path -> URL firmada, ignorando silenciosamente los paths que no se
+ * pudieron firmar.
+ */
+export async function firmarUrlsDeTickets(paths: string[]): Promise<Map<string, string>> {
+  const mapa = new Map<string, string>();
+  const unicos = Array.from(new Set(paths.filter(Boolean)));
+  if (unicos.length === 0) return mapa;
+
+  const { data: firmadas, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrls(unicos, VIGENCIA_URL_SEGUNDOS);
+
+  if (error || !firmadas) {
+    console.error('firmarUrlsDeTickets: error firmando URLs', error);
+    return mapa;
+  }
+
+  for (const f of firmadas) {
+    if (f.signedUrl) mapa.set(f.path ?? '', f.signedUrl);
+  }
+  return mapa;
+}

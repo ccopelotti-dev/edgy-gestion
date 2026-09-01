@@ -41,6 +41,7 @@ import { useClienteActual } from '@/hooks/useClienteActual';
 import {
   subirImagenComprobanteManual,
   eliminarImagenComprobanteManual,
+  firmarUrlsDeTickets,
   ACCEPT_IMAGEN_COMPROBANTE,
   TAMANIO_MAXIMO_IMAGEN_COMPROBANTE,
 } from '@/lib/imagenComprobanteAgente';
@@ -2242,13 +2243,28 @@ interface ConfirmarPagoDialogProps {
   onOpenChange: (open: boolean) => void;
   pago?: PagoCompra;
   proveedorNombre?: string;
+  /** Fase 67: necesario para subir el ticket al bucket privado (el path
+   * de Storage exige el cliente como primer segmento de la carpeta). */
+  clienteId?: string;
   cuentas: CuentaBancariaOpcionDialog[];
   onConfirm: (data: { fecha: string; lineasPago: LineaPago[] }) => void;
 }
 
-interface LineaPagoConfirmRow extends LineaPago {}
+interface LineaPagoConfirmRow extends LineaPago {
+  /** Fase 67: true mientras se sube la foto del ticket -- deshabilita el
+   * input para no disparar dos subidas en paralelo sobre la misma línea. */
+  subiendoTicket?: boolean;
+  /** Fase 67: URL YA FIRMADA para previsualizar el ticket recién subido
+   * (o el que ya tenía la línea al reabrir el diálogo) -- separada de
+   * `imagenUrl`, que guarda el PATH (lo que se persiste). */
+  ticketPreviewUrl?: string;
+  /** Fase 67: tilde para mostrar los campos de reintegro esperado --
+   * borrador de UI, no viaja al guardar (lo que importa es si
+   * `reintegroMonto` quedó > 0). */
+  mostrarReintegro?: boolean;
+}
 
-export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre, cuentas, onConfirm }: ConfirmarPagoDialogProps) {
+export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre, clienteId, cuentas, onConfirm }: ConfirmarPagoDialogProps) {
   const [fecha, setFecha] = useState(todayISO());
   const [lineas, setLineas] = useState<LineaPagoConfirmRow[]>([]);
   const [error, setError] = useState('');
@@ -2256,13 +2272,42 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
   useEffect(() => {
     if (open && pago) {
       setFecha(todayISO());
-      setLineas(pago.lineasPago.map((l) => ({ ...l, cuentaBancariaId: l.cuentaBancariaId ?? cuentas[0]?.id })));
+      const iniciales = pago.lineasPago.map((l) => ({ ...l, cuentaBancariaId: l.cuentaBancariaId ?? cuentas[0]?.id, mostrarReintegro: Boolean(l.reintegroMonto) }));
+      setLineas(iniciales);
       setError('');
+      // Si alguna línea ya traía un ticket adjuntado (ej. se abrió, se
+      // cerró sin confirmar, se reabre), firmamos su URL para la miniatura.
+      const paths = iniciales.map((l) => l.imagenUrl).filter((p): p is string => Boolean(p));
+      if (paths.length) {
+        firmarUrlsDeTickets(paths).then((mapa) => {
+          setLineas((prev) => prev.map((l) => (l.imagenUrl ? { ...l, ticketPreviewUrl: mapa.get(l.imagenUrl) } : l)));
+        });
+      }
     }
   }, [open, pago, cuentas]);
 
-  const updateLinea = (index: number, field: keyof LineaPago, value: string) => {
+  const updateLinea = (index: number, field: keyof LineaPagoConfirmRow, value: string | number | boolean | undefined) => {
     setLineas((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+  };
+
+  const handleAdjuntarTicket = async (index: number, file: File | undefined) => {
+    if (!file || !clienteId) return;
+    updateLinea(index, 'subiendoTicket', true);
+    try {
+      const { path, signedUrl } = await subirImagenComprobanteManual(file, clienteId);
+      setLineas((prev) =>
+        prev.map((l, i) => (i === index ? { ...l, imagenUrl: path, ticketPreviewUrl: signedUrl, subiendoTicket: false } : l)),
+      );
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo subir el ticket.');
+      updateLinea(index, 'subiendoTicket', false);
+    }
+  };
+
+  const handleQuitarTicket = (index: number) => {
+    const path = lineas[index]?.imagenUrl;
+    if (path) eliminarImagenComprobanteManual(path);
+    setLineas((prev) => prev.map((l, i) => (i === index ? { ...l, imagenUrl: undefined, ticketPreviewUrl: undefined } : l)));
   };
 
   const handleConfirm = () => {
@@ -2274,7 +2319,16 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
 
     onConfirm({
       fecha,
-      lineasPago: lineas.map((l) => (l.medioPago === 'cheque' ? { ...l, chequeId: l.chequeId ?? generarId() } : l)),
+      // Se sacan los campos que son solo borrador de UI (subiendoTicket,
+      // ticketPreviewUrl, mostrarReintegro) -- lo que persiste es
+      // imagenUrl (el path) y reintegroConcepto/reintegroMonto si el
+      // usuario cargó algo, ver LineaPago en types/index.ts.
+      lineasPago: lineas.map(({ subiendoTicket, ticketPreviewUrl, mostrarReintegro, ...l }) => ({
+        ...l,
+        chequeId: l.medioPago === 'cheque' ? (l.chequeId ?? generarId()) : l.chequeId,
+        reintegroMonto: mostrarReintegro && l.reintegroMonto ? l.reintegroMonto : undefined,
+        reintegroConcepto: mostrarReintegro && l.reintegroMonto ? l.reintegroConcepto : undefined,
+      })),
     });
     onOpenChange(false);
   };
@@ -2360,6 +2414,71 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
                       </div>
                     </div>
                   )}
+
+                  {/* Fase 67 (01/09, a pedido de Carlos): ticket del
+                      pago (cupón de tarjeta, comprobante de MercadoPago,
+                      etc.) + si esa línea generó un reintegro/crédito
+                      esperado (ej. Promo Pampa) -- ver src/lib/creditos.ts.
+                      No toca el monto de la línea ni el total del pago:
+                      el reintegro es plata que el banco te devuelve
+                      DESPUÉS, aparte. */}
+                  <div className="pt-2 border-t border-gray-100 space-y-2">
+                    <div className="flex items-center gap-2">
+                      {linea.ticketPreviewUrl ? (
+                        <div className="flex items-center gap-2">
+                          <a href={linea.ticketPreviewUrl} target="_blank" rel="noreferrer">
+                            <img src={linea.ticketPreviewUrl} alt="Ticket" className="h-10 w-10 rounded border border-gray-200 object-cover" />
+                          </a>
+                          <button type="button" onClick={() => handleQuitarTicket(idx)} className="text-xs text-gray-400 hover:text-red-600">
+                            Quitar ticket
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 cursor-pointer">
+                          {linea.subiendoTicket ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <ImagePlus className="w-3.5 h-3.5" />
+                          )}
+                          {linea.subiendoTicket ? 'Subiendo...' : 'Adjuntar ticket'}
+                          <input
+                            type="file"
+                            accept={ACCEPT_IMAGEN_COMPROBANTE}
+                            className="hidden"
+                            disabled={linea.subiendoTicket}
+                            onChange={(e) => handleAdjuntarTicket(idx, e.target.files?.[0])}
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(linea.mostrarReintegro)}
+                        onChange={(e) => updateLinea(idx, 'mostrarReintegro', e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      Esta línea genera un reintegro/crédito esperado (ej. promo bancaria)
+                    </label>
+                    {linea.mostrarReintegro && (
+                      <div className="grid grid-cols-3 gap-2 pl-1">
+                        <input
+                          className={`${inputClass} text-xs col-span-2`}
+                          placeholder="Concepto (ej. Promo Pampa 25%, tope $25.000)"
+                          value={linea.reintegroConcepto ?? ''}
+                          onChange={(e) => updateLinea(idx, 'reintegroConcepto', e.target.value)}
+                        />
+                        <input
+                          className={`${inputClass} text-xs`}
+                          type="number" min={0} step={0.01}
+                          placeholder="Monto esperado"
+                          value={linea.reintegroMonto ?? ''}
+                          onChange={(e) => updateLinea(idx, 'reintegroMonto', Number(e.target.value))}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

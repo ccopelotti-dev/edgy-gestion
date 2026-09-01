@@ -39,6 +39,7 @@ import { descargarComprobantePagoPdf, generarComprobantePagoPdfBase64 } from '..
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { listarCuentasBancarias } from '@/lib/tesoreriaSync';
+import { crearCreditoPendiente } from '@/lib/creditos';
 import { formatDate, formatARS, nowISO } from '../lib/format';
 import type { EstadoPago, Pago } from '../types';
 import { generarId } from '../types';
@@ -132,6 +133,21 @@ export default function Pagos() {
       type: 'CONFIRMAR_PAGO',
       payload: { id: confirmarPagoId, fecha: data.fecha, lineasPago: data.lineasPago },
     });
+    if (empresaActual) {
+      const proveedorId = pagos.find((p) => p.id === confirmarPagoId)?.proveedorId;
+      for (const linea of data.lineasPago) {
+        if (linea.reintegroMonto && linea.reintegroMonto > 0) {
+          crearCreditoPendiente({
+            clienteId: empresaActual.id,
+            modulo: 'home_keep',
+            pagoId: confirmarPagoId,
+            proveedorId,
+            concepto: linea.reintegroConcepto?.trim() || 'Reintegro / crédito esperado',
+            montoEsperado: linea.reintegroMonto,
+          });
+        }
+      }
+    }
     setConfirmarPagoId(null);
   };
 
@@ -380,6 +396,7 @@ export default function Pagos() {
         proveedorNombre={pagoAConfirmar ? nombreProveedor(pagoAConfirmar.proveedorId) : undefined}
         cuentas={cuentas}
         onConfirm={handleConfirmarPago}
+        clienteId={empresaActual?.id}
       />
     </div>
   );

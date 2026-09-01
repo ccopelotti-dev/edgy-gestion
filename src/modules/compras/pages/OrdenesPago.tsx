@@ -37,6 +37,7 @@ import { descargarComprobantePagoPdf, generarComprobantePagoPdfBase64 } from '..
 import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { listarCuentasBancarias } from '@/lib/tesoreriaSync';
+import { crearCreditoPendiente } from '@/lib/creditos';
 import { formatDate, formatARS, nowISO } from '../lib/format';
 import type { EstadoPagoCompra, PagoCompra } from '../types';
 import { generarId } from '../types';
@@ -133,6 +134,25 @@ export default function OrdenesPago() {
       type: 'CONFIRMAR_PAGO',
       payload: { id: confirmarPagoId, fecha: data.fecha, lineasPago: data.lineasPago },
     });
+    // Fase 67 (01/09): si alguna línea quedó marcada con un reintegro
+    // esperado (ej. Promo Pampa), se registra en creditos_pendientes --
+    // ver src/lib/creditos.ts. No afecta el pago en sí (fire-and-forget,
+    // mismo criterio que el resto de la sincronización con Supabase).
+    if (empresaActual) {
+      const proveedorId = pagos.find((p) => p.id === confirmarPagoId)?.proveedorId;
+      for (const linea of data.lineasPago) {
+        if (linea.reintegroMonto && linea.reintegroMonto > 0) {
+          crearCreditoPendiente({
+            clienteId: empresaActual.id,
+            modulo: 'compras',
+            pagoId: confirmarPagoId,
+            proveedorId,
+            concepto: linea.reintegroConcepto?.trim() || 'Reintegro / crédito esperado',
+            montoEsperado: linea.reintegroMonto,
+          });
+        }
+      }
+    }
     setConfirmarPagoId(null);
   };
 
@@ -381,6 +401,7 @@ export default function OrdenesPago() {
         onOpenChange={(v) => { if (!v) setConfirmarPagoId(null); }}
         pago={pagoAConfirmar}
         proveedorNombre={pagoAConfirmar ? nombreProveedor(pagoAConfirmar.proveedorId) : undefined}
+        clienteId={empresaActual?.id}
         cuentas={cuentas}
         onConfirm={handleConfirmarPago}
       />
