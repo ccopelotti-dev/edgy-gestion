@@ -148,6 +148,17 @@ export default async (req) => {
   // responde la forma de pago) sepa a qué tablas seguir apuntando.
   const destinoValido = destino === 'hogar' ? 'hogar' : null
 
+  // Fase 68b -- la IA de visión ya viene clasificando la imagen (ver
+  // prompt de "Extraer Datos Comprobante {Tenant}" en n8n, campo
+  // tipoDocumento: 'factura' | 'ticket_pago' | 'otro'). Se persiste acá
+  // mismo, en el alta, para que quede visible en la bandeja aunque el
+  // intento de carga automática (más abajo) todavía no haya corrido o
+  // haya fallado por otro motivo.
+  const TIPOS_DOCUMENTO_VALIDOS = ['factura', 'ticket_pago', 'otro']
+  const tipoDocumentoDetectado = TIPOS_DOCUMENTO_VALIDOS.includes(datosExtraidos?.tipoDocumento)
+    ? datosExtraidos.tipoDocumento
+    : null
+
   const { data: comprobante, error: insertError } = await supabaseAdmin
     .from('comprobantes_recibidos')
     .insert([{
@@ -156,6 +167,7 @@ export default async (req) => {
       numero_whatsapp_remitente: telefono,
       admin_id: admin?.id ?? null,
       tipo,
+      tipo_documento: tipoDocumentoDetectado,
       imagen_url: imagenPath,
       datos_extraidos: datosExtraidos,
       estado: autorizado ? 'pendiente_revision' : 'rechazado_no_autorizado',

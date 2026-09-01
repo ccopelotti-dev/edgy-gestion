@@ -77,6 +77,21 @@ export async function intentarCargarComprobante({
     return { creado: false, motivo: 'sin_datos_extraidos' }
   }
 
+  // Fase 68b -- la IA de visión ahora clasifica la imagen ANTES de que
+  // lleguemos acá (ver prompt de "Extraer Datos Comprobante {Tenant}" en
+  // n8n, campo tipoDocumento). Si es un ticket de pago (transferencia,
+  // Mercado Pago, etc.) en vez de una factura de un proveedor, NUNCA hay
+  // que intentar cargarlo como comprobante de compra -- eso fue
+  // justamente el bug del 01/09 (un ticket de pago QR de MP se cargó
+  // como si fuera una factura nueva, con un "proveedor" inventado a
+  // partir del número de operación). Se deja marcado en la bandeja para
+  // que la Fase 68c lo vincule a un pago existente.
+  if (datosExtraidos.tipoDocumento === 'ticket_pago') {
+    // tipo_documento ya quedó guardado en el alta (agente-comprobante-recibir.js);
+    // acá solo cortamos el flujo antes de tocar proveedores/comprobantes.
+    return { creado: false, motivo: 'es_ticket_pago' }
+  }
+
   const tablas = TABLAS_POR_DESTINO[destino] || TABLAS_POR_DESTINO.compras
   const esHogar = destino === 'hogar'
 
