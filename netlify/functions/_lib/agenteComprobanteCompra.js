@@ -154,12 +154,27 @@ function parsearMontoArg(s) {
 function parseCaptionPagoFactura(captionTexto) {
   const texto = String(captionTexto || '')
   const matchFactura = texto.match(/factura\s*n?[°ºo]?\.?\s*#?\s*(\d+)/i)
-  const matchReintegro = texto.match(/reintegro\s*(?:de|del)?\s*\$?\s*([\d.,]+)\s*(%)?/i)
-  if (!matchFactura || !matchReintegro) return null
+  if (!matchFactura) return null
   const numeroFactura = parseInt(matchFactura[1], 10)
-  const reintegroValor = parsearMontoArg(matchReintegro[1])
-  const reintegroEsPorcentaje = Boolean(matchReintegro[2])
-  if (!Number.isFinite(numeroFactura) || !Number.isFinite(reintegroValor)) return null
+  if (!Number.isFinite(numeroFactura)) return null
+
+  // El reintegro es OPCIONAL -- un pago sin promo/reintegro asociado
+  // (ej. la parte de Mercado Pago de una compra mixta) también se puede
+  // registrar solo con "factura N" en el caption. Si "reintegro" está
+  // pero el valor no es un número real (ej. alguien puso "reintegro x"
+  // como placeholder sin completar), se ignora el reintegro en vez de
+  // descartar todo el caption -- mejor cargar el pago sin reintegro que
+  // no cargarlo por un dato incompleto que no afecta el monto del pago.
+  const matchReintegro = texto.match(/reintegro\s*(?:de|del)?\s*\$?\s*([\d.,]+)\s*(%)?/i)
+  let reintegroValor = 0
+  let reintegroEsPorcentaje = false
+  if (matchReintegro) {
+    const valor = parsearMontoArg(matchReintegro[1])
+    if (Number.isFinite(valor)) {
+      reintegroValor = valor
+      reintegroEsPorcentaje = Boolean(matchReintegro[2])
+    }
+  }
   return { numeroFactura, reintegroValor, reintegroEsPorcentaje }
 }
 
@@ -281,8 +296,9 @@ async function intentarRegistrarPagoConReintegro({
     medioPago: 'otro',
     monto: montoTicket,
     imagenUrl: ticketImagenUrl || undefined,
-    reintegroConcepto: `Reintegro tarjeta - Factura N.º ${numeroFactura}`,
-    reintegroMonto,
+    ...(reintegroMonto > 0
+      ? { reintegroConcepto: `Reintegro tarjeta - Factura N.º ${numeroFactura}`, reintegroMonto }
+      : {}),
   }
 
   const { data: pago, error: errPago } = await supabaseAdmin
@@ -359,17 +375,22 @@ async function intentarRegistrarPagoConReintegro({
     console.error('intentarRegistrarPagoConReintegro: error registrando movimiento de caja', errCaja)
   }
 
-  // Fase 67 -- crédito esperado (reintegro), a la espera de que el banco lo acredite.
-  const { error: errCredito } = await supabaseAdmin.from('creditos_pendientes').insert([{
-    cliente_id: clienteId,
-    modulo,
-    pago_id: pago.id,
-    proveedor_id: comprobante.proveedor_id,
-    concepto: `Reintegro tarjeta - Factura N.º ${numeroFactura}`,
-    monto_esperado: reintegroMonto,
-  }])
-  if (errCredito) {
-    console.error('intentarRegistrarPagoConReintegro: error creando credito pendiente', errCredito)
+  // Fase 67 -- crédito esperado (reintegro), a la espera de que el banco lo
+  // acredite. Solo si el pago realmente tiene un reintegro asociado -- un
+  // pago sin promo (ej. Mercado Pago sin reintegro) no debe dejar un
+  // crédito de $0 dando vueltas en Tesorería > Créditos y Reintegros.
+  if (reintegroMonto > 0) {
+    const { error: errCredito } = await supabaseAdmin.from('creditos_pendientes').insert([{
+      cliente_id: clienteId,
+      modulo,
+      pago_id: pago.id,
+      proveedor_id: comprobante.proveedor_id,
+      concepto: `Reintegro tarjeta - Factura N.º ${numeroFactura}`,
+      monto_esperado: reintegroMonto,
+    }])
+    if (errCredito) {
+      console.error('intentarRegistrarPagoConReintegro: error creando credito pendiente', errCredito)
+    }
   }
 
   return {
