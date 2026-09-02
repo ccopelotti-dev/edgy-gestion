@@ -40,6 +40,8 @@ import { armarLinkWhatsapp } from '@/lib/whatsapp';
 import { enviarDocumentoWhatsapp } from '@/lib/enviarDocumentoWhatsapp';
 import { listarCuentasBancarias } from '@/lib/tesoreriaSync';
 import { crearCreditoPendiente } from '@/lib/creditos';
+import { firmarUrlsDeTickets } from '@/lib/imagenComprobanteAgente';
+import ImageLightbox from '@/components/ImageLightbox';
 import { formatDate, formatARS, nowISO } from '../lib/format';
 import type { EstadoPago, Pago } from '../types';
 import { generarId } from '../types';
@@ -68,6 +70,17 @@ export default function Pagos() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [generandoPdfId, setGenerandoPdfId] = useState<string | null>(null);
   const [enviandoWhatsappId, setEnviandoWhatsappId] = useState<string | null>(null);
+  // Fase 68c (polish, 02/09): miniatura + lightbox del ticket adjunto a
+  // cada línea de pago -- espejo del mismo cambio en Compras/OrdenesPago.tsx
+  // (ver ese archivo para el porqué).
+  const [ticketUrls, setTicketUrls] = useState<Map<string, string>>(new Map());
+  const [ticketAmpliado, setTicketAmpliado] = useState<string | null>(null);
+
+  useEffect(() => {
+    const paths = pagos.flatMap((p) => p.lineasPago.map((l) => l.imagenUrl)).filter((p): p is string => Boolean(p));
+    if (paths.length === 0) return;
+    firmarUrlsDeTickets(paths).then(setTicketUrls);
+  }, [pagos]);
 
   useEffect(() => {
     if (confirmarPagoId && empresaActual) {
@@ -350,20 +363,45 @@ export default function Pagos() {
                             <div>
                               <h4 className="font-semibold text-gray-900 text-sm mb-2">Líneas de pago</h4>
                               <div className="space-y-1">
-                                {pago.lineasPago.map((linea) => (
-                                  <div key={linea.id} className="rounded-lg bg-white px-3 py-2 text-sm border border-gray-100">
-                                    <div className="flex items-center justify-between">
-                                      <MedioPagoBadge medio={linea.medioPago} />
-                                      <Amount value={linea.monto} size="sm" />
+                                {pago.lineasPago.map((linea) => {
+                                  const ticketUrl = linea.imagenUrl ? ticketUrls.get(linea.imagenUrl) : undefined;
+                                  return (
+                                    <div key={linea.id} className="rounded-lg bg-white px-3 py-2 text-sm border border-gray-100">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <MedioPagoBadge medio={linea.medioPago} />
+                                          {linea.imagenUrl && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => { e.stopPropagation(); if (ticketUrl) setTicketAmpliado(ticketUrl); }}
+                                              className="shrink-0 overflow-hidden rounded border border-gray-200 h-8 w-8 hover:ring-2 hover:ring-orange-300"
+                                              title="Ver ticket"
+                                            >
+                                              {ticketUrl ? (
+                                                <img src={ticketUrl} alt="Ticket de pago" className="h-full w-full object-cover" />
+                                              ) : (
+                                                <div className="h-full w-full bg-gray-100" />
+                                              )}
+                                            </button>
+                                          )}
+                                        </div>
+                                        <Amount value={linea.monto} size="sm" />
+                                      </div>
+                                      {linea.medioPago === 'cheque' && (linea.chequeNumero || linea.chequeBanco) && (
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          N.º {linea.chequeNumero || '—'} · {linea.chequeBanco || '—'}
+                                          {linea.chequeFechaPago ? ` · vence ${formatDate(linea.chequeFechaPago)}` : ''}
+                                        </p>
+                                      )}
+                                      {linea.reintegroMonto ? (
+                                        <p className="text-xs text-orange-600 mt-1">
+                                          Reintegro esperado: {formatARS(linea.reintegroMonto)}
+                                          {linea.reintegroConcepto ? ` · ${linea.reintegroConcepto}` : ''}
+                                        </p>
+                                      ) : null}
                                     </div>
-                                    {linea.medioPago === 'cheque' && (linea.chequeNumero || linea.chequeBanco) && (
-                                      <p className="text-xs text-gray-500 mt-1">
-                                        N.º {linea.chequeNumero || '—'} · {linea.chequeBanco || '—'}
-                                        {linea.chequeFechaPago ? ` · vence ${formatDate(linea.chequeFechaPago)}` : ''}
-                                      </p>
-                                    )}
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </div>
                           </div>
@@ -398,6 +436,8 @@ export default function Pagos() {
         onConfirm={handleConfirmarPago}
         clienteId={empresaActual?.id}
       />
+
+      <ImageLightbox src={ticketAmpliado} onClose={() => setTicketAmpliado(null)} />
     </div>
   );
 }
