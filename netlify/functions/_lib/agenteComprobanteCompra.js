@@ -163,6 +163,21 @@ function parseCaptionPagoFactura(captionTexto) {
   return { numeroFactura, reintegroValor, reintegroEsPorcentaje }
 }
 
+// El numero de factura que un humano lee y tipea es el "numero de
+// comprobante del proveedor" (ej. 449 de "0026-00000449"), no
+// comprobantes_compra.numero (correlativo interno 1,2,3... que nunca se
+// muestra). Se matchea contra el sufijo numerico despues del ultimo '-'
+// (o el numero completo si no hay guion), sin ceros a la izquierda -- y
+// tambien contra el numero interno, por si algun dia se usa ese.
+function numeroFacturaCoincide(comprobante, numeroBuscado) {
+  if (Number(comprobante.numero) === numeroBuscado) return true
+  const ncp = String(comprobante.numero_comprobante_proveedor || '')
+  if (!ncp) return false
+  const sufijo = ncp.includes('-') ? ncp.split('-').pop() : ncp
+  const limpio = sufijo.replace(/\D/g, '').replace(/^0+/, '') || '0'
+  return Number(limpio) === numeroBuscado
+}
+
 const TABLAS_PAGOS_POR_DESTINO = {
   compras: { pagos: 'pagos_compra', imputaciones: 'pago_compra_imputaciones' },
   hogar: { pagos: 'pagos_hogar', imputaciones: 'pago_hogar_imputaciones' },
@@ -197,21 +212,35 @@ async function intentarRegistrarPagoConReintegro({
     return { creado: false, motivo: 'monto_ticket_invalido' }
   }
 
-  const { data: comprobante, error: errComprobante } = await supabaseAdmin
+  // El numero que Carlos va a escribir en el caption es el que VE -- el
+  // numero de comprobante del proveedor (ej. "449" de "0026-00000449",
+  // que es justamente lo que se muestra como "Numero" en el listado de
+  // Comprobantes) -- no nuestro correlativo interno (comprobantes_compra.numero,
+  // que es un contador propio 1,2,3... por cliente+tipo y nunca se le
+  // muestra). Se matchea contra los dos por las dudas, pero el criterio
+  // real es el sufijo numerico de numero_comprobante_proveedor.
+  const { data: facturas, error: errComprobante } = await supabaseAdmin
     .from(tablas.comprobantes)
-    .select('id, numero, proveedor_id, total, monto_pagado, saldo_pendiente, estado')
+    .select('id, numero, numero_comprobante_proveedor, proveedor_id, total, monto_pagado, saldo_pendiente, estado')
     .eq('cliente_id', clienteId)
     .eq('tipo', 'factura')
-    .eq('numero', numeroFactura)
-    .maybeSingle()
 
   if (errComprobante) {
     console.error('intentarRegistrarPagoConReintegro: error buscando factura', errComprobante)
     return { creado: false, motivo: 'error_buscando_factura', error: errComprobante.message }
   }
-  if (!comprobante) {
+
+  const candidatas = (facturas || []).filter((f) => numeroFacturaCoincide(f, numeroFactura))
+  if (candidatas.length === 0) {
     return { creado: false, motivo: 'factura_no_encontrada', numeroFactura }
   }
+  if (candidatas.length > 1) {
+    // Mismo criterio conservador de siempre: si hay mas de una factura que
+    // matchea ese numero (ej. mismo numero de comprobante en dos puntos de
+    // venta distintos), no se adivina.
+    return { creado: false, motivo: 'factura_ambigua', numeroFactura, candidatas: candidatas.length }
+  }
+  const comprobante = candidatas[0]
 
   const TOLERANCIA = 1 // $1 de margen por redondeo (mismo criterio que el resto de Fase 68c)
   if (montoTicket > Number(comprobante.saldo_pendiente) + TOLERANCIA) {
