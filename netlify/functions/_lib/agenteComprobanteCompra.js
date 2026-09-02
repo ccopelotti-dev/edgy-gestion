@@ -435,7 +435,12 @@ export async function intentarCargarComprobante({
         ticketImagenUrl,
       })
       if (resultadoPago.creado) {
-        return { creado: false, motivo: 'pago_registrado_con_reintegro', ...resultadoPago }
+        // OJO: el spread va ANTES de creado/motivo -- si van antes, el
+        // creado:true de resultadoPago pisa el creado:false de acá (bug
+        // real detectado en la prueba en vivo del 02/09: el WhatsApp
+        // devolvió el mensaje generico de "comprobante cargado" en vez
+        // del detalle del pago, porque cargaCompras.creado quedaba true).
+        return { ...resultadoPago, creado: false, motivo: 'pago_registrado_con_reintegro' }
       }
       // La instrucción del caption era explícita y no se pudo cumplir
       // (factura inexistente, saldo insuficiente, error) -- se informa
