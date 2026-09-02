@@ -153,19 +153,25 @@ function parsearMontoArg(s) {
 
 function parseCaptionPagoFactura(captionTexto) {
   const texto = String(captionTexto || '')
-  const matchFactura = texto.match(/factura\s*n?[°ºo]?\.?\s*#?\s*(\d+)/i)
+  // Fase 68c (economía de caracteres, 02/09) -- "factura"/"reintegro"
+  // completos siguen andando, pero también se acepta la forma corta
+  // "F449 R25000" para escribir menos en el caption de WhatsApp. \b
+  // (límite de palabra) antes de la f/r para no matchear en medio de
+  // otra palabra cualquiera.
+  const matchFactura = texto.match(/\bf(?:actura)?\.?\s*n?[°ºo]?\.?\s*#?\s*(\d+)/i)
   if (!matchFactura) return null
   const numeroFactura = parseInt(matchFactura[1], 10)
   if (!Number.isFinite(numeroFactura)) return null
 
   // El reintegro es OPCIONAL -- un pago sin promo/reintegro asociado
   // (ej. la parte de Mercado Pago de una compra mixta) también se puede
-  // registrar solo con "factura N" en el caption. Si "reintegro" está
-  // pero el valor no es un número real (ej. alguien puso "reintegro x"
-  // como placeholder sin completar), se ignora el reintegro en vez de
-  // descartar todo el caption -- mejor cargar el pago sin reintegro que
-  // no cargarlo por un dato incompleto que no afecta el monto del pago.
-  const matchReintegro = texto.match(/reintegro\s*(?:de|del)?\s*\$?\s*([\d.,]+)\s*(%)?/i)
+  // registrar solo con "F449" (o "factura 449") en el caption. Si
+  // "reintegro"/"r" está pero el valor no es un número real (ej. alguien
+  // puso "reintegro x" como placeholder sin completar), se ignora el
+  // reintegro en vez de descartar todo el caption -- mejor cargar el
+  // pago sin reintegro que no cargarlo por un dato incompleto que no
+  // afecta el monto del pago.
+  const matchReintegro = texto.match(/\br(?:eintegro)?\.?\s*(?:de|del)?\s*\$?\s*([\d.,]+)\s*(%)?/i)
   let reintegroValor = 0
   let reintegroEsPorcentaje = false
   if (matchReintegro) {
