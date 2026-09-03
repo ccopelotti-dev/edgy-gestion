@@ -1458,6 +1458,16 @@ export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps
 
 // ─── TarjetaDialog (Fase 70) ────────────────────────────────
 
+// El input type="number" no impide que el navegador acepte valores
+// fuera de [min,max] mientras se tipea (ej. escribir "724" en un
+// campo de día de mes). Clampeamos manualmente a un día de mes válido.
+function clampDiaMes(raw: string): number | '' {
+  if (raw === '') return '';
+  const n = Number(raw);
+  if (Number.isNaN(n)) return '';
+  return Math.min(31, Math.max(1, Math.trunc(n)));
+}
+
 interface TarjetaDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1543,7 +1553,7 @@ export function TarjetaDialog({ open, onOpenChange, tarjeta, onSave }: TarjetaDi
                   max={31}
                   className={inputClass}
                   value={diaCierre}
-                  onChange={(e) => setDiaCierre(e.target.value === '' ? '' : Number(e.target.value))}
+                  onChange={(e) => setDiaCierre(clampDiaMes(e.target.value))}
                 />
               </div>
               <div>
@@ -1554,7 +1564,7 @@ export function TarjetaDialog({ open, onOpenChange, tarjeta, onSave }: TarjetaDi
                   max={31}
                   className={inputClass}
                   value={diaVencimiento}
-                  onChange={(e) => setDiaVencimiento(e.target.value === '' ? '' : Number(e.target.value))}
+                  onChange={(e) => setDiaVencimiento(clampDiaMes(e.target.value))}
                 />
               </div>
             </div>
