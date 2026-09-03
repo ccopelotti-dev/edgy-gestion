@@ -22,6 +22,8 @@ export interface Proveedor {
   nombreFantasia?: string;
   cuit: string;
   condicionIva: CondicionIvaProveedor;
+  /** Fase 70c: numero de inscripcion en Ingresos Brutos (IIBB). */
+  ingresosBrutos?: string;
   email?: string;
   telefono?: string;
   direccion?: string;

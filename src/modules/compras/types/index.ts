@@ -30,6 +30,10 @@ export interface Proveedor {
    * con un ajuste manual de stock (ver migración 0116). */
   esInformal?: boolean;
   condicionIva: CondicionIvaProveedor;
+  /** Fase 70c: numero de inscripcion en Ingresos Brutos (IIBB), relevante
+   * para retenciones. Texto libre porque el formato varia segun jurisdiccion
+   * (Convenio Multilateral vs. local). */
+  ingresosBrutos?: string;
   email?: string;
   telefono?: string;
   direccion?: string;

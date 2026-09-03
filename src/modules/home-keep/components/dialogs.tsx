@@ -98,6 +98,7 @@ interface ProveedorForm {
   nombreFantasia: string;
   cuit: string;
   condicionIva: CondicionIvaProveedor;
+  ingresosBrutos: string;
   email: string;
   telefono: string;
   direccion: string;
@@ -113,6 +114,7 @@ const emptyProveedorForm: ProveedorForm = {
   nombreFantasia: '',
   cuit: '',
   condicionIva: 'responsable_inscripto',
+  ingresosBrutos: '',
   email: '',
   telefono: '',
   direccion: '',
@@ -135,6 +137,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
           nombreFantasia: proveedor.nombreFantasia ?? '',
           cuit: proveedor.cuit,
           condicionIva: proveedor.condicionIva,
+          ingresosBrutos: proveedor.ingresosBrutos ?? '',
           email: proveedor.email ?? '',
           telefono: proveedor.telefono ?? '',
           direccion: proveedor.direccion ?? '',
@@ -172,6 +175,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
       nombreFantasia: form.nombreFantasia.trim() || undefined,
       cuit: form.cuit.trim(),
       condicionIva: form.condicionIva,
+      ingresosBrutos: form.ingresosBrutos.trim() || undefined,
       email: form.email || undefined,
       telefono: form.telefono || undefined,
       direccion: form.direccion || undefined,
@@ -222,6 +226,11 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Ingresos Brutos</label>
+              <input className={inputClass} value={form.ingresosBrutos} onChange={(e) => update('ingresosBrutos', e.target.value)} placeholder="Numero de inscripcion IIBB (para retenciones)" />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

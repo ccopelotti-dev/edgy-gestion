@@ -93,6 +93,7 @@ interface ProveedorForm {
   /** Fase 69: ver Proveedor.esInformal en types/index.ts. */
   esInformal: boolean;
   condicionIva: CondicionIvaProveedor;
+  ingresosBrutos: string;
   email: string;
   telefono: string;
   direccion: string;
@@ -109,6 +110,7 @@ const emptyProveedorForm: ProveedorForm = {
   cuit: '',
   esInformal: false,
   condicionIva: 'responsable_inscripto',
+  ingresosBrutos: '',
   email: '',
   telefono: '',
   direccion: '',
@@ -132,6 +134,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
           cuit: proveedor.cuit,
           esInformal: proveedor.esInformal ?? false,
           condicionIva: proveedor.condicionIva,
+          ingresosBrutos: proveedor.ingresosBrutos ?? '',
           email: proveedor.email ?? '',
           telefono: proveedor.telefono ?? '',
           direccion: proveedor.direccion ?? '',
@@ -174,6 +177,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
       cuit: form.esInformal ? '' : form.cuit.trim(),
       esInformal: form.esInformal,
       condicionIva: form.condicionIva,
+      ingresosBrutos: form.ingresosBrutos.trim() || undefined,
       email: form.email || undefined,
       telefono: form.telefono || undefined,
       direccion: form.direccion || undefined,
@@ -240,6 +244,11 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Ingresos Brutos</label>
+              <input className={inputClass} value={form.ingresosBrutos} onChange={(e) => update('ingresosBrutos', e.target.value)} placeholder="Numero de inscripcion IIBB (para retenciones)" />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
