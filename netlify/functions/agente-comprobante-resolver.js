@@ -1,5 +1,15 @@
 import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
-import { intentarCargarComprobante, normalizarFormaPago } from './_lib/agenteComprobanteCompra.js'
+import { intentarCargarComprobante, normalizarFormaPago, resolverConfirmacionRecepcionOc } from './_lib/agenteComprobanteCompra.js'
+
+// Fase 69b -- parser mínimo de SI/NO para la rama 'confirmar_recepcion_oc'.
+// Mismo criterio conservador que el resto del archivo: si la respuesta no
+// es clara, se devuelve null y se le vuelve a preguntar en vez de asumir.
+function parseSiNo(texto) {
+  const t = texto.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  if (/^(si|s|dale|ok|confirmo|confirmar|correcto|listo)\b/.test(t)) return true
+  if (/^(no|n|cancelar|cancela)\b/.test(t)) return false
+  return null
+}
 
 // Fase 54 -- segunda mitad del flujo de carga automática (Tarea #149).
 // Cuando el agente no puede determinar la forma de pago (Contado /
@@ -59,7 +69,7 @@ export default async (req) => {
     .select('id, datos_extraidos, es_prueba, destino, pendiente_aclaracion')
     .eq('cliente_id', agente.clienteId)
     .eq('admin_id', admin.id)
-    .in('pendiente_aclaracion', ['forma_pago', 'cuit'])
+    .in('pendiente_aclaracion', ['forma_pago', 'cuit', 'confirmar_recepcion_oc'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -100,6 +110,61 @@ export default async (req) => {
 
     return new Response(
       JSON.stringify({ ok: true, huboPendiente: true, entendido: true, pendienteAclaracion: 'cuit', cargaCompras: resultado }),
+      { status: 200 },
+    )
+  }
+
+  // Fase 69b -- rama "confirmar_recepcion_oc": el admin responde SI/NO a
+  // la pregunta de si cierra una Orden de Compra que no coincidió exacto
+  // contra la factura cargada (ver intentarCargarComprobante). Acá no hay
+  // CUIT ni forma de pago de por medio, solo un sí/no directo.
+  if (tipoAclaracion === 'confirmar_recepcion_oc') {
+    const confirmar = parseSiNo(texto)
+    if (confirmar === null) {
+      // No se entendió -- se le vuelve a preguntar, no se toca nada.
+      return new Response(
+        JSON.stringify({ ok: true, huboPendiente: true, entendido: false, pendienteAclaracion: 'confirmar_recepcion_oc' }),
+        { status: 200 },
+      )
+    }
+
+    const datosOc = pendiente.datos_extraidos?._recepcionOcPendiente
+    if (!datosOc?.comprobanteId || !datosOc?.ordenCompraId) {
+      console.error('agente-comprobante-resolver: falta _recepcionOcPendiente en datos_extraidos', pendiente.id)
+      await supabaseAdmin.from('comprobantes_recibidos').update({ pendiente_aclaracion: null }).eq('id', pendiente.id)
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          huboPendiente: true,
+          entendido: true,
+          pendienteAclaracion: 'confirmar_recepcion_oc',
+          cargaCompras: { ok: false, error: 'datos_incompletos' },
+        }),
+        { status: 200 },
+      )
+    }
+
+    const resultado = await resolverConfirmacionRecepcionOc(supabaseAdmin, {
+      comprobanteId: datosOc.comprobanteId,
+      ordenCompraId: datosOc.ordenCompraId,
+      confirmar,
+    })
+
+    // Se resuelva bien o mal, la pregunta ya fue respondida -- se limpia
+    // el pendiente para no volver a preguntar lo mismo. Si algo falló del
+    // lado del stock (resultado.ok === false con confirmar:true), queda
+    // para resolver a mano desde la app, con el motivo logueado arriba.
+    await supabaseAdmin.from('comprobantes_recibidos').update({ pendiente_aclaracion: null }).eq('id', pendiente.id)
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        huboPendiente: true,
+        entendido: true,
+        pendienteAclaracion: 'confirmar_recepcion_oc',
+        confirmar,
+        cargaCompras: resultado,
+      }),
       { status: 200 },
     )
   }

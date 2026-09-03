@@ -411,6 +411,154 @@ async function intentarRegistrarPagoConReintegro({
   }
 }
 
+// ─── Fase 69b -- matcheo de items de factura contra items de una OC ───
+//
+// Cuando el agente ya encontró UNA sola Orden de Compra pendiente/parcial
+// del mismo proveedor (ver intentarCargarComprobante), hay que chequear
+// si lo que dice la factura coincide con lo que se había pedido en esa
+// OC antes de cerrarla y cargar stock solo. El problema es que la
+// factura llega con la descripción "cruda" tal cual la escribió el
+// proveedor (ej. "PULPA CUARTO MAYORISTA"), mientras que la OC ya tiene
+// el insumo real vinculado (ej. "Pulpa de Cuarto Trasero de Cerdo") --
+// no hay ningún id en común para matchear directo, así que se compara
+// por similitud de texto (intersección de palabras significativas).
+
+const PALABRAS_FILLER_MATCH = new Set([
+  'de', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'del', 'al', 'en', 'con',
+  'mayorista', 'minorista', 'kg', 'grs', 'gr', 'gramo', 'gramos', 'kilo', 'kilos',
+  'unidad', 'unidades', 'unid', 'pack', 'caja',
+])
+
+function normalizarTextoMatch(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // saca acentos
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !PALABRAS_FILLER_MATCH.has(t))
+}
+
+/** 0..1 -- proporción de palabras en común respecto al texto más corto. */
+function scoreMatchDescripcion(a, b) {
+  const tokensA = normalizarTextoMatch(a)
+  const tokensB = normalizarTextoMatch(b)
+  if (!tokensA.length || !tokensB.length) return 0
+  const setB = new Set(tokensB)
+  const comunes = tokensA.filter((t) => setB.has(t)).length
+  return comunes / Math.min(tokensA.length, tokensB.length)
+}
+
+// ±10% por línea, a pedido de Carlos (03/09) -- la carne varía por
+// venderse al peso, así que un cierre "casi exacto" no debería frenar la
+// carga automática, pero cualquier cosa más allá de eso sí amerita
+// preguntarle antes de tocar stock.
+const TOLERANCIA_CANTIDAD_OC = 0.10
+const UMBRAL_MATCH_DESCRIPCION = 0.5
+
+/**
+ * Devuelve un resultado por cada ítem de la factura: a qué ítem de la OC
+ * matcheó (o null si ninguno superó el umbral de similitud) y si la
+ * cantidad entregada cae dentro de la tolerancia de la pedida. Cada ítem
+ * de la OC se usa como match una sola vez (no puede "explicar" dos
+ * líneas distintas de la misma factura).
+ */
+function matchearItemsFacturaConOc(itemsFactura, itemsOc) {
+  const ocDisponibles = itemsOc.map((oc) => ({ ...oc, usado: false }))
+  return itemsFactura.map((itemFactura) => {
+    let mejor = null
+    let mejorScore = 0
+    for (const oc of ocDisponibles) {
+      if (oc.usado) continue
+      const score = scoreMatchDescripcion(itemFactura.descripcion, oc.descripcion)
+      if (score > mejorScore) {
+        mejorScore = score
+        mejor = oc
+      }
+    }
+    if (!mejor || mejorScore < UMBRAL_MATCH_DESCRIPCION) {
+      return { itemFactura, ocItem: null, dentroDeTolerancia: false }
+    }
+    mejor.usado = true
+    const cantidadOc = Number(mejor.cantidad) || 0
+    const cantidadFactura = Number(itemFactura.cantidad) || 0
+    const diferenciaPct = cantidadOc > 0 ? Math.abs(cantidadFactura - cantidadOc) / cantidadOc : 1
+    return {
+      itemFactura,
+      ocItem: mejor,
+      cantidadOc,
+      cantidadFactura,
+      diferenciaPct,
+      dentroDeTolerancia: diferenciaPct <= TOLERANCIA_CANTIDAD_OC,
+    }
+  })
+}
+
+/**
+ * Espejo server-side (service_role) de actualizarStockPorCompra en
+ * src/modules/compras/lib/actualizarStockCompra.ts -- ese archivo usa el
+ * cliente browser de Supabase (RLS), no sirve en un contexto de Netlify
+ * Function. No maneja multi-local (punto_venta_id null) -- mismo
+ * criterio simplificado que ya se usa en el resto de este archivo para
+ * los movimientos de caja de los pagos (ver más arriba).
+ */
+async function actualizarStockPorCompraServer(supabaseAdmin, { clienteId, proveedorNombre, fecha, numeroComprobante, lineas }) {
+  const recepcionId = crypto.randomUUID()
+  const { error: errRecepcion } = await supabaseAdmin.from('recepciones').insert({
+    id: recepcionId,
+    cliente_id: clienteId,
+    fecha,
+    proveedor: proveedorNombre,
+    numero_remito: numeroComprobante,
+    estado: 'confirmada',
+    notas: `Generada automáticamente por el agente de WhatsApp -- comprobante ${numeroComprobante}, cantidades verificadas contra la Orden de Compra (Fase 69b).`,
+  })
+  if (errRecepcion) {
+    console.error('actualizarStockPorCompraServer: error creando recepción', errRecepcion)
+    return { ok: false, error: errRecepcion.message }
+  }
+
+  const recepcionLineas = lineas.map((l) => ({
+    id: crypto.randomUUID(),
+    recepcion_id: recepcionId,
+    item_tipo: 'insumo',
+    item_id: l.insumoId,
+    cantidad: l.cantidad,
+    costo_unitario: l.costoUnitario,
+    fecha_vencimiento: null,
+  }))
+  const { error: errLineas } = await supabaseAdmin.from('recepcion_lineas').insert(recepcionLineas)
+  if (errLineas) console.error('actualizarStockPorCompraServer: error creando recepcion_lineas', errLineas)
+
+  const movimientos = recepcionLineas.map((l) => ({
+    id: crypto.randomUUID(),
+    cliente_id: clienteId,
+    tipo: 'ingreso',
+    item_tipo: 'insumo',
+    item_id: l.item_id,
+    cantidad: l.cantidad,
+    costo_unitario: l.costo_unitario,
+    fecha,
+    origen: 'recepcion',
+    origen_id: recepcionId,
+    punto_venta_id: null,
+  }))
+  const { error: errMov } = await supabaseAdmin.from('movimientos_stock').insert(movimientos)
+  if (errMov) console.error('actualizarStockPorCompraServer: error creando movimientos_stock', errMov)
+
+  // Secuencial (no en paralelo) por si una misma fórmula/factura repite
+  // el mismo insumo en más de una línea -- mismo criterio que la versión
+  // frontend.
+  for (const l of lineas) {
+    const { data: insumoRow } = await supabaseAdmin.from('insumos').select('stock').eq('id', l.insumoId).single()
+    const stockActual = Number(insumoRow?.stock ?? 0)
+    const update = { stock: stockActual + l.cantidad }
+    if (l.costoUnitario > 0) update.costo = l.costoUnitario
+    await supabaseAdmin.from('insumos').update(update).eq('id', l.insumoId)
+  }
+
+  return { ok: true, recepcionId }
+}
+
 // Intenta cargar el comprobante en Compras (o en Home Keep, según
 // `destino`) a partir de lo que se pudo extraer de la imagen. Devuelve
 // siempre un resultado -- nunca lanza por datos incompletos, eso es
@@ -604,6 +752,10 @@ export async function intentarCargarComprobante({
     const subtotalItem = cantidad * precioUnitario
     const montoIvaItem = subtotalItem * (alicuotaIva / 100)
     const base = {
+      // Fase 69b -- id propio (no el default de la DB) para poder pisar
+      // el insumo_id de la fila puntual después del insert, si el
+      // matcheo contra la OC resuelve a qué insumo corresponde.
+      id: crypto.randomUUID(),
       descripcion: String(it.descripcion || 'Ítem sin detalle').slice(0, 500),
       cantidad,
       precio_unitario: precioUnitario,
@@ -631,6 +783,66 @@ export async function intentarCargarComprobante({
 
   const notaTrazabilidad = `Cargado automáticamente por el agente de WhatsApp a partir de comprobantes_recibidos#${comprobanteRecibidoId}.`
 
+  // Fase 69b (a pedido de Carlos, 03/09) -- caso real: la carne del 22/08
+  // se compró contra la OC N.º 2, pero la factura llegó por WhatsApp sin
+  // ningún vínculo hacia esa OC, que quedó "pendiente" para siempre aunque
+  // la mercadería se recibió y se pagó. Acá, si hay UNA sola Orden de
+  // Compra pendiente/parcial de este mismo proveedor, se linkea
+  // automáticamente (mismo criterio conservador de siempre: 0 o 2+
+  // matches, no se adivina, queda sin vincular para hacerlo a mano desde
+  // Órdenes de Compra). Solo aplica a Compras real -- Home Keep no tiene
+  // Órdenes de Compra.
+  let ordenCompraId = null
+  let itemsOc = []
+  if (!esHogar) {
+    const { data: ocsPendientes, error: errOcs } = await supabaseAdmin
+      .from('ordenes_compra')
+      .select('id, estado')
+      .eq('cliente_id', clienteId)
+      .eq('proveedor_id', proveedor.id)
+      .in('estado', ['pendiente', 'parcial'])
+    if (errOcs) {
+      console.error('intentarCargarComprobante: error buscando OC pendiente para vincular', errOcs)
+    } else if (ocsPendientes && ocsPendientes.length === 1) {
+      ordenCompraId = ocsPendientes[0].id
+      const { data: ocItemsRows, error: errOcItems } = await supabaseAdmin
+        .from('orden_compra_items')
+        .select('id, descripcion, cantidad, insumo_id')
+        .eq('orden_compra_id', ordenCompraId)
+      if (errOcItems) {
+        console.error('intentarCargarComprobante: error leyendo items de la OC', errOcItems)
+      } else {
+        itemsOc = ocItemsRows || []
+      }
+    }
+  }
+
+  // Fase 69b (03/09, a pedido de Carlos) -- encontrar la OC no alcanza:
+  // antes de cerrarla y cargar stock solo, hay que chequear que las
+  // cantidades de la factura cierren contra lo pedido en esa OC. La
+  // carne varía por venderse al peso, así que se tolera ±10% por línea
+  // (TOLERANCIA_CANTIDAD_OC) -- dentro de ese margen se carga solo, fuera
+  // de eso se le pregunta a Carlos por WhatsApp (SI/NO) en vez de
+  // adivinar. El matcheo item-por-item usa similitud de texto porque la
+  // factura llega con la descripción "cruda" del proveedor (ej. "PULPA
+  // CUARTO MAYORISTA") mientras que la OC ya tiene el insumo real
+  // vinculado (ej. "Pulpa de Cuarto Trasero de Cerdo") -- ver
+  // matchearItemsFacturaConOc más abajo en este archivo.
+  let matchesOc = []
+  let autoCierreOc = false
+  if (ordenCompraId && itemsOc.length && !esHogar) {
+    matchesOc = matchearItemsFacturaConOc(items, itemsOc)
+    autoCierreOc = matchesOc.length > 0 && matchesOc.every((m) => m.ocItem && m.dentroDeTolerancia)
+    if (autoCierreOc) {
+      // Todo matcheó y cierra dentro de tolerancia -- se resuelve el
+      // insumo_id de cada línea ACÁ, antes del insert, para no tener que
+      // pisarlo después.
+      for (const m of matchesOc) {
+        m.itemFactura.insumo_id = m.ocItem.insumo_id
+      }
+    }
+  }
+
   const filaComprobante = {
     cliente_id: clienteId,
     tipo,
@@ -655,6 +867,7 @@ export async function intentarCargarComprobante({
     filaComprobante.control_remision = 'no'
     filaComprobante.tipo_comprobante_codigo = datosExtraidos.tipoComprobanteCodigo || null
     filaComprobante.stock_actualizado = false
+    filaComprobante.orden_compra_id = ordenCompraId
   }
 
   const { data: comprobante, error: insertError } = await supabaseAdmin
@@ -676,11 +889,92 @@ export async function intentarCargarComprobante({
     console.error('intentarCargarComprobante: error creando items', itemsError)
   }
 
+  // Fase 69b -- una vez insertados factura + items, se resuelve qué pasa
+  // con la OC vinculada (si hay una): cerrarla y cargar stock solo si
+  // cerró dentro de tolerancia, o dejar la pregunta pendiente para
+  // WhatsApp si no.
+  let ordenCompraVinculada = Boolean(ordenCompraId)
+  let ocCerradaAutomaticamente = false
+  let confirmacionOcPendiente = null
+
+  if (ordenCompraId && autoCierreOc) {
+    const resultadoStock = await actualizarStockPorCompraServer(supabaseAdmin, {
+      clienteId,
+      proveedorNombre: proveedor.nombre_fantasia || proveedor.nombre,
+      fecha: filaComprobante.fecha,
+      numeroComprobante: `FC-${String(nuevoNumero).padStart(5, '0')}`,
+      lineas: matchesOc.map((m) => ({
+        insumoId: m.ocItem.insumo_id,
+        cantidad: m.cantidadFactura,
+        costoUnitario: m.itemFactura.precio_unitario,
+      })),
+    })
+    if (resultadoStock.ok) {
+      await supabaseAdmin
+        .from('comprobantes_compra')
+        .update({ stock_actualizado: true, recepcion_id: resultadoStock.recepcionId })
+        .eq('id', comprobante.id)
+
+      // ¿Esta factura cubrió TODOS los insumos de la OC, o solo una
+      // parte (ej. la carne de una OC que también tenía aditivos de otro
+      // proveedor)? Se mira el total de insumos ya facturados contra
+      // esta OC (entre ésta y cualquier factura anterior), no solo los de
+      // esta factura puntual -- así una OC que se completa en 2 compras
+      // separadas sí termina en "recibida" con la segunda.
+      const { data: comprobantesDeEstaOc } = await supabaseAdmin
+        .from('comprobantes_compra')
+        .select('comprobante_compra_items(insumo_id)')
+        .eq('orden_compra_id', ordenCompraId)
+      const insumosFacturados = new Set(
+        (comprobantesDeEstaOc || [])
+          .flatMap((c) => c.comprobante_compra_items || [])
+          .map((i) => i.insumo_id)
+          .filter(Boolean),
+      )
+      const insumosOc = new Set(itemsOc.map((i) => i.insumo_id).filter(Boolean))
+      const cobertoCompleto = [...insumosOc].every((id) => insumosFacturados.has(id))
+
+      const { error: errUpdateOc } = await supabaseAdmin
+        .from('ordenes_compra')
+        .update({ estado: cobertoCompleto ? 'recibida' : 'parcial' })
+        .eq('id', ordenCompraId)
+      if (errUpdateOc) {
+        console.error('intentarCargarComprobante: error actualizando estado de la OC', errUpdateOc)
+      }
+      ocCerradaAutomaticamente = true
+    } else {
+      console.error('intentarCargarComprobante: error cargando stock desde OC verificada', resultadoStock.error)
+    }
+  } else if (ordenCompraId && matchesOc.length) {
+    // No cerró exacto (o no matcheó algún ítem) -- se le pregunta a
+    // Carlos por WhatsApp antes de tocar stock/OC. Se guardan solo los
+    // ids (no el detalle del matcheo) porque el resolver re-lee
+    // comprobante_compra_items + orden_compra_items y recalcula el mismo
+    // matcheo de forma determinística -- no hace falta duplicar datos.
+    datosExtraidos = {
+      ...datosExtraidos,
+      _recepcionOcPendiente: { comprobanteId: comprobante.id, ordenCompraId },
+    }
+    confirmacionOcPendiente = {
+      ordenCompraId,
+      detalle: matchesOc.map((m) => ({
+        descripcion: m.itemFactura.descripcion,
+        cantidadFactura: m.cantidadFactura,
+        cantidadOc: m.ocItem ? m.cantidadOc : null,
+        matcheo: Boolean(m.ocItem),
+      })),
+    }
+    await marcarPendiente(supabaseAdmin, comprobanteRecibidoId, { pendienteAclaracion: 'confirmar_recepcion_oc' })
+  }
+
   // comprobante_compra_id tiene FK a comprobantes_compra -- para
   // destino='hogar' el id va en su columna hermana (Fase 56c).
   const updateRecibido = {
     estado: 'revisado',
-    pendiente_aclaracion: null,
+    // Fase 69b -- si quedó pendiente la confirmación de la OC, no se
+    // pisa acá (marcarPendiente ya lo dejó en 'confirmar_recepcion_oc'
+    // arriba); en cualquier otro caso, se limpia como siempre.
+    pendiente_aclaracion: confirmacionOcPendiente ? 'confirmar_recepcion_oc' : null,
     datos_extraidos: datosExtraidos,
   }
   if (esHogar) {
@@ -701,6 +995,136 @@ export async function intentarCargarComprobante({
     total,
     numero: nuevoNumero,
     tipo,
+    ordenCompraVinculada,
+    ocCerradaAutomaticamente,
+    confirmacionOcPendiente,
+  }
+}
+
+/**
+ * Fase 69b -- se llama desde agente-comprobante-resolver.js cuando Carlos
+ * responde SI/NO por WhatsApp a la pregunta de "¿cierro esta OC con esta
+ * factura aunque no cerró exacto?". Re-lee los items de la factura y de
+ * la OC desde cero (no se confía en nada cacheado en datos_extraidos) y
+ * repite el mismo matcheo de intentarCargarComprobante -- es
+ * determinístico, así que no hace falta duplicar el detalle del cálculo
+ * en ningún lado, alcanza con guardar comprobanteId + ordenCompraId.
+ *
+ * Con "NO": no se toca nada más -- la factura y la OC quedan como
+ * estaban, para resolverlo a mano desde la app (elección explícita de
+ * Carlos, no un default nuestro).
+ *
+ * Con "SI": se cargan al inventario únicamente los ítems de la factura
+ * que matchearon por texto contra algún ítem de la OC -- los que no
+ * matchearon ninguno quedan sin insumo_id, igual que si la factura se
+ * hubiera cargado sin ninguna OC vinculada. Nunca se inventa un
+ * insumo_id para un ítem que no matcheó.
+ */
+export async function resolverConfirmacionRecepcionOc(supabaseAdmin, { comprobanteId, ordenCompraId, confirmar }) {
+  if (!confirmar) {
+    return { ok: true, cerrada: false }
+  }
+
+  const { data: itemsFacturaRows, error: errItemsFactura } = await supabaseAdmin
+    .from('comprobante_compra_items')
+    .select('id, descripcion, cantidad, precio_unitario, insumo_id')
+    .eq('comprobante_id', comprobanteId)
+  if (errItemsFactura) {
+    console.error('resolverConfirmacionRecepcionOc: error leyendo items de la factura', errItemsFactura)
+    return { ok: false, error: errItemsFactura.message }
+  }
+
+  const { data: itemsOcRows, error: errItemsOc } = await supabaseAdmin
+    .from('orden_compra_items')
+    .select('id, descripcion, cantidad, insumo_id')
+    .eq('orden_compra_id', ordenCompraId)
+  if (errItemsOc) {
+    console.error('resolverConfirmacionRecepcionOc: error leyendo items de la OC', errItemsOc)
+    return { ok: false, error: errItemsOc.message }
+  }
+
+  const matches = matchearItemsFacturaConOc(itemsFacturaRows || [], itemsOcRows || [])
+  const usables = matches.filter((m) => m.ocItem && m.ocItem.insumo_id)
+
+  if (!usables.length) {
+    return { ok: false, error: 'ningun_item_matcheo' }
+  }
+
+  const { data: comprobanteRow, error: errComprobante } = await supabaseAdmin
+    .from('comprobantes_compra')
+    .select('id, cliente_id, proveedor_id, fecha, numero')
+    .eq('id', comprobanteId)
+    .single()
+  if (errComprobante || !comprobanteRow) {
+    console.error('resolverConfirmacionRecepcionOc: error leyendo el comprobante', errComprobante)
+    return { ok: false, error: errComprobante?.message || 'comprobante_no_encontrado' }
+  }
+
+  const { data: proveedorRow } = await supabaseAdmin
+    .from('proveedores')
+    .select('nombre, nombre_fantasia')
+    .eq('id', comprobanteRow.proveedor_id)
+    .maybeSingle()
+  const proveedorNombre = proveedorRow?.nombre_fantasia || proveedorRow?.nombre || 'Proveedor'
+
+  const resultadoStock = await actualizarStockPorCompraServer(supabaseAdmin, {
+    clienteId: comprobanteRow.cliente_id,
+    proveedorNombre,
+    fecha: comprobanteRow.fecha,
+    numeroComprobante: `FC-${String(comprobanteRow.numero).padStart(5, '0')}`,
+    lineas: usables.map((m) => ({
+      insumoId: m.ocItem.insumo_id,
+      cantidad: m.cantidadFactura,
+      costoUnitario: Number(m.itemFactura.precio_unitario) || 0,
+    })),
+  })
+  if (!resultadoStock.ok) {
+    console.error('resolverConfirmacionRecepcionOc: error cargando stock', resultadoStock.error)
+    return { ok: false, error: resultadoStock.error }
+  }
+
+  // Deja registrado en cada ítem de la factura a qué insumo quedó
+  // vinculado -- para que se vea en el detalle del comprobante, igual
+  // que si hubiera cerrado automático.
+  for (const m of usables) {
+    await supabaseAdmin
+      .from('comprobante_compra_items')
+      .update({ insumo_id: m.ocItem.insumo_id })
+      .eq('id', m.itemFactura.id)
+  }
+
+  await supabaseAdmin
+    .from('comprobantes_compra')
+    .update({ stock_actualizado: true, recepcion_id: resultadoStock.recepcionId })
+    .eq('id', comprobanteId)
+
+  const { data: comprobantesDeEstaOc } = await supabaseAdmin
+    .from('comprobantes_compra')
+    .select('comprobante_compra_items(insumo_id)')
+    .eq('orden_compra_id', ordenCompraId)
+  const insumosFacturados = new Set(
+    (comprobantesDeEstaOc || [])
+      .flatMap((c) => c.comprobante_compra_items || [])
+      .map((i) => i.insumo_id)
+      .filter(Boolean),
+  )
+  const insumosOc = new Set((itemsOcRows || []).map((i) => i.insumo_id).filter(Boolean))
+  const cobertoCompleto = [...insumosOc].every((id) => insumosFacturados.has(id))
+
+  const { error: errUpdateOc } = await supabaseAdmin
+    .from('ordenes_compra')
+    .update({ estado: cobertoCompleto ? 'recibida' : 'parcial' })
+    .eq('id', ordenCompraId)
+  if (errUpdateOc) {
+    console.error('resolverConfirmacionRecepcionOc: error actualizando estado de la OC', errUpdateOc)
+  }
+
+  return {
+    ok: true,
+    cerrada: true,
+    estadoOc: cobertoCompleto ? 'recibida' : 'parcial',
+    itemsCargados: usables.length,
+    itemsSinMatch: matches.length - usables.length,
   }
 }
 
