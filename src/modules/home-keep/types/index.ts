@@ -179,12 +179,117 @@ export interface Pago {
   updatedAt: string;
 }
 
+// ─── Ingresos (Fase 70) ────────────────────────────────────────
+// De dónde sale la plata para pagar los gastos del hogar: un aporte
+// del negocio (La Charcutería) o un ingreso fijo de otro integrante de
+// la familia. El aporte del negocio se registra DOBLE -- acá como
+// ingreso, y además como egreso real en la Tesorería del negocio (ver
+// ADD_INGRESO en data/store.tsx) -- así el negocio también refleja la
+// salida de esa plata.
+
+export type TipoIngreso = 'aporte_negocio' | 'ingreso_familiar' | 'otro';
+
+export interface Ingreso {
+  id: string;
+  fecha: string;
+  tipo: TipoIngreso;
+  /** "La Charcutería" para aporte_negocio, nombre del familiar para
+   * ingreso_familiar, libre para 'otro'. */
+  origen?: string;
+  concepto?: string;
+  monto: number;
+  /** Solo relevante para tipo='aporte_negocio' -- cómo salió la plata
+   * de la Charcutería, para reflejarlo bien en su Tesorería (caja vs.
+   * banco). Se ignora para ingreso_familiar/otro. */
+  medioPago?: MedioPago;
+  /** Ingreso fijo mensual (ej. sueldo de un familiar) -- para poder
+   * recordarlo/sugerirlo cada mes. */
+  recurrente: boolean;
+  diaMesRecurrente?: number;
+  /** Id del movimiento espejo en movimientos_caja del negocio, cuando
+   * tipo='aporte_negocio' -- solo para trazabilidad/debug. */
+  movimientoCajaId?: string;
+  notas?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const TIPO_INGRESO_LABEL: Record<TipoIngreso, string> = {
+  aporte_negocio: 'Aporte de la Charcutería',
+  ingreso_familiar: 'Ingreso familiar',
+  otro: 'Otro ingreso',
+};
+
+// ─── Tarjetas de crédito (Fase 70) ─────────────────────────────
+// Resumen con detalle completo de consumos y cuotas -- se paga con el
+// mismo mecanismo simplificado de registrarMovimientoTesoreria que usa
+// el resto de Home Keep (no hace falta modelar el banco como
+// "proveedor" ni forzar el resumen dentro del circuito de
+// Pago/imputaciones pensado para comprobantes de proveedor).
+
+export interface TarjetaCredito {
+  id: string;
+  nombre: string; // ej. "Visa Santander - Carlos"
+  banco?: string;
+  titular?: string;
+  ultimosDigitos?: string;
+  diaCierre?: number;
+  diaVencimiento?: number;
+  limite?: number;
+  activa: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConsumoTarjeta {
+  id: string;
+  descripcion: string;
+  fechaConsumo?: string;
+  /** Monto de ESTA cuota puntual, no el total de la compra original. */
+  monto: number;
+  cuotaActual: number;
+  cuotasTotales: number;
+  /** Agrupa todas las cuotas de una misma compra a través de distintos
+   * resúmenes/meses -- ver matcheo por descripción en store.tsx. */
+  compraId?: string;
+  categoriaGastoId?: string;
+}
+
+export type EstadoResumenTarjeta = 'pendiente' | 'pagado_parcial' | 'pagado';
+
+export interface ResumenTarjeta {
+  id: string;
+  tarjetaId: string;
+  /** 'YYYY-MM' del cierre. */
+  periodo: string;
+  fechaCierre?: string;
+  fechaVencimiento?: string;
+  total: number;
+  pagoMinimo?: number;
+  estado: EstadoResumenTarjeta;
+  montoPagado: number;
+  saldoPendiente: number;
+  consumos: ConsumoTarjeta[];
+  notas?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const ESTADO_RESUMEN_TARJETA_LABEL: Record<EstadoResumenTarjeta, string> = {
+  pendiente: 'Pendiente',
+  pagado_parcial: 'Pago parcial',
+  pagado: 'Pagado',
+};
+
 // ─── Estado global ───────────────────────────────────────────
 
 export interface HomeKeepState {
   proveedores: Proveedor[];
   comprobantes: Comprobante[];
   pagos: Pago[];
+  ingresos: Ingreso[];
+  tarjetas: TarjetaCredito[];
+  resumenesTarjeta: ResumenTarjeta[];
   nextNumeroComprobante: Record<TipoComprobante, number>;
   nextNumeroPago: number;
   config: HomeKeepConfig;

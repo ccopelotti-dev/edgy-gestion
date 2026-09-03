@@ -34,6 +34,11 @@ import type {
   EstadoComprobante,
   TipoComprobante,
   ItemComprobante,
+  Ingreso,
+  TarjetaCredito,
+  ResumenTarjeta,
+  ConsumoTarjeta,
+  EstadoResumenTarjeta,
 } from '../types';
 
 import { generarId } from '../types';
@@ -56,6 +61,14 @@ type HomeKeepAction =
   | { type: 'CONFIRMAR_PAGO'; payload: { id: string; lineasPago: LineaPago[]; fecha: string } }
   | { type: 'ANULAR_PAGO'; payload: { id: string } }
   | { type: 'UPDATE_CONFIG'; payload: Partial<HomeKeepConfig> }
+  // Fase 70 -- Ingresos y Tarjetas de crédito.
+  | { type: 'ADD_INGRESO'; payload: Ingreso }
+  | { type: 'DELETE_INGRESO'; payload: { id: string } }
+  | { type: 'ADD_TARJETA'; payload: TarjetaCredito }
+  | { type: 'UPDATE_TARJETA'; payload: TarjetaCredito }
+  | { type: 'TOGGLE_TARJETA_ACTIVA'; payload: { id: string } }
+  | { type: 'ADD_RESUMEN_TARJETA'; payload: ResumenTarjeta }
+  | { type: 'PAGAR_RESUMEN_TARJETA'; payload: { resumenId: string; monto: number; fecha: string; medioPago: LineaPago['medioPago']; cuentaBancariaId?: string } }
   | { type: 'SET_STATE'; payload: HomeKeepState };
 
 // ─── Reducer ───────────────────────────────────────────────────
@@ -228,9 +241,119 @@ function homeKeepReducer(state: HomeKeepState, action: HomeKeepAction): HomeKeep
     case 'UPDATE_CONFIG':
       return { ...state, config: { ...state.config, ...action.payload } };
 
+    // ─── Fase 70: Ingresos ────────────────────────────────────
+    case 'ADD_INGRESO':
+      return { ...state, ingresos: [...state.ingresos, action.payload] };
+
+    case 'DELETE_INGRESO':
+      return { ...state, ingresos: state.ingresos.filter((i) => i.id !== action.payload.id) };
+
+    // ─── Fase 70: Tarjetas de crédito ─────────────────────────
+    case 'ADD_TARJETA':
+      return { ...state, tarjetas: [...state.tarjetas, action.payload] };
+
+    case 'UPDATE_TARJETA':
+      return { ...state, tarjetas: state.tarjetas.map((t) => (t.id === action.payload.id ? action.payload : t)) };
+
+    case 'TOGGLE_TARJETA_ACTIVA':
+      return {
+        ...state,
+        tarjetas: state.tarjetas.map((t) =>
+          t.id === action.payload.id ? { ...t, activa: !t.activa, updatedAt: now } : t,
+        ),
+      };
+
+    case 'ADD_RESUMEN_TARJETA':
+      return { ...state, resumenesTarjeta: [...state.resumenesTarjeta, action.payload] };
+
+    case 'PAGAR_RESUMEN_TARJETA': {
+      const resumen = state.resumenesTarjeta.find((r) => r.id === action.payload.resumenId);
+      if (!resumen) return state;
+      const nuevoMontoPagado = resumen.montoPagado + action.payload.monto;
+      const nuevoSaldo = Math.max(0, resumen.total - nuevoMontoPagado);
+      const estado: EstadoResumenTarjeta = nuevoSaldo <= 0.01 ? 'pagado' : nuevoMontoPagado > 0 ? 'pagado_parcial' : 'pendiente';
+      return {
+        ...state,
+        resumenesTarjeta: state.resumenesTarjeta.map((r) =>
+          r.id === resumen.id
+            ? { ...r, montoPagado: nuevoMontoPagado, saldoPendiente: nuevoSaldo, estado, updatedAt: now }
+            : r,
+        ),
+      };
+    }
+
     default:
       return state;
   }
+}
+
+// ─── Fase 70 -- matcheo de cuotas contra resúmenes anteriores ─────
+// Cuando se carga un resumen nuevo con un consumo "cuota 3/12" hay que
+// encontrar la fila de la cuota 2/12 de la MISMA compra (en un resumen
+// anterior, misma tarjeta) para heredar su `compraId` y así poder ver
+// todas las cuotas de una compra agrupadas. Mismo criterio de similitud
+// de texto que matchearItemsFacturaConOc en
+// netlify/functions/_lib/agenteComprobanteCompra.js (Fase 69b) --
+// duplicado acá a propósito porque ese archivo corre en Node/Netlify y
+// éste en el browser, no hay un módulo compartido entre ambos hoy.
+
+const PALABRAS_FILLER_CUOTA = new Set(['de', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'del', 'al', 'en', 'con']);
+
+function normalizarTextoCuota(s: string): string[] {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !PALABRAS_FILLER_CUOTA.has(t));
+}
+
+function scoreDescripcionCuota(a: string, b: string): number {
+  const tokensA = normalizarTextoCuota(a);
+  const tokensB = normalizarTextoCuota(b);
+  if (!tokensA.length || !tokensB.length) return 0;
+  const setB = new Set(tokensB);
+  const comunes = tokensA.filter((t) => setB.has(t)).length;
+  return comunes / Math.min(tokensA.length, tokensB.length);
+}
+
+const UMBRAL_MATCH_CUOTA = 0.5;
+
+/** Para cada consumo nuevo con cuotasTotales > 1, busca en TODOS los
+ * consumos ya cargados de la misma tarjeta uno que sea "la cuota
+ * anterior" de la misma compra (cuotaActual - 1, mismas cuotasTotales,
+ * descripción parecida) y le copia el compraId. Si no encuentra nada,
+ * genera un compraId nuevo (primera cuota vista de esa compra). Nunca
+ * pisa un compraId ya asignado a mano.
+ */
+export function encadenarCuotasTarjeta(
+  tarjetaId: string,
+  consumosNuevos: ConsumoTarjeta[],
+  resumenesExistentes: ResumenTarjeta[],
+): ConsumoTarjeta[] {
+  const consumosPrevios = resumenesExistentes
+    .filter((r) => r.tarjetaId === tarjetaId)
+    .flatMap((r) => r.consumos);
+
+  return consumosNuevos.map((c) => {
+    if (c.compraId || c.cuotasTotales <= 1) return c;
+    let mejor: ConsumoTarjeta | null = null;
+    let mejorScore = 0;
+    for (const prev of consumosPrevios) {
+      if (prev.cuotasTotales !== c.cuotasTotales) continue;
+      if (prev.cuotaActual !== c.cuotaActual - 1) continue;
+      const score = scoreDescripcionCuota(c.descripcion, prev.descripcion);
+      if (score > mejorScore) {
+        mejorScore = score;
+        mejor = prev;
+      }
+    }
+    if (mejor && mejorScore >= UMBRAL_MATCH_CUOTA && mejor.compraId) {
+      return { ...c, compraId: mejor.compraId };
+    }
+    return { ...c, compraId: c.compraId ?? generarId() };
+  });
 }
 
 // ─── Mapeo dominio -> filas de Supabase ───────────────────────
@@ -307,6 +430,70 @@ function pagoToRow(p: Pago, clienteId: string) {
     lineas_pago: p.lineasPago,
     fecha_confirmacion: p.fechaConfirmacion ?? null,
     notas: p.notas ?? null,
+  };
+}
+
+function ingresoToRow(i: Ingreso, clienteId: string) {
+  return {
+    id: i.id,
+    cliente_id: clienteId,
+    fecha: i.fecha,
+    tipo: i.tipo,
+    origen: i.origen ?? null,
+    concepto: i.concepto ?? null,
+    monto: i.monto,
+    medio_pago: i.medioPago ?? null,
+    recurrente: i.recurrente,
+    dia_mes_recurrente: i.diaMesRecurrente ?? null,
+    movimiento_caja_id: i.movimientoCajaId ?? null,
+    notas: i.notas ?? null,
+  };
+}
+
+function tarjetaToRow(t: TarjetaCredito, clienteId: string) {
+  return {
+    id: t.id,
+    cliente_id: clienteId,
+    nombre: t.nombre,
+    banco: t.banco ?? null,
+    titular: t.titular ?? null,
+    ultimos_digitos: t.ultimosDigitos ?? null,
+    dia_cierre: t.diaCierre ?? null,
+    dia_vencimiento: t.diaVencimiento ?? null,
+    limite: t.limite ?? null,
+    activa: t.activa,
+  };
+}
+
+function resumenTarjetaToRow(r: ResumenTarjeta, clienteId: string) {
+  return {
+    id: r.id,
+    cliente_id: clienteId,
+    tarjeta_id: r.tarjetaId,
+    periodo: r.periodo,
+    fecha_cierre: r.fechaCierre ?? null,
+    fecha_vencimiento: r.fechaVencimiento ?? null,
+    total: r.total,
+    pago_minimo: r.pagoMinimo ?? null,
+    estado: r.estado,
+    monto_pagado: r.montoPagado,
+    saldo_pendiente: r.saldoPendiente,
+    notas: r.notas ?? null,
+  };
+}
+
+function consumoTarjetaToRow(c: ConsumoTarjeta, resumenId: string, tarjetaId: string) {
+  return {
+    id: c.id,
+    resumen_id: resumenId,
+    tarjeta_id: tarjetaId,
+    descripcion: c.descripcion,
+    fecha_consumo: c.fechaConsumo ?? null,
+    monto: c.monto,
+    cuota_actual: c.cuotaActual,
+    cuotas_totales: c.cuotasTotales,
+    compra_id: c.compraId ?? null,
+    categoria_gasto_id: c.categoriaGastoId ?? null,
   };
 }
 
@@ -496,6 +683,97 @@ function syncToSupabase(action: HomeKeepAction, nextState: HomeKeepState, client
       return;
     }
 
+    // ─── Fase 70: Ingresos ────────────────────────────────────
+    case 'ADD_INGRESO': {
+      const i = nextState.ingresos.find((x) => x.id === action.payload.id);
+      if (!i) return;
+      supabase.from('ingresos_hogar').insert(ingresoToRow(i, clienteId)).then((res) => {
+        logErr('alta de ingreso')(res);
+      });
+      // Doble registro (a pedido de Carlos): un aporte del negocio sale
+      // de la Charcutería de verdad -- se refleja como egreso real en su
+      // Tesorería, con el mismo medio de pago declarado acá.
+      if (i.tipo === 'aporte_negocio' && i.medioPago && i.medioPago !== 'cuenta_corriente') {
+        registrarMovimientoTesoreria({
+          clienteId,
+          tipo: 'egreso',
+          medioPago: i.medioPago,
+          monto: i.monto,
+          concepto: `Aporte a Hogar${i.concepto ? ` — ${i.concepto}` : ''}`,
+          categoria: 'Aportes al hogar',
+          fecha: i.fecha,
+          // Home Keep comparte el mismo circuito de Tesorería que Compras
+          // (mismo shim que el resto de este archivo).
+          origenModulo: 'compras',
+          origenId: i.id,
+        });
+      }
+      return;
+    }
+
+    case 'DELETE_INGRESO':
+      supabase.from('ingresos_hogar').delete().eq('id', action.payload.id).then(logErr('borrado de ingreso'));
+      return;
+
+    // ─── Fase 70: Tarjetas de crédito ─────────────────────────
+    case 'ADD_TARJETA':
+      supabase.from('tarjetas_credito_hogar').insert(tarjetaToRow(action.payload, clienteId)).then(logErr('alta de tarjeta'));
+      return;
+
+    case 'UPDATE_TARJETA':
+      supabase.from('tarjetas_credito_hogar').update(tarjetaToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de tarjeta'));
+      return;
+
+    case 'TOGGLE_TARJETA_ACTIVA': {
+      const t = nextState.tarjetas.find((x) => x.id === action.payload.id);
+      if (t) supabase.from('tarjetas_credito_hogar').update({ activa: t.activa }).eq('id', t.id).then(logErr('activar/desactivar tarjeta'));
+      return;
+    }
+
+    case 'ADD_RESUMEN_TARJETA': {
+      const r = nextState.resumenesTarjeta.find((x) => x.id === action.payload.id);
+      if (!r) return;
+      supabase
+        .from('resumenes_tarjeta_hogar')
+        .insert(resumenTarjetaToRow(r, clienteId))
+        .then((res) => {
+          logErr('alta de resumen de tarjeta')(res);
+          if (!res.error && r.consumos.length) {
+            supabase
+              .from('consumos_tarjeta_hogar')
+              .insert(r.consumos.map((c) => consumoTarjetaToRow(c, r.id, r.tarjetaId)))
+              .then(logErr('consumos de resumen de tarjeta'));
+          }
+        });
+      return;
+    }
+
+    case 'PAGAR_RESUMEN_TARJETA': {
+      const r = nextState.resumenesTarjeta.find((x) => x.id === action.payload.resumenId);
+      if (!r) return;
+      const tarjeta = nextState.tarjetas.find((t) => t.id === r.tarjetaId);
+      supabase
+        .from('resumenes_tarjeta_hogar')
+        .update({ monto_pagado: r.montoPagado, saldo_pendiente: r.saldoPendiente, estado: r.estado })
+        .eq('id', r.id)
+        .then(logErr('pago de resumen de tarjeta'));
+      if (action.payload.medioPago !== 'cuenta_corriente') {
+        registrarMovimientoTesoreria({
+          clienteId,
+          tipo: 'egreso',
+          medioPago: action.payload.medioPago,
+          monto: action.payload.monto,
+          concepto: `Resumen ${tarjeta?.nombre ?? 'tarjeta'} — ${r.periodo}`,
+          categoria: 'Tarjeta de crédito',
+          fecha: action.payload.fecha,
+          origenModulo: 'compras',
+          cuentaBancariaId: action.payload.cuentaBancariaId,
+          origenId: r.id,
+        });
+      }
+      return;
+    }
+
     default:
       return;
   }
@@ -519,12 +797,16 @@ function itemComprobanteFromRow(r: any): ItemComprobante {
 }
 
 async function fetchHomeKeepState(): Promise<HomeKeepState> {
-  const [proveedoresRes, comprobantesRes, compItemsRes, pagosRes, impRes] = await Promise.all([
+  const [proveedoresRes, comprobantesRes, compItemsRes, pagosRes, impRes, ingresosRes, tarjetasRes, resumenesRes, consumosRes] = await Promise.all([
     supabase.from('proveedores_hogar').select('*').order('created_at'),
     supabase.from('comprobantes_hogar').select('*').order('numero'),
     supabase.from('comprobante_hogar_items').select('*'),
     supabase.from('pagos_hogar').select('*').order('numero'),
     supabase.from('pago_hogar_imputaciones').select('*'),
+    supabase.from('ingresos_hogar').select('*').order('fecha'),
+    supabase.from('tarjetas_credito_hogar').select('*').order('created_at'),
+    supabase.from('resumenes_tarjeta_hogar').select('*').order('periodo'),
+    supabase.from('consumos_tarjeta_hogar').select('*'),
   ]);
 
   const proveedores: Proveedor[] = (proveedoresRes.data ?? []).map((r: any) => ({
@@ -607,10 +889,76 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     nota_debito: maxNumero(comprobantes.filter((c) => c.tipo === 'nota_debito')) + 1,
   };
 
+  const ingresos: Ingreso[] = (ingresosRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    fecha: r.fecha,
+    tipo: r.tipo,
+    origen: r.origen ?? undefined,
+    concepto: r.concepto ?? undefined,
+    monto: Number(r.monto),
+    medioPago: r.medio_pago ?? undefined,
+    recurrente: r.recurrente,
+    diaMesRecurrente: r.dia_mes_recurrente ?? undefined,
+    movimientoCajaId: r.movimiento_caja_id ?? undefined,
+    notas: r.notas ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+
+  const tarjetas: TarjetaCredito[] = (tarjetasRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    nombre: r.nombre,
+    banco: r.banco ?? undefined,
+    titular: r.titular ?? undefined,
+    ultimosDigitos: r.ultimos_digitos ?? undefined,
+    diaCierre: r.dia_cierre ?? undefined,
+    diaVencimiento: r.dia_vencimiento ?? undefined,
+    limite: r.limite != null ? Number(r.limite) : undefined,
+    activa: r.activa,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+
+  const consumosByResumen = new Map<string, ConsumoTarjeta[]>();
+  for (const r of consumosRes.data ?? []) {
+    const arr = consumosByResumen.get(r.resumen_id) ?? [];
+    arr.push({
+      id: r.id,
+      descripcion: r.descripcion,
+      fechaConsumo: r.fecha_consumo ?? undefined,
+      monto: Number(r.monto),
+      cuotaActual: r.cuota_actual,
+      cuotasTotales: r.cuotas_totales,
+      compraId: r.compra_id ?? undefined,
+      categoriaGastoId: r.categoria_gasto_id ?? undefined,
+    });
+    consumosByResumen.set(r.resumen_id, arr);
+  }
+
+  const resumenesTarjeta: ResumenTarjeta[] = (resumenesRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    tarjetaId: r.tarjeta_id,
+    periodo: r.periodo,
+    fechaCierre: r.fecha_cierre ?? undefined,
+    fechaVencimiento: r.fecha_vencimiento ?? undefined,
+    total: Number(r.total),
+    pagoMinimo: r.pago_minimo != null ? Number(r.pago_minimo) : undefined,
+    estado: r.estado,
+    montoPagado: Number(r.monto_pagado),
+    saldoPendiente: Number(r.saldo_pendiente),
+    consumos: consumosByResumen.get(r.id) ?? [],
+    notas: r.notas ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+
   return {
     proveedores,
     comprobantes,
     pagos,
+    ingresos,
+    tarjetas,
+    resumenesTarjeta,
     nextNumeroComprobante,
     nextNumeroPago: maxNumero(pagos) + 1,
     config: SEED_STATE.config,
@@ -626,6 +974,9 @@ const emptyState: HomeKeepState = {
   proveedores: [],
   comprobantes: [],
   pagos: [],
+  ingresos: [],
+  tarjetas: [],
+  resumenesTarjeta: [],
   nextNumeroComprobante: { factura: 1, nota_credito: 1, nota_debito: 1 },
   nextNumeroPago: 1,
   config: SEED_STATE.config,
@@ -746,6 +1097,49 @@ export function useDashboardHomeKeep(): DashboardHomeKeepStats {
 
     return { gastosDelMes, pendientePago, proveedoresActivos, topProveedores };
   }, [comprobantes, proveedores]);
+}
+
+// ─── Fase 70: Ingresos y Tarjetas ──────────────────────────────
+
+export function useIngresos(): Ingreso[] {
+  const { ingresos } = useHomeKeep();
+  return ingresos;
+}
+
+export function useTarjetas(): TarjetaCredito[] {
+  const { tarjetas } = useHomeKeep();
+  return tarjetas;
+}
+
+export function useResumenesTarjeta(tarjetaId?: string): ResumenTarjeta[] {
+  const { resumenesTarjeta } = useHomeKeep();
+  return useMemo(() => {
+    if (!tarjetaId) return resumenesTarjeta;
+    return resumenesTarjeta.filter((r) => r.tarjetaId === tarjetaId);
+  }, [resumenesTarjeta, tarjetaId]);
+}
+
+interface SaldoHogar {
+  totalIngresos: number;
+  totalEgresos: number;
+  saldoDisponible: number;
+}
+
+/** Saldo "de bolsillo" del hogar: todo lo que entró (Ingresos) menos
+ * todo lo que salió por Comprobantes (Compras/servicios pagados) y
+ * Pagos confirmados -- NO incluye resúmenes de tarjeta todavía
+ * pendientes de pago (esos son deuda futura, no salida de caja hoy). */
+export function useSaldoHogar(): SaldoHogar {
+  const { ingresos, comprobantes } = useHomeKeep();
+  return useMemo(() => {
+    const totalIngresos = ingresos.reduce((sum, i) => sum + i.monto, 0);
+    // comprobante.montoPagado ya acumula TODO lo pagado de esa factura,
+    // sea que se pagó al instante (ADD_COMPROBANTE) o después a través de
+    // un Pago (CONFIRMAR_PAGO actualiza montoPagado de cada comprobante
+    // imputado) -- sumar además pago.monto duplicaría esa misma plata.
+    const totalEgresos = comprobantes.filter((c) => c.estado !== 'anulado').reduce((sum, c) => sum + c.montoPagado, 0);
+    return { totalIngresos, totalEgresos, saldoDisponible: totalIngresos - totalEgresos };
+  }, [ingresos, comprobantes]);
 }
 
 export type { HomeKeepAction };

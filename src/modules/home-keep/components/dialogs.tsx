@@ -31,6 +31,10 @@ import type {
   ImpuestoAdicional,
   Pago,
   LineaPago,
+  TipoIngreso,
+  TarjetaCredito,
+  ConsumoTarjeta,
+  ResumenTarjeta,
 } from '../types';
 
 import {
@@ -39,6 +43,7 @@ import {
   CONDICION_IVA_PROV_LABEL,
   TIPO_COMPROBANTE_LABEL,
   MEDIO_PAGO_LABEL,
+  TIPO_INGRESO_LABEL,
 } from '../types';
 
 import { formatARS, todayISO } from '../lib/format';
@@ -1269,6 +1274,617 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
             <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
             <button className={btnPrimary} onClick={handleConfirm}>Confirmar pago</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── IngresoDialog (Fase 70) ────────────────────────────────
+// De dónde sale la plata: aporte de la Charcutería (con doble registro
+// en su Tesorería, ver store.tsx) o ingreso fijo de un familiar.
+
+interface IngresoDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (data: {
+    fecha: string;
+    tipo: TipoIngreso;
+    origen: string;
+    concepto: string;
+    monto: number;
+    medioPago?: MedioPago;
+    recurrente: boolean;
+    diaMesRecurrente?: number;
+    notas: string;
+  }) => void;
+}
+
+export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps) {
+  const [fecha, setFecha] = useState(todayISO());
+  const [tipo, setTipo] = useState<TipoIngreso>('aporte_negocio');
+  const [origen, setOrigen] = useState('La Charcutería');
+  const [concepto, setConcepto] = useState('');
+  const [monto, setMonto] = useState(0);
+  const [medioPago, setMedioPago] = useState<MedioPago>('transferencia');
+  const [recurrente, setRecurrente] = useState(false);
+  const [diaMesRecurrente, setDiaMesRecurrente] = useState(1);
+  const [notas, setNotas] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setFecha(todayISO());
+      setTipo('aporte_negocio');
+      setOrigen('La Charcutería');
+      setConcepto('');
+      setMonto(0);
+      setMedioPago('transferencia');
+      setRecurrente(false);
+      setDiaMesRecurrente(1);
+      setNotas('');
+      setError('');
+    }
+  }, [open]);
+
+  const handleTipo = (nuevo: TipoIngreso) => {
+    setTipo(nuevo);
+    if (nuevo === 'aporte_negocio') setOrigen('La Charcutería');
+    else if (origen === 'La Charcutería') setOrigen('');
+  };
+
+  const handleSave = () => {
+    if (monto <= 0) {
+      setError('El monto debe ser mayor a cero');
+      return;
+    }
+    onSave({
+      fecha,
+      tipo,
+      origen: origen.trim(),
+      concepto: concepto.trim(),
+      monto,
+      medioPago: tipo === 'aporte_negocio' ? medioPago : undefined,
+      recurrente,
+      diaMesRecurrente: recurrente ? diaMesRecurrente : undefined,
+      notas: notas.trim(),
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">Nuevo ingreso</Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>Tipo</label>
+              <select className={selectClass} value={tipo} onChange={(e) => handleTipo(e.target.value as TipoIngreso)}>
+                {(Object.entries(TIPO_INGRESO_LABEL) as [TipoIngreso, string][]).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+              {tipo === 'aporte_negocio' && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Se registra doble: acá como ingreso, y como egreso real en la Tesorería de la Charcutería.
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Fecha</label>
+                <input type="date" className={inputClass} value={fecha} onChange={(e) => setFecha(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Monto *</label>
+                <input type="number" className={inputClass} value={monto || ''} onChange={(e) => setMonto(Number(e.target.value))} />
+              </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>{tipo === 'ingreso_familiar' ? 'Nombre del familiar' : 'Origen'}</label>
+              <input
+                className={inputClass}
+                value={origen}
+                onChange={(e) => setOrigen(e.target.value)}
+                placeholder={tipo === 'ingreso_familiar' ? 'Ej. Esposa' : 'Ej. La Charcutería'}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Concepto</label>
+              <input className={inputClass} value={concepto} onChange={(e) => setConcepto(e.target.value)} placeholder="Opcional" />
+            </div>
+
+            {tipo === 'aporte_negocio' && (
+              <div>
+                <label className={labelClass}>Cómo salió de la Charcutería</label>
+                <select className={selectClass} value={medioPago} onChange={(e) => setMedioPago(e.target.value as MedioPago)}>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="transferencia">Transferencia</option>
+                </select>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="ingreso-recurrente"
+                checked={recurrente}
+                onChange={(e) => setRecurrente(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <label htmlFor="ingreso-recurrente" className="text-sm text-gray-700">Ingreso fijo mensual (recordar cada mes)</label>
+            </div>
+            {recurrente && (
+              <div>
+                <label className={labelClass}>Día del mes</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className={inputClass}
+                  value={diaMesRecurrente}
+                  onChange={(e) => setDiaMesRecurrente(Number(e.target.value))}
+                />
+              </div>
+            )}
+
+            <div>
+              <label className={labelClass}>Notas</label>
+              <textarea className={inputClass} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            </div>
+
+            {error && <p className="text-xs text-red-600">{error}</p>}
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── TarjetaDialog (Fase 70) ────────────────────────────────
+
+interface TarjetaDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  tarjeta?: TarjetaCredito;
+  onSave: (data: Omit<TarjetaCredito, 'id' | 'activa' | 'createdAt' | 'updatedAt'>) => void;
+}
+
+export function TarjetaDialog({ open, onOpenChange, tarjeta, onSave }: TarjetaDialogProps) {
+  const [nombre, setNombre] = useState('');
+  const [banco, setBanco] = useState('');
+  const [titular, setTitular] = useState('');
+  const [ultimosDigitos, setUltimosDigitos] = useState('');
+  const [diaCierre, setDiaCierre] = useState<number | ''>('');
+  const [diaVencimiento, setDiaVencimiento] = useState<number | ''>('');
+  const [limite, setLimite] = useState<number | ''>('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setNombre(tarjeta?.nombre ?? '');
+      setBanco(tarjeta?.banco ?? '');
+      setTitular(tarjeta?.titular ?? '');
+      setUltimosDigitos(tarjeta?.ultimosDigitos ?? '');
+      setDiaCierre(tarjeta?.diaCierre ?? '');
+      setDiaVencimiento(tarjeta?.diaVencimiento ?? '');
+      setLimite(tarjeta?.limite ?? '');
+      setError('');
+    }
+  }, [open, tarjeta]);
+
+  const handleSave = () => {
+    if (!nombre.trim()) {
+      setError('El nombre es obligatorio');
+      return;
+    }
+    onSave({
+      nombre: nombre.trim(),
+      banco: banco.trim() || undefined,
+      titular: titular.trim() || undefined,
+      ultimosDigitos: ultimosDigitos.trim() || undefined,
+      diaCierre: diaCierre === '' ? undefined : Number(diaCierre),
+      diaVencimiento: diaVencimiento === '' ? undefined : Number(diaVencimiento),
+      limite: limite === '' ? undefined : Number(limite),
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">{tarjeta ? 'Editar tarjeta' : 'Nueva tarjeta'}</Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>Nombre *</label>
+              <input className={inputClass} value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Visa Santander - Carlos" />
+              {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Banco</label>
+                <input className={inputClass} value={banco} onChange={(e) => setBanco(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Titular</label>
+                <input className={inputClass} value={titular} onChange={(e) => setTitular(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelClass}>Últimos 4 dígitos</label>
+                <input className={inputClass} maxLength={4} value={ultimosDigitos} onChange={(e) => setUltimosDigitos(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Día de cierre</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className={inputClass}
+                  value={diaCierre}
+                  onChange={(e) => setDiaCierre(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Día de vencimiento</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className={inputClass}
+                  value={diaVencimiento}
+                  onChange={(e) => setDiaVencimiento(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className={labelClass}>Límite</label>
+              <input
+                type="number"
+                className={inputClass}
+                value={limite}
+                onChange={(e) => setLimite(e.target.value === '' ? '' : Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── ResumenTarjetaDialog (Fase 70) ─────────────────────────
+// Carga de un resumen con detalle completo de consumos y cuotas (a
+// pedido explícito de Carlos, para poder ver qué compra puntual
+// compone cada resumen mensual). El total NO se tipea a mano: se
+// calcula solo, sumando los consumos -- mismo criterio que
+// ComprobanteDialog con sus ítems.
+
+interface ConsumoRow {
+  id: string;
+  descripcion: string;
+  fechaConsumo: string;
+  monto: number;
+  cuotaActual: number;
+  cuotasTotales: number;
+}
+
+function newConsumoRow(): ConsumoRow {
+  return { id: generarId(), descripcion: '', fechaConsumo: todayISO(), monto: 0, cuotaActual: 1, cuotasTotales: 1 };
+}
+
+interface ResumenTarjetaDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  tarjetas: TarjetaCredito[];
+  onSave: (data: {
+    tarjetaId: string;
+    periodo: string;
+    fechaCierre: string;
+    fechaVencimiento: string;
+    pagoMinimo?: number;
+    notas: string;
+    consumos: Omit<ConsumoTarjeta, 'id' | 'compraId'>[];
+  }) => void;
+}
+
+export function ResumenTarjetaDialog({ open, onOpenChange, tarjetas, onSave }: ResumenTarjetaDialogProps) {
+  const [tarjetaId, setTarjetaId] = useState('');
+  const [periodo, setPeriodo] = useState(() => todayISO().slice(0, 7));
+  const [fechaCierre, setFechaCierre] = useState(todayISO());
+  const [fechaVencimiento, setFechaVencimiento] = useState(todayISO());
+  const [pagoMinimo, setPagoMinimo] = useState<number | ''>('');
+  const [notas, setNotas] = useState('');
+  const [consumos, setConsumos] = useState<ConsumoRow[]>([newConsumoRow()]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setTarjetaId(tarjetas[0]?.id ?? '');
+      setPeriodo(todayISO().slice(0, 7));
+      setFechaCierre(todayISO());
+      setFechaVencimiento(todayISO());
+      setPagoMinimo('');
+      setNotas('');
+      setConsumos([newConsumoRow()]);
+      setError('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const updateConsumo = (idx: number, field: keyof ConsumoRow, value: string | number) => {
+    setConsumos((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c)));
+  };
+  const addConsumo = () => setConsumos((prev) => [...prev, newConsumoRow()]);
+  const removeConsumo = (idx: number) => {
+    if (consumos.length > 1) setConsumos((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const total = consumos.reduce((sum, c) => sum + (Number(c.monto) || 0), 0);
+
+  const handleSave = () => {
+    if (!tarjetaId) {
+      setError('Elegí una tarjeta');
+      return;
+    }
+    if (!periodo.trim()) {
+      setError('El período es obligatorio');
+      return;
+    }
+    const incompletos = consumos.some((c) => !c.descripcion.trim() || c.monto <= 0);
+    if (incompletos) {
+      setError('Completá descripción y monto en todas las filas');
+      return;
+    }
+    onSave({
+      tarjetaId,
+      periodo: periodo.trim(),
+      fechaCierre,
+      fechaVencimiento,
+      pagoMinimo: pagoMinimo === '' ? undefined : Number(pagoMinimo),
+      notas: notas.trim(),
+      consumos: consumos.map((c) => ({
+        descripcion: c.descripcion.trim(),
+        fechaConsumo: c.fechaConsumo,
+        monto: Number(c.monto),
+        cuotaActual: Number(c.cuotaActual),
+        cuotasTotales: Number(c.cuotasTotales),
+      })),
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentWideClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">Nuevo resumen de tarjeta</Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Tarjeta *</label>
+                <select className={selectClass} value={tarjetaId} onChange={(e) => setTarjetaId(e.target.value)}>
+                  <option value="">Seleccionar...</option>
+                  {tarjetas.map((t) => (
+                    <option key={t.id} value={t.id}>{t.nombre}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Período (AAAA-MM) *</label>
+                <input className={inputClass} value={periodo} onChange={(e) => setPeriodo(e.target.value)} placeholder="2026-09" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelClass}>Fecha de cierre</label>
+                <input type="date" className={inputClass} value={fechaCierre} onChange={(e) => setFechaCierre(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Fecha de vencimiento</label>
+                <input type="date" className={inputClass} value={fechaVencimiento} onChange={(e) => setFechaVencimiento(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Pago mínimo</label>
+                <input
+                  type="number"
+                  className={inputClass}
+                  value={pagoMinimo}
+                  onChange={(e) => setPagoMinimo(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className={`${labelClass} mb-0`}>Consumos</label>
+                <button type="button" onClick={addConsumo} className="flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900">
+                  <Plus className="w-3.5 h-3.5" /> Agregar
+                </button>
+              </div>
+              <div className="space-y-2">
+                {consumos.map((c, idx) => (
+                  <div key={c.id} className="grid grid-cols-12 gap-2 items-center rounded-lg border border-gray-100 p-2">
+                    <input
+                      className={`${inputClass} col-span-4`}
+                      placeholder="Descripción"
+                      value={c.descripcion}
+                      onChange={(e) => updateConsumo(idx, 'descripcion', e.target.value)}
+                    />
+                    <input
+                      type="date"
+                      className={`${inputClass} col-span-2`}
+                      value={c.fechaConsumo}
+                      onChange={(e) => updateConsumo(idx, 'fechaConsumo', e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      className={`${inputClass} col-span-2`}
+                      placeholder="Monto cuota"
+                      value={c.monto || ''}
+                      onChange={(e) => updateConsumo(idx, 'monto', Number(e.target.value))}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      title="Cuota actual"
+                      className={`${inputClass} col-span-1`}
+                      value={c.cuotaActual}
+                      onChange={(e) => updateConsumo(idx, 'cuotaActual', Number(e.target.value))}
+                    />
+                    <span className="col-span-1 text-center text-gray-400 text-sm">/</span>
+                    <input
+                      type="number"
+                      min={1}
+                      title="Cuotas totales"
+                      className={`${inputClass} col-span-1`}
+                      value={c.cuotasTotales}
+                      onChange={(e) => updateConsumo(idx, 'cuotasTotales', Number(e.target.value))}
+                    />
+                    <button type="button" className={`${btnIcon} col-span-1`} onClick={() => removeConsumo(idx)} disabled={consumos.length <= 1}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                Cuota actual / cuotas totales -- ej. 3 / 12 para la tercera cuota de una compra en 12 pagos. Las cuotas de
+                una misma compra se agrupan automáticamente entre resúmenes por descripción.
+              </p>
+            </div>
+
+            <div>
+              <label className={labelClass}>Notas</label>
+              <textarea className={inputClass} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            </div>
+
+            <div className="flex justify-end text-sm font-semibold text-gray-900">Total: {formatARS(total)}</div>
+
+            {error && <p className="text-xs text-red-600">{error}</p>}
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── PagarResumenDialog (Fase 70) ───────────────────────────
+// Pago simplificado del resumen (un solo medio de pago por vez, sin el
+// circuito completo de Pago/imputaciones -- una tarjeta se suele pagar
+// de una sola vez, no combinando cheques/transferencias como una
+// factura de proveedor).
+
+interface PagarResumenDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  resumen?: ResumenTarjeta;
+  onSave: (data: { monto: number; fecha: string; medioPago: MedioPago }) => void;
+}
+
+export function PagarResumenDialog({ open, onOpenChange, resumen, onSave }: PagarResumenDialogProps) {
+  const [monto, setMonto] = useState(0);
+  const [fecha, setFecha] = useState(todayISO());
+  const [medioPago, setMedioPago] = useState<MedioPago>('transferencia');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open && resumen) {
+      setMonto(resumen.saldoPendiente);
+      setFecha(todayISO());
+      setMedioPago('transferencia');
+      setError('');
+    }
+  }, [open, resumen]);
+
+  if (!resumen) return null;
+
+  const handleSave = () => {
+    if (monto <= 0) {
+      setError('El monto debe ser mayor a cero');
+      return;
+    }
+    if (monto > resumen.saldoPendiente + 0.01) {
+      setError('El monto supera el saldo pendiente');
+      return;
+    }
+    onSave({ monto, fecha, medioPago });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">Pagar resumen — {resumen.periodo}</Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500">
+              Saldo pendiente: <span className="font-semibold text-gray-900">{formatARS(resumen.saldoPendiente)}</span>
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Fecha</label>
+                <input type="date" className={inputClass} value={fecha} onChange={(e) => setFecha(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Monto</label>
+                <input type="number" className={inputClass} value={monto || ''} onChange={(e) => setMonto(Number(e.target.value))} />
+              </div>
+            </div>
+            <div>
+              <label className={labelClass}>Medio de pago</label>
+              <select className={selectClass} value={medioPago} onChange={(e) => setMedioPago(e.target.value as MedioPago)}>
+                {(Object.entries(MEDIO_PAGO_LABEL) as [MedioPago, string][])
+                  .filter(([val]) => val !== 'cheque')
+                  .map(([val, label]) => (
+                    <option key={val} value={val}>{label}</option>
+                  ))}
+              </select>
+            </div>
+            {error && <p className="text-xs text-red-600">{error}</p>}
+          </div>
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Confirmar pago</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

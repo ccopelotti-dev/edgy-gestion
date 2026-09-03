@@ -11,6 +11,8 @@ import {
   Building2,
   Receipt,
   Wallet,
+  TrendingUp,
+  CreditCard,
 } from 'lucide-react';
 
 interface TabDef {
@@ -24,12 +26,17 @@ const BASE = '/m/home_keep';
 
 const tabs: TabDef[] = [
   { to: BASE,                  label: 'Dashboard',    icon: LayoutDashboard, end: true },
+  // Fase 70: de dónde sale la plata (aporte de la Charcutería / ingreso
+  // fijo familiar) -- antes de Proveedores porque conceptualmente viene
+  // primero en el flujo del hogar.
+  { to: `${BASE}/ingresos`,     label: 'Ingresos',     icon: TrendingUp },
   { to: `${BASE}/proveedores`, label: 'Proveedores',  icon: Building2 },
   { to: `${BASE}/comprobantes`, label: 'Comprobantes', icon: Receipt },
   // Mismo ícono que usa Compras para "Ordenes de Pago" (Wallet) -- acá el
   // texto visible es simplemente "Pagos" (a pedido de Carlos), el modelo
   // de datos interno sigue llamándose "pago".
   { to: `${BASE}/pagos`,        label: 'Pagos',        icon: Wallet },
+  { to: `${BASE}/tarjetas`,    label: 'Tarjetas',     icon: CreditCard },
 ];
 
 export default function HomeKeepLayout() {
@@ -52,7 +59,7 @@ export default function HomeKeepLayout() {
                 key={tab.to}
                 to={tab.to}
                 end={tab.end ?? false}
-                className={({ isActive }) =>
+                className={({ isActive }: { isActive: boolean }) =>
                   `flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
                     isActive
                       ? 'border-gray-900 text-gray-900'
