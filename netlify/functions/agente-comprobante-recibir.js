@@ -218,6 +218,13 @@ export default async (req) => {
       comprobanteId: comprobante.id,
       estado: comprobante.estado,
       esPrueba,
+      // Fase 70d -- el mensaje de WhatsApp (n8n) decía siempre "cargado en
+      // Compras" aunque el caption "hogar" haya ruteado esto a Home Keep
+      // (el dato quedaba bien guardado en las tablas *_hogar, pero el
+      // texto de confirmación mentía). Se manda a nivel top-level (no solo
+      // dentro de cargaCompras) porque aplica a TODAS las ramas de
+      // respuesta, no solo a la de éxito.
+      destino: destinoValido || 'compras',
       cargaCompras: resultadoCarga,
     }),
     { status: 200 },
