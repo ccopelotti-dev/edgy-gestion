@@ -90,6 +90,8 @@ interface ProveedorForm {
   nombre: string;
   nombreFantasia: string;
   cuit: string;
+  /** Fase 69: ver Proveedor.esInformal en types/index.ts. */
+  esInformal: boolean;
   condicionIva: CondicionIvaProveedor;
   email: string;
   telefono: string;
@@ -105,6 +107,7 @@ const emptyProveedorForm: ProveedorForm = {
   nombre: '',
   nombreFantasia: '',
   cuit: '',
+  esInformal: false,
   condicionIva: 'responsable_inscripto',
   email: '',
   telefono: '',
@@ -127,6 +130,7 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
           nombre: proveedor.nombre,
           nombreFantasia: proveedor.nombreFantasia ?? '',
           cuit: proveedor.cuit,
+          esInformal: proveedor.esInformal ?? false,
           condicionIva: proveedor.condicionIva,
           email: proveedor.email ?? '',
           telefono: proveedor.telefono ?? '',
@@ -152,8 +156,12 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
   const validate = (): boolean => {
     const next: Partial<Record<keyof ProveedorForm, string>> = {};
     if (!form.nombre.trim()) next.nombre = 'El nombre es obligatorio';
-    if (!form.cuit.trim()) next.cuit = 'El CUIT es obligatorio';
-    else if (!esCuitValido(form.cuit)) next.cuit = 'El CUIT no es válido (dígito verificador incorrecto)';
+    // Fase 69: un proveedor informal (familiar, préstamo puntual) no
+    // tiene CUIT real -- se guarda vacío, sin exigir ni validar nada acá.
+    if (!form.esInformal) {
+      if (!form.cuit.trim()) next.cuit = 'El CUIT es obligatorio';
+      else if (!esCuitValido(form.cuit)) next.cuit = 'El CUIT no es válido (dígito verificador incorrecto)';
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -163,7 +171,8 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
     onSave({
       nombre: form.nombre.trim(),
       nombreFantasia: form.nombreFantasia.trim() || undefined,
-      cuit: form.cuit.trim(),
+      cuit: form.esInformal ? '' : form.cuit.trim(),
+      esInformal: form.esInformal,
       condicionIva: form.condicionIva,
       email: form.email || undefined,
       telefono: form.telefono || undefined,
@@ -201,10 +210,26 @@ export function ProveedorDialog({ open, onOpenChange, proveedor, onSave }: Prove
               <input className={inputClass} value={form.nombreFantasia} onChange={(e) => update('nombreFantasia', e.target.value)} placeholder="Nombre de fantasia (ej. Don Rene)" />
             </div>
 
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={form.esInformal}
+                onChange={(e) => update('esInformal', e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Proveedor informal (sin CUIT -- familiar, préstamo puntual de insumos, etc.)
+            </label>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelClass}>CUIT *</label>
-                <input className={inputClass} value={form.cuit} onChange={(e) => update('cuit', e.target.value)} placeholder="Sin guiones" />
+                <label className={labelClass}>{form.esInformal ? 'CUIT (opcional)' : 'CUIT *'}</label>
+                <input
+                  className={inputClass}
+                  value={form.cuit}
+                  onChange={(e) => update('cuit', e.target.value)}
+                  placeholder={form.esInformal ? 'Sin CUIT' : 'Sin guiones'}
+                  disabled={form.esInformal}
+                />
                 {errors.cuit && <p className="text-xs text-red-600 mt-1">{errors.cuit}</p>}
               </div>
               <div>

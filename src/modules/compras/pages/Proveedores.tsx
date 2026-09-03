@@ -272,11 +272,16 @@ export default function Proveedores() {
                       </td>
                       <td className="px-4 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">
                         {prov.nombre}
+                        {prov.esInformal && (
+                          <span className="ml-1.5 inline-flex rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700" title="Proveedor informal, sin CUIT -- familiar, préstamo puntual de insumos, etc.">
+                            Informal
+                          </span>
+                        )}
                         {prov.nombreFantasia && (
                           <div className="text-[11px] font-normal text-gray-400">{prov.nombreFantasia}</div>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{formatCuit(prov.cuit)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{prov.esInformal ? '—' : formatCuit(prov.cuit)}</td>
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{CONDICION_IVA_PROV_LABEL[prov.condicionIva]}</td>
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{prov.rubro ?? '—'}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap"><Amount value={prov.saldoCuentaCorriente} size="xs" /></td>

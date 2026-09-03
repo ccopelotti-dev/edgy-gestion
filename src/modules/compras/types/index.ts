@@ -20,6 +20,15 @@ export interface Proveedor {
    * PDF siguen usando la razón social. */
   nombreFantasia?: string;
   cuit: string;
+  /** Fase 69: proveedor sin CUIT real -- un familiar, un préstamo puntual
+   * de insumos, etc. Cuando es true, el CUIT queda opcional (se guarda
+   * como ''/null) tanto en el alta como en la validación del modal. Sirve
+   * para poder registrar "compras" de este proveedor (a cuenta corriente,
+   * sin plata real de por medio) y así usar TODO el circuito existente de
+   * Comprobantes -> Recepción -> stock + saldo/Orden de Pago para
+   * trackear qué se le debe devolver o pagar, en vez de tapar el préstamo
+   * con un ajuste manual de stock (ver migración 0116). */
+  esInformal?: boolean;
   condicionIva: CondicionIvaProveedor;
   email?: string;
   telefono?: string;

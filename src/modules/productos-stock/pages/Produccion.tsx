@@ -843,7 +843,10 @@ export default function Produccion() {
             <div className="flex items-center justify-end gap-3">
               {bloqueadoPorInsumos && (
                 <span className="text-xs text-red-600">
-                  No se puede registrar -- falta stock de insumos (revisá la tabla de arriba).
+                  No se puede registrar -- falta stock de insumos (revisá la tabla de arriba). Si lo
+                  conseguiste prestado de un tercero (no es una compra real), cargalo en Compras &gt;
+                  Comprobantes como factura de un proveedor informal (a cuenta corriente) en vez de
+                  ajustar el stock a mano -- así queda el saldo a devolver o pagar.
                 </span>
               )}
               <Button
