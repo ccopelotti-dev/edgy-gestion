@@ -718,6 +718,13 @@ export interface Insumo {
    * faltantes en una OC por proveedor real en vez de por rubro -- ver
    * `agruparFaltantesPorOC` más abajo. */
   proveedorId?: string
+  /** Fase 70f (04/09, a pedido de Carlos): código de barras/QR del insumo,
+   * mismo criterio que Producto.codigoBarras -- si el insumo viene con
+   * código real de fábrica se prioriza ese (se escanea/carga tal cual);
+   * si no tiene, se autogenera uno interno con generarCodigoInterno().
+   * undefined = sin código cargado (default, sin cambios para insumos
+   * existentes). */
+  codigoBarras?: string
   /** Fase 48b (24/08, a pedido de Carlos -- Charcutería, caso Starter que
    * viene en sachets de 20 g Y de 40 g): presentaciones de compra de este
    * insumo -- reemplaza al campo único `pesoEnvase` de la Fase 48 (mismo

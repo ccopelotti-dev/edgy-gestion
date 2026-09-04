@@ -1268,6 +1268,11 @@ interface InsumoDialogProps {
    * ofrecer un atajo hacia él cuando el insumo es un espejo. Opcional para
    * no romper otros llamadores que todavía no lo pasen. */
   productos?: Producto[]
+  /** Fase 70f: lista de insumos existentes, para validar que el código de
+   * barras cargado/generado no esté repetido (mismo criterio que
+   * ProductoDialog con `productos`). Opcional para no romper otros
+   * llamadores que todavía no lo pasen. */
+  insumos?: Insumo[]
   onIrAProducto?: (productoId: string) => void
 }
 
@@ -1301,11 +1306,13 @@ export function InsumoDialog({
   subRubros,
   editData,
   productos,
+  insumos,
   onIrAProducto,
 }: InsumoDialogProps) {
   const [form, setForm] = useState<InsumoFormData>(emptyInsumo)
   const [stockMinimoTexto, setStockMinimoTexto] = useState('')
   const [costoTexto, setCostoTexto] = useState('')
+  const [errorCodigoBarras, setErrorCodigoBarras] = useState('')
   // Fase 41.7: ver comentario de Insumo.anchoRollo en types/index.ts.
   const [anchoRolloTexto, setAnchoRolloTexto] = useState('')
   // Fase 48b: ver comentario de Insumo.presentaciones en types/index.ts.
@@ -1366,6 +1373,7 @@ export function InsumoDialog({
     if (open) {
       setGuardando(false)
       setErrorGuardado('')
+      setErrorCodigoBarras('')
       // Fase 48c: carpeta estable para la foto (id real si ya existe, o un
       // id temporal si el insumo se está creando) y limpieza de refs de
       // "subido en esta sesión" -- mismo criterio que ProductoDialog.
@@ -1475,6 +1483,19 @@ export function InsumoDialog({
   async function handleSave() {
     if (!form.nombre.trim()) return
     if (guardando) return
+
+    const codigoBarrasLimpio = form.codigoBarras?.trim() || undefined
+    if (codigoBarrasLimpio) {
+      const yaUsado = (insumos ?? []).some(
+        (i) => i.id !== editData?.id && i.codigoBarras === codigoBarrasLimpio,
+      )
+      if (yaUsado) {
+        setErrorCodigoBarras('Ese código de barras ya lo tiene otro insumo.')
+        return
+      }
+    }
+    setErrorCodigoBarras('')
+
     setErrorGuardado('')
     // Presentaciones con contenido vacío o inválido se descartan en
     // silencio (fila a medio cargar, no vale la pena bloquear el guardado
@@ -1498,6 +1519,7 @@ export function InsumoDialog({
     const errorGuardar = await onSave({
       ...form,
       subRubroId: form.subRubroId || undefined,
+      codigoBarras: codigoBarrasLimpio,
       presentaciones,
       documentos,
     })
@@ -1621,6 +1643,40 @@ export function InsumoDialog({
               placeholder="Nombre del insumo"
               disabled={vinculado}
             />
+          </div>
+
+          {/* Fase 70f: Código de barras / QR -- mismo patrón que ProductoDialog. */}
+          <div className="grid gap-1.5">
+            <label className="text-sm font-medium">Código de barras / QR</label>
+            <div className="flex gap-2">
+              <input
+                className={inputClass}
+                value={form.codigoBarras ?? ''}
+                onChange={(e) => {
+                  update('codigoBarras', e.target.value)
+                  setErrorCodigoBarras('')
+                }}
+                placeholder="Escaneá con el lector, o generá uno interno"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => {
+                  update('codigoBarras', generarCodigoInterno())
+                  setErrorCodigoBarras('')
+                }}
+              >
+                <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                Generar
+              </Button>
+            </div>
+            {errorCodigoBarras && <p className="text-xs text-red-500">{errorCodigoBarras}</p>}
+            <p className="text-muted-foreground text-xs">
+              Si el insumo ya viene con código de fábrica, escaneálo acá con el lector. Si no
+              tiene, usá "Generar" para crear uno interno.
+            </p>
           </div>
 
           {/* Rubro y Sub-rubro */}
