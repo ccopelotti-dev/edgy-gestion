@@ -285,6 +285,15 @@ export const ESTADO_RESUMEN_TARJETA_LABEL: Record<EstadoResumenTarjeta, string> 
 
 // ─── Estado global ───────────────────────────────────────────
 
+/** Fase 70g (05/09, a pedido de Carlos): categoría de gasto personal
+ * (tabla compartida `categorias_gasto`, ver comentario en
+ * ItemComprobante.categoriaGastoId) -- se carga acá para poder mostrar el
+ * desglose de gastos por categoría en el Dashboard. */
+export interface CategoriaGasto {
+  id: string;
+  nombre: string;
+}
+
 export interface HomeKeepState {
   proveedores: Proveedor[];
   comprobantes: Comprobante[];
@@ -292,6 +301,7 @@ export interface HomeKeepState {
   ingresos: Ingreso[];
   tarjetas: TarjetaCredito[];
   resumenesTarjeta: ResumenTarjeta[];
+  categoriasGasto: CategoriaGasto[];
   nextNumeroComprobante: Record<TipoComprobante, number>;
   nextNumeroPago: number;
   config: HomeKeepConfig;

@@ -13,6 +13,7 @@ import {
   TrendingUp,
   FileText,
   AlertTriangle,
+  PieChart,
 } from 'lucide-react';
 
 import { useDashboardHomeKeep, useComprobantes, useProveedores } from '../data/store';
@@ -118,6 +119,43 @@ export default function Dashboard() {
                   </td>
                   <td className="py-2.5 text-right">
                     <Amount value={p.total} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Top categorías del mes (Fase 70g) */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <PieChart className="h-5 w-5 text-gray-600" />
+          <h2 className="text-lg font-semibold text-gray-900">Gastos por categoría del mes</h2>
+        </div>
+
+        {stats.topCategorias.length === 0 ? (
+          <EmptyState title="Sin gastos registrados este mes" />
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 text-left text-gray-500">
+                <th className="pb-2 font-medium">Categoria</th>
+                <th className="pb-2 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.topCategorias.map((c) => (
+                <tr key={c.categoriaId ?? 'sin-categorizar'} className="border-b border-gray-50 last:border-0">
+                  <td className="py-2.5">
+                    {c.categoriaId === null ? (
+                      <span className="text-gray-500 italic">{c.nombre}</span>
+                    ) : (
+                      c.nombre
+                    )}
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <Amount value={c.total} />
                   </td>
                 </tr>
               ))}

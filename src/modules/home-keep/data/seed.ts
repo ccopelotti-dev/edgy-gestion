@@ -15,6 +15,7 @@ export const SEED_STATE: HomeKeepState = {
   ingresos: [],
   tarjetas: [],
   resumenesTarjeta: [],
+  categoriasGasto: [],
   nextNumeroComprobante: { factura: 1, nota_credito: 1, nota_debito: 1 },
   nextNumeroPago: 1,
   config,

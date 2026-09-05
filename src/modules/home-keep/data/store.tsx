@@ -39,6 +39,7 @@ import type {
   ResumenTarjeta,
   ConsumoTarjeta,
   EstadoResumenTarjeta,
+  CategoriaGasto,
 } from '../types';
 
 import { generarId } from '../types';
@@ -798,7 +799,7 @@ function itemComprobanteFromRow(r: any): ItemComprobante {
 }
 
 async function fetchHomeKeepState(): Promise<HomeKeepState> {
-  const [proveedoresRes, comprobantesRes, compItemsRes, pagosRes, impRes, ingresosRes, tarjetasRes, resumenesRes, consumosRes] = await Promise.all([
+  const [proveedoresRes, comprobantesRes, compItemsRes, pagosRes, impRes, ingresosRes, tarjetasRes, resumenesRes, consumosRes, categoriasRes] = await Promise.all([
     supabase.from('proveedores_hogar').select('*').order('created_at'),
     supabase.from('comprobantes_hogar').select('*').order('numero'),
     supabase.from('comprobante_hogar_items').select('*'),
@@ -808,7 +809,14 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     supabase.from('tarjetas_credito_hogar').select('*').order('created_at'),
     supabase.from('resumenes_tarjeta_hogar').select('*').order('periodo'),
     supabase.from('consumos_tarjeta_hogar').select('*'),
+    // Fase 70g: categorías de gasto personal, para el desglose del Dashboard.
+    supabase.from('categorias_gasto').select('id, nombre').order('nombre'),
   ]);
+
+  const categoriasGasto: CategoriaGasto[] = (categoriasRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    nombre: r.nombre,
+  }));
 
   const proveedores: Proveedor[] = (proveedoresRes.data ?? []).map((r: any) => ({
     id: r.id,
@@ -961,6 +969,7 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     ingresos,
     tarjetas,
     resumenesTarjeta,
+    categoriasGasto,
     nextNumeroComprobante,
     nextNumeroPago: maxNumero(pagos) + 1,
     config: SEED_STATE.config,
@@ -979,6 +988,7 @@ const emptyState: HomeKeepState = {
   ingresos: [],
   tarjetas: [],
   resumenesTarjeta: [],
+  categoriasGasto: [],
   nextNumeroComprobante: { factura: 1, nota_credito: 1, nota_debito: 1 },
   nextNumeroPago: 1,
   config: SEED_STATE.config,
@@ -1071,10 +1081,15 @@ interface DashboardHomeKeepStats {
   pendientePago: number;
   proveedoresActivos: number;
   topProveedores: { proveedorId: string; nombre: string; total: number }[];
+  /** Fase 70g: desglose de gastos del mes por categoría de gasto personal
+   * (agrupado por ítem, no por comprobante -- ver ItemComprobante.categoriaGastoId).
+   * Los ítems sin categoría asignada se agrupan bajo categoriaId null,
+   * "Sin categorizar", para que sea visible cuánto falta clasificar. */
+  topCategorias: { categoriaId: string | null; nombre: string; total: number }[];
 }
 
 export function useDashboardHomeKeep(): DashboardHomeKeepStats {
-  const { comprobantes, proveedores } = useHomeKeep();
+  const { comprobantes, proveedores, categoriasGasto } = useHomeKeep();
   return useMemo(() => {
     const ahora = new Date();
     const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
@@ -1097,8 +1112,32 @@ export function useDashboardHomeKeep(): DashboardHomeKeepStats {
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
 
-    return { gastosDelMes, pendientePago, proveedoresActivos, topProveedores };
-  }, [comprobantes, proveedores]);
+    const categoriaTotals = new Map<string, number>();
+    const SIN_CATEGORIZAR = '__sin_categorizar__';
+    for (const f of facturasMes) {
+      for (const item of f.items) {
+        const clave = item.categoriaGastoId ?? SIN_CATEGORIZAR;
+        const totalItem = item.subtotal + item.montoIva;
+        categoriaTotals.set(clave, (categoriaTotals.get(clave) || 0) + totalItem);
+      }
+    }
+    const topCategorias = Array.from(categoriaTotals.entries())
+      .map(([clave, total]) => {
+        if (clave === SIN_CATEGORIZAR) {
+          return { categoriaId: null, nombre: 'Sin categorizar', total };
+        }
+        const categoria = categoriasGasto.find((c) => c.id === clave);
+        return { categoriaId: clave, nombre: categoria?.nombre ?? 'Desconocida', total };
+      })
+      .sort((a, b) => b.total - a.total);
+
+    return { gastosDelMes, pendientePago, proveedoresActivos, topProveedores, topCategorias };
+  }, [comprobantes, proveedores, categoriasGasto]);
+}
+
+export function useCategoriasGasto(): CategoriaGasto[] {
+  const { categoriasGasto } = useHomeKeep();
+  return categoriasGasto;
 }
 
 // ─── Fase 70: Ingresos y Tarjetas ──────────────────────────────
