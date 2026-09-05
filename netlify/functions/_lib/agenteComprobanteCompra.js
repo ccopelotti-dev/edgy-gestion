@@ -9,14 +9,19 @@
 //  - La forma de pago es binaria: 'efectivo' (Contado) o
 //    'cuenta_corriente' (Cta Cte) -- si ni la IA ni la respuesta del
 //    admin la resuelven, tampoco se carga nada en Compras.
-//  - Lo que sí se carga, se crea en estado 'pendiente' (nunca
-//    'pagado'): marcar un comprobante como pagado dispara en la
-//    pantalla un movimiento de egreso en Tesorería (ver
-//    src/modules/compras/data/store.tsx, syncToSupabase) que este
-//    endpoint no replica -- eso queda para una siguiente etapa, cuando
-//    se sume el cruce contra cajas/cuentas bancarias. Por ahora el
-//    pago se confirma a mano desde Compras, como cualquier otro
-//    comprobante.
+//  - Lo que sí se carga con forma de pago 'cuenta_corriente' se crea en
+//    estado 'pendiente' -- ahí es una deuda real con el proveedor, el
+//    pago se confirma a mano después desde Pagos, como cualquier otro
+//    comprobante a crédito.
+//  - Fase 70e (03/09, a pedido de Carlos): con 'efectivo' (Contado) es
+//    distinto -- el ticket en sí ES la prueba de que ya se pagó en el
+//    momento (verdulería, carnicería de barrio, etc.), así que dejarlo
+//    en 'pendiente' hasta que alguien vaya a mano a Pagos es un dato
+//    falso (el dashboard mostraba plata "adeudada" que en realidad ya
+//    se pagó en el momento de la compra). Para ese caso se registra el
+//    pago solo, sin preguntar (réplica de la misma cascada que dispara
+//    CONFIRMAR_PAGO en el frontend: pago + imputación + comprobante
+//    pagado + espejo en Tesorería -- ver más abajo).
 //  - Nunca toca stock (`stock_actualizado` queda false) -- combustible
 //    y servicios no son insumos de inventario.
 
@@ -720,14 +725,24 @@ export async function intentarCargarComprobante({
   // cliente, se la asigna a todos los ítems. Si el cliente no tiene
   // categorías (caso normal de Punto Tex/Charcutería) o no hay match,
   // queda null -- no bloquea la carga, es solo un dato extra.
+  //
+  // Fase 70g (05/09, bug real detectado en carga masiva de tickets Hogar):
+  // el match era 100% literal por string (solo lowercase) -- el prompt de
+  // n8n tenía "Alimentacion"/"Educacion" sin tilde mientras que las
+  // categorías cargadas en la base sí las tienen ("Alimentación",
+  // "Educación"), así que TODOS los tickets de supermercado quedaban sin
+  // categorizar en silencio. Se compara ahora sin acentos (además de ya
+  // haber corregido el prompt en n8n) para que un futuro desvío de tilde
+  // no vuelva a romper esto calladamente.
   let categoriaGastoId = null
   if (datosExtraidos.categoriaSugerida) {
     const { data: categorias } = await supabaseAdmin
       .from('categorias_gasto')
       .select('id, nombre')
       .eq('cliente_id', clienteId)
-    const buscado = String(datosExtraidos.categoriaSugerida).trim().toLowerCase()
-    const match = (categorias || []).find((c) => c.nombre.toLowerCase() === buscado)
+    const sinAcentos = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const buscado = sinAcentos(datosExtraidos.categoriaSugerida)
+    const match = (categorias || []).find((c) => sinAcentos(c.nombre) === buscado)
     categoriaGastoId = match ? match.id : null
   }
 
@@ -782,6 +797,65 @@ export async function intentarCargarComprobante({
   const total = numero(datosExtraidos.total, subtotal + montoIva + totalOtros)
 
   const notaTrazabilidad = `Cargado automáticamente por el agente de WhatsApp a partir de comprobantes_recibidos#${comprobanteRecibidoId}.`
+
+  // Fase 70e -- ver comentario de cabecera. 'efectivo' (Contado) = el
+  // ticket prueba que ya se pagó en el momento -> se registra el pago
+  // ACÁ, antes de insertar el comprobante, para poder crearlo ya en
+  // estado 'pagado' (en vez de crearlo pendiente y updatearlo después).
+  // 'cuenta_corriente' no toca nada de esto -- sigue quedando pendiente.
+  let pagoContado = null
+  if (formaPago === 'efectivo' && total > 0) {
+    const tablasPago = TABLAS_PAGOS_POR_DESTINO[destino] || TABLAS_PAGOS_POR_DESTINO.compras
+    const fechaPago = datosExtraidos.fecha || new Date().toISOString().slice(0, 10)
+    const { data: maxPago } = await supabaseAdmin
+      .from(tablasPago.pagos)
+      .select('numero')
+      .eq('cliente_id', clienteId)
+      .order('numero', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const nuevoNumeroPago = numero(maxPago?.numero, 0) + 1
+    const lineaPago = { id: crypto.randomUUID(), medioPago: 'efectivo', monto: total }
+    const { data: pagoInsertado, error: errPagoContado } = await supabaseAdmin
+      .from(tablasPago.pagos)
+      .insert([{
+        cliente_id: clienteId,
+        numero: nuevoNumeroPago,
+        proveedor_id: proveedor.id,
+        fecha: fechaPago,
+        estado: 'pagada',
+        monto: total,
+        medio_pago: 'efectivo',
+        lineas_pago: [lineaPago],
+        fecha_confirmacion: fechaPago,
+        notas: 'Pago automático -- el agente detectó que el ticket ya estaba pagado al momento de la compra (Fase 70e).',
+      }])
+      .select('id, numero')
+      .single()
+    if (errPagoContado) {
+      console.error('intentarCargarComprobante: error creando pago automático (contado)', errPagoContado)
+    } else {
+      pagoContado = pagoInsertado
+      // Espejo en Tesorería -- mismo criterio que intentarRegistrarPagoConReintegro:
+      // reimplementación server-side de registrarMovimientoTesoreria porque
+      // ese archivo usa el cliente de supabase del browser, no sirve acá.
+      const { error: errCaja } = await supabaseAdmin.from('movimientos_caja').insert([{
+        cliente_id: clienteId,
+        fecha: fechaPago,
+        tipo: 'egreso',
+        concepto: `Pago N.º ${pagoContado.numero} — ${proveedor.nombre_fantasia || proveedor.nombre}`,
+        categoria: 'Pago a proveedores',
+        medio_pago: 'efectivo',
+        monto: total,
+        cuenta_id: null,
+        link_id: crypto.randomUUID(),
+        punto_venta_id: null,
+      }])
+      if (errCaja) {
+        console.error('intentarCargarComprobante: error registrando movimiento de caja (pago automático)', errCaja)
+      }
+    }
+  }
 
   // Fase 69b (a pedido de Carlos, 03/09) -- caso real: la carne del 22/08
   // se compró contra la OC N.º 2, pero la factura llegó por WhatsApp sin
@@ -853,10 +927,10 @@ export async function intentarCargarComprobante({
     monto_iva: montoIva,
     otros_impuestos: otrosImpuestos,
     total,
-    estado: 'pendiente',
+    estado: pagoContado ? 'pagado' : 'pendiente',
     medio_pago: formaPago,
-    monto_pagado: 0,
-    saldo_pendiente: total,
+    monto_pagado: pagoContado ? total : 0,
+    saldo_pendiente: pagoContado ? 0 : total,
     numero_comprobante_proveedor: datosExtraidos.numeroComprobanteProveedor || null,
     notas: notaTrazabilidad,
     es_prueba: Boolean(esPrueba),
@@ -887,6 +961,20 @@ export async function intentarCargarComprobante({
 
   if (itemsError) {
     console.error('intentarCargarComprobante: error creando items', itemsError)
+  }
+
+  // Fase 70e -- el pago ya se creó más arriba (antes del insert de este
+  // comprobante, porque necesitábamos saber si había que crearlo como
+  // 'pagado'); ahora que ya existe comprobante.id, se cierra el círculo
+  // con la imputación.
+  if (pagoContado) {
+    const tablasPago = TABLAS_PAGOS_POR_DESTINO[destino] || TABLAS_PAGOS_POR_DESTINO.compras
+    const { error: errImputacionContado } = await supabaseAdmin
+      .from(tablasPago.imputaciones)
+      .insert([{ pago_id: pagoContado.id, comprobante_id: comprobante.id, monto_imputado: total }])
+    if (errImputacionContado) {
+      console.error('intentarCargarComprobante: error creando imputación (pago automático)', errImputacionContado)
+    }
   }
 
   // Fase 69b -- una vez insertados factura + items, se resuelve qué pasa
@@ -998,6 +1086,9 @@ export async function intentarCargarComprobante({
     ordenCompraVinculada,
     ocCerradaAutomaticamente,
     confirmacionOcPendiente,
+    // Fase 70e -- true si se detectó "efectivo" y se registró el pago
+    // solo (sin preguntar); el mensaje de WhatsApp lo aclara.
+    pagadoAutomaticamente: Boolean(pagoContado),
   }
 }
 
