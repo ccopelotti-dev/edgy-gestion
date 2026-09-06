@@ -36,6 +36,14 @@ import { useClienteActual } from '@/hooks/useClienteActual'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { AccesoRestringido } from '@/modules/AccesoRestringido'
 import type { UsuarioCliente } from '@/types'
 
@@ -79,6 +87,145 @@ function AvatarFamiliar({ nombre, color }: { nombre: string | null; color: strin
   )
 }
 
+function SelectorColor({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {COLORES_PERFIL.map((c) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onChange(c)}
+          aria-label={`Elegir color ${c}`}
+          className={`h-7 w-7 rounded-full transition-transform ${
+            value === c ? 'ring-2 ring-offset-2 ring-gray-900 scale-105' : ''
+          }`}
+          style={{ backgroundColor: c }}
+        />
+      ))}
+    </div>
+  )
+}
+
+// Fase 71h (06/09, a pedido de Carlos, inspirado en la pantalla de
+// "Información personal" de la cuenta de Google): al hacer click en
+// cualquier integrante ya cargado (incluido el propio Dueño) se abre
+// este dialog para ir completando sus datos administrativos con el
+// tiempo. Email y rol quedan de solo lectura acá a propósito -- tocar
+// el email de alguien que YA tiene login real requeriría además
+// actualizar su cuenta de Supabase Auth (no solo la fila de la tabla),
+// y cambiar el rol reabre todo el tema de permisos_rol (Fase 71) -- las
+// dos cosas merecen su propio flujo más adelante, no colarse acá.
+function EditarFamiliarDialog({
+  usuario,
+  onClose,
+  onGuardado,
+}: {
+  usuario: UsuarioCliente | null
+  onClose: () => void
+  onGuardado: (actualizado: UsuarioCliente) => void
+}) {
+  const [nombre, setNombre] = useState('')
+  const [telefono, setTelefono] = useState('')
+  const [fechaNacimiento, setFechaNacimiento] = useState('')
+  const [color, setColor] = useState<string>(COLORES_PERFIL[0])
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!usuario) return
+    setNombre(usuario.nombre ?? '')
+    setTelefono(usuario.telefono ?? '')
+    setFechaNacimiento(usuario.fecha_nacimiento ?? '')
+    setColor(usuario.color ?? COLORES_PERFIL[0])
+    setError(null)
+  }, [usuario])
+
+  async function guardar() {
+    if (!usuario) return
+    setGuardando(true)
+    setError(null)
+    const { data, error: errUpdate } = await supabase
+      .from('usuarios_cliente')
+      .update({
+        nombre: nombre.trim() || null,
+        telefono: telefono.trim() || null,
+        fecha_nacimiento: fechaNacimiento || null,
+        color,
+      })
+      .eq('id', usuario.id)
+      .select()
+      .single()
+
+    setGuardando(false)
+
+    if (errUpdate || !data) {
+      console.error('PerfilFamiliar: error actualizando usuarios_cliente', errUpdate)
+      setError('No se pudo guardar. Probá de nuevo.')
+      return
+    }
+
+    onGuardado(data as UsuarioCliente)
+  }
+
+  return (
+    <Dialog
+      open={!!usuario}
+      onOpenChange={(v) => {
+        if (!v) onClose()
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{usuario?.nombre ?? 'Editar integrante'}</DialogTitle>
+          <DialogDescription>
+            {usuario?.rol}
+            {usuario?.email ? ` · ${usuario.email}` : ''} -- el email y el rol no se editan desde acá.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs text-gray-500">Nombre y apellido</label>
+            <Input value={nombre} onChange={(e) => setNombre(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Teléfono</label>
+              <Input
+                placeholder="Ej. 2954 12-3456"
+                value={telefono}
+                onChange={(e) => setTelefono(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Fecha de nacimiento</label>
+              <Input
+                type="date"
+                value={fechaNacimiento}
+                onChange={(e) => setFechaNacimiento(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-gray-500">Color identificatorio</label>
+            <SelectorColor value={color} onChange={setColor} />
+          </div>
+          {error && <p className="text-sm text-red-500">{error}</p>}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button onClick={guardar} disabled={guardando}>
+            {guardando ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function PerfilFamiliar() {
   const { cliente, rolActual, cargando: cargandoCliente } = useClienteActual()
 
@@ -104,6 +251,9 @@ export default function PerfilFamiliar() {
   // escriba la contraseña, y su valor mientras se completa.
   const [passwordFormId, setPasswordFormId] = useState<string | null>(null)
   const [passwordValor, setPasswordValor] = useState('')
+  // Fase 71h: integrante sobre el que está abierto el dialog de edición
+  // de datos personales (null = cerrado).
+  const [editando, setEditando] = useState<UsuarioCliente | null>(null)
 
   useEffect(() => {
     if (!cliente) return
@@ -262,7 +412,12 @@ export default function PerfilFamiliar() {
           return (
             <Card key={u.id} className="space-y-3 p-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditando(u)}
+                  className="flex items-center gap-3 rounded-md text-left hover:opacity-75"
+                  title="Editar datos personales"
+                >
                   <AvatarFamiliar nombre={u.nombre} color={u.color} />
                   <div>
                     <p className="text-sm font-medium text-gray-900">{u.nombre ?? u.email ?? 'Sin nombre'}</p>
@@ -272,7 +427,7 @@ export default function PerfilFamiliar() {
                       {u.telefono ? ` · ${u.telefono}` : ''}
                     </p>
                   </div>
-                </div>
+                </button>
                 {invitacionPendiente ? (
                   <div className="flex gap-2">
                     <Button
@@ -367,20 +522,7 @@ export default function PerfilFamiliar() {
 
           <div className="space-y-1">
             <label className="text-xs text-gray-500">Color identificatorio</label>
-            <div className="flex flex-wrap gap-2">
-              {COLORES_PERFIL.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  aria-label={`Elegir color ${c}`}
-                  className={`h-7 w-7 rounded-full transition-transform ${
-                    color === c ? 'ring-2 ring-offset-2 ring-gray-900 scale-105' : ''
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
+            <SelectorColor value={color} onChange={setColor} />
           </div>
 
           {rolesDisponibles.length === 0 ? (
@@ -417,6 +559,15 @@ export default function PerfilFamiliar() {
           + Agregar familiar
         </Button>
       )}
+
+      <EditarFamiliarDialog
+        usuario={editando}
+        onClose={() => setEditando(null)}
+        onGuardado={(actualizado) => {
+          setUsuarios((prev) => prev.map((u) => (u.id === actualizado.id ? actualizado : u)))
+          setEditando(null)
+        }}
+      />
     </div>
   )
 }
