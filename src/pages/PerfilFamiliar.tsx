@@ -29,6 +29,8 @@
 //     usuario y la contraseña de palabra cuando le parece.
 
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { Card } from '@/components/ui/card'
@@ -42,6 +44,41 @@ interface RolLiviano {
   nombre: string
 }
 
+// Fase 71g (06/09, a pedido de Carlos, inspirado en el selector de
+// color de perfil de Chrome): paleta fija en vez de un color picker
+// libre -- alcanza para diferenciar a un puñado de integrantes de la
+// familia de un vistazo, y evita combinaciones ilegibles (texto blanco
+// sobre un color pastel clarísimo, etc.).
+const COLORES_PERFIL = [
+  '#4F46E5', // índigo
+  '#DC2626', // rojo
+  '#EA580C', // naranja
+  '#CA8A04', // ámbar
+  '#16A34A', // verde
+  '#0D9488', // verde azulado
+  '#2563EB', // azul
+  '#9333EA', // violeta
+  '#DB2777', // rosa
+  '#57534E', // gris piedra
+]
+
+function iniciales(nombre: string | null): string {
+  if (!nombre) return '?'
+  const partes = nombre.trim().split(/\s+/).filter(Boolean)
+  return partes.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
+}
+
+function AvatarFamiliar({ nombre, color }: { nombre: string | null; color: string | null }) {
+  return (
+    <span
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+      style={{ backgroundColor: color ?? '#9CA3AF' }}
+    >
+      {iniciales(nombre)}
+    </span>
+  )
+}
+
 export default function PerfilFamiliar() {
   const { cliente, rolActual, cargando: cargandoCliente } = useClienteActual()
 
@@ -53,6 +90,11 @@ export default function PerfilFamiliar() {
   const [nombre, setNombre] = useState('')
   const [email, setEmail] = useState('')
   const [rolId, setRolId] = useState('')
+  // Fase 71g: campos opcionales del perfil -- se puede agregar a
+  // alguien sin completar ninguno de los tres, no bloquean el alta.
+  const [telefono, setTelefono] = useState('')
+  const [fechaNacimiento, setFechaNacimiento] = useState('')
+  const [color, setColor] = useState<string>(COLORES_PERFIL[0])
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -153,6 +195,9 @@ export default function PerfilFamiliar() {
         email: email.trim(),
         auth_mode: 'full',
         cuil: null,
+        telefono: telefono.trim() || null,
+        fecha_nacimiento: fechaNacimiento || null,
+        color,
       })
       .select()
       .single()
@@ -168,6 +213,9 @@ export default function PerfilFamiliar() {
     setUsuarios((prev) => [...prev, creado as UsuarioCliente])
     setNombre('')
     setEmail('')
+    setTelefono('')
+    setFechaNacimiento('')
+    setColor(COLORES_PERFIL[0])
     setMostrarForm(false)
     // Fase 71c: ya no se manda nada automáticamente -- queda "pendiente"
     // hasta que el admin elija cómo darle acceso (ver la fila del
@@ -187,6 +235,18 @@ export default function PerfilFamiliar() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
+      {/* Fase 71f (06/09, a pedido de Carlos): atajo de vuelta -- Perfil
+          Familiar es una pantalla de cuenta, no un módulo con tabs, así
+          que a diferencia de Compras/Ventas/Home Keep no tenía ningún
+          "Dashboard" al que volver con un clic. */}
+      <Link
+        to="/dashboard"
+        className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Volver al Dashboard
+      </Link>
+
       <div>
         <h1 className="text-lg font-medium text-gray-900">Perfil Familiar</h1>
         <p className="mt-1 text-sm text-gray-500">
@@ -202,12 +262,16 @@ export default function PerfilFamiliar() {
           return (
             <Card key={u.id} className="space-y-3 p-4">
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">{u.nombre ?? u.email ?? 'Sin nombre'}</p>
-                  <p className="text-sm text-gray-500">
-                    {u.rol}
-                    {u.email ? ` · ${u.email}` : ''}
-                  </p>
+                <div className="flex items-center gap-3">
+                  <AvatarFamiliar nombre={u.nombre} color={u.color} />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{u.nombre ?? u.email ?? 'Sin nombre'}</p>
+                    <p className="text-sm text-gray-500">
+                      {u.rol}
+                      {u.email ? ` · ${u.email}` : ''}
+                      {u.telefono ? ` · ${u.telefono}` : ''}
+                    </p>
+                  </div>
                 </div>
                 {invitacionPendiente ? (
                   <div className="flex gap-2">
@@ -280,6 +344,45 @@ export default function PerfilFamiliar() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
+
+          {/* Fase 71g: opcionales -- no bloquean el alta si quedan vacíos. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Teléfono (opcional)</label>
+              <Input
+                placeholder="Ej. 2954 12-3456"
+                value={telefono}
+                onChange={(e) => setTelefono(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Fecha de nacimiento (opcional)</label>
+              <Input
+                type="date"
+                value={fechaNacimiento}
+                onChange={(e) => setFechaNacimiento(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-gray-500">Color identificatorio</label>
+            <div className="flex flex-wrap gap-2">
+              {COLORES_PERFIL.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  aria-label={`Elegir color ${c}`}
+                  className={`h-7 w-7 rounded-full transition-transform ${
+                    color === c ? 'ring-2 ring-offset-2 ring-gray-900 scale-105' : ''
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+
           {rolesDisponibles.length === 0 ? (
             <p className="text-sm text-amber-600">
               Todavía no hay ningún rol familiar creado (ej. "Hijo"). Pedile a Edgy que lo cargue.

@@ -171,6 +171,15 @@ export interface UsuarioCliente {
    * definir un email nuevo antes de dejarlo pasar. Lo prende el staff
    * desde ClienteDetalle.tsx. */
   debe_cambiar_email: boolean
+  /** Fase 71g (06/09): primeros campos de un perfil familiar más
+   * completo (Perfil Familiar) -- todos opcionales, se van sumando de a
+   * uno a medida que hacen falta, no son exclusivos de ningún rol en
+   * particular (el Dueño también puede cargarlos). */
+  fecha_nacimiento: string | null
+  telefono: string | null
+  /** Color hex (ej. "#4F46E5") para diferenciar al integrante de un
+   * vistazo en listados/gráficos. null = gris por defecto en la UI. */
+  color: string | null
 }
 
 export interface Permiso {
