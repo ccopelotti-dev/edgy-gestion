@@ -13,6 +13,7 @@ import {
   Receipt,
   Wallet,
 } from 'lucide-react';
+import { AtajoPerfilFamiliar } from '@/components/AtajoPerfilFamiliar';
 
 interface TabDef {
   to: string;
@@ -45,7 +46,7 @@ export default function ComprasLayout() {
         </div>
 
         {/* Tabs */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6">
           <nav className="flex gap-1 overflow-x-auto pb-px -mb-px" aria-label="Secciones">
             {tabs.map((tab) => (
               <NavLink
@@ -65,6 +66,7 @@ export default function ComprasLayout() {
               </NavLink>
             ))}
           </nav>
+          <AtajoPerfilFamiliar />
         </div>
       </header>
 
