@@ -126,6 +126,13 @@ export interface Rol {
   nombre: string
   es_sistema: boolean
   es_admin: boolean
+  /** Fase 71e (05/09): true = rol pensado para integrantes de la
+   * familia (ej. "Hijo", "Cónyuge" -- ver Perfil Familiar), no para el
+   * staff del negocio (Cajero, Mozo, etc). Independiente de es_admin:
+   * un rol familiar casi siempre es es_admin=false, pero la pregunta
+   * "¿es de la familia?" y "¿administra la cuenta?" son cosas
+   * distintas. */
+  es_familiar: boolean
   vista: VistaRol
   created_at: string
 }

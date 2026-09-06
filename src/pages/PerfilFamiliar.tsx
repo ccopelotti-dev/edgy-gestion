@@ -75,15 +75,17 @@ export default function PerfilFamiliar() {
           .select('*')
           .eq('cliente_id', cliente!.id)
           .order('created_at'),
-        // Solo roles NO admin -- este formulario es a propósito acotado
-        // a integrantes restringidos (ej. "Hijo"). Sumar otro admin a la
-        // cuenta sigue siendo cosa del flujo de Equipo existente, no de
-        // Perfil Familiar.
+        // Fase 71e (bug real: este selector mostraba también roles de
+        // staff del negocio como "Cajero"/"Mozo", porque el filtro
+        // original era "no admin" y esos roles tampoco son admin). Ahora
+        // se filtra por `es_familiar` -- la marca explícita para roles
+        // pensados para integrantes de la familia (Hijo, Cónyuge), no
+        // para el equipo operativo del negocio.
         supabase
           .from('roles')
           .select('id, nombre')
           .eq('cliente_id', cliente!.id)
-          .eq('es_admin', false)
+          .eq('es_familiar', true)
           .order('nombre'),
       ])
 
@@ -189,7 +191,7 @@ export default function PerfilFamiliar() {
         <h1 className="text-lg font-medium text-gray-900">Perfil Familiar</h1>
         <p className="mt-1 text-sm text-gray-500">
           Dale acceso a otros integrantes de la familia. Cada uno entra con su propio usuario, y ve
-          solo lo que su rol permite -- hoy, "Hijo" ve únicamente Home Keep.
+          solo lo que su rol permite -- hoy, "Hijo" y "Cónyuge" ven únicamente Home Keep.
         </p>
       </div>
 
