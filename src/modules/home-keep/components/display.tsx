@@ -156,6 +156,42 @@ export function Amount({ value, size = 'md' }: { value: number; size?: 'xs' | 's
   );
 }
 
+// ─── CupoDisponibleBar (Fase 72) ────────────────────────────
+// Barra de progreso "gastado vs. límite" de una tarjeta -- mismo criterio
+// visual que las barras a mano que ya usa Tesorería (sin librería de
+// gráficos, para esto alcanza con CSS).
+
+export function CupoDisponibleBar({
+  limite,
+  deudaFacturada,
+  consumidoAbierto,
+}: {
+  limite: number;
+  deudaFacturada: number;
+  consumidoAbierto: number;
+}) {
+  const usado = deudaFacturada + consumidoAbierto;
+  const pct = limite > 0 ? Math.min(100, (usado / limite) * 100) : 0;
+  const disponible = limite - usado;
+  const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-500">
+          Usado <span className="font-medium text-gray-900">{formatARS(usado)}</span> de {formatARS(limite)}
+        </span>
+        <span className={`font-medium ${disponible < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+          Disponible: {formatARS(disponible)}
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 // ─── EmptyState ─────────────────────────────────────────────
 
 interface EmptyStateProps {

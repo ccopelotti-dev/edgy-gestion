@@ -52,9 +52,9 @@ import type { UsuarioCliente } from '@/types'
 // con la persona ya fijada (`integranteFijo`). Esta pantalla vive fuera del
 // árbol de HomeKeepProvider, así que el guardado NO pasa por su store/reducer
 // -- inserta directo en `ingresos_hogar` con el mismo mapeo de columnas.
-import { IngresoDialog } from '@/modules/home-keep/components/dialogs'
+import { IngresoDialog, TarjetaDialog } from '@/modules/home-keep/components/dialogs'
 import { formatARS, formatDate } from '@/modules/home-keep/lib/format'
-import { TIPO_INGRESO_LABEL, generarId, type Ingreso } from '@/modules/home-keep/types'
+import { TIPO_INGRESO_LABEL, generarId, type Ingreso, type TarjetaCredito } from '@/modules/home-keep/types'
 
 interface RolLiviano {
   id: string
@@ -146,6 +146,14 @@ function EditarFamiliarDialog({
   const [ingresosAsociados, setIngresosAsociados] = useState<Ingreso[]>([])
   const [cargandoIngresos, setCargandoIngresos] = useState(false)
   const [mostrarIngresoDialog, setMostrarIngresoDialog] = useState(false)
+
+  // Fase 72c (06/09, a pedido de Carlos): el alta de una tarjeta de
+  // crédito se mueve acá -- Home Keep > Tarjetas sigue siendo donde se
+  // maneja su funcionamiento (resúmenes, consumos, cupo, pagos), pero
+  // ya no donde se la da de alta. Mismo patrón que Ingresos arriba.
+  const [tarjetasAsociadas, setTarjetasAsociadas] = useState<TarjetaCredito[]>([])
+  const [cargandoTarjetas, setCargandoTarjetas] = useState(false)
+  const [mostrarTarjetaDialog, setMostrarTarjetaDialog] = useState(false)
 
   useEffect(() => {
     if (!usuario) return
@@ -251,6 +259,93 @@ function EditarFamiliarDialog({
   async function eliminarIngreso(id: string) {
     await supabase.from('ingresos_hogar').delete().eq('id', id)
     setIngresosAsociados((prev) => prev.filter((i) => i.id !== id))
+  }
+
+  // Fase 72c: tarjetas de crédito de las que esta persona es titular --
+  // misma tabla que ve Home Keep > Tarjetas, filtrada por usuario_cliente_id.
+  useEffect(() => {
+    if (!usuario) {
+      setTarjetasAsociadas([])
+      return
+    }
+    let activo = true
+    setCargandoTarjetas(true)
+    supabase
+      .from('tarjetas_credito_hogar')
+      .select('*')
+      .eq('usuario_cliente_id', usuario.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (!activo) return
+        const filas: TarjetaCredito[] = (data ?? []).map((r: any) => ({
+          id: r.id,
+          nombre: r.nombre,
+          banco: r.banco ?? undefined,
+          titular: r.titular ?? undefined,
+          usuarioClienteId: r.usuario_cliente_id ?? undefined,
+          ultimosDigitos: r.ultimos_digitos ?? undefined,
+          diaCierre: r.dia_cierre ?? undefined,
+          diaVencimiento: r.dia_vencimiento ?? undefined,
+          limite: r.limite != null ? Number(r.limite) : undefined,
+          activa: r.activa,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }))
+        setTarjetasAsociadas(filas)
+        setCargandoTarjetas(false)
+      })
+    return () => {
+      activo = false
+    }
+  }, [usuario])
+
+  async function guardarTarjeta(data: Omit<TarjetaCredito, 'id' | 'activa' | 'createdAt' | 'updatedAt'>) {
+    if (!usuario) return
+    const { data: creado, error: errInsert } = await supabase
+      .from('tarjetas_credito_hogar')
+      .insert({
+        id: generarId(),
+        cliente_id: usuario.cliente_id,
+        nombre: data.nombre,
+        banco: data.banco ?? null,
+        titular: data.titular ?? null,
+        usuario_cliente_id: usuario.id,
+        ultimos_digitos: data.ultimosDigitos ?? null,
+        dia_cierre: data.diaCierre ?? null,
+        dia_vencimiento: data.diaVencimiento ?? null,
+        limite: data.limite ?? null,
+        activa: true,
+      })
+      .select()
+      .single()
+
+    if (errInsert || !creado) {
+      console.error('PerfilFamiliar: error insertando tarjetas_credito_hogar', errInsert)
+      return
+    }
+
+    setTarjetasAsociadas((prev) => [
+      {
+        id: creado.id,
+        nombre: creado.nombre,
+        banco: creado.banco ?? undefined,
+        titular: creado.titular ?? undefined,
+        usuarioClienteId: creado.usuario_cliente_id ?? undefined,
+        ultimosDigitos: creado.ultimos_digitos ?? undefined,
+        diaCierre: creado.dia_cierre ?? undefined,
+        diaVencimiento: creado.dia_vencimiento ?? undefined,
+        limite: creado.limite != null ? Number(creado.limite) : undefined,
+        activa: creado.activa,
+        createdAt: creado.created_at,
+        updatedAt: creado.updated_at,
+      },
+      ...prev,
+    ])
+  }
+
+  async function eliminarTarjeta(id: string) {
+    await supabase.from('tarjetas_credito_hogar').delete().eq('id', id)
+    setTarjetasAsociadas((prev) => prev.filter((t) => t.id !== id))
   }
 
   async function guardar() {
@@ -366,6 +461,48 @@ function EditarFamiliarDialog({
               </ul>
             )}
           </div>
+
+          {/* Fase 72c: tarjetas de crédito -- el alta pasa a estar acá;
+              su funcionamiento sigue viviendo en Home Keep > Tarjetas. */}
+          <div className="space-y-2 border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-gray-500">Tarjetas de crédito</label>
+              <Button variant="outline" size="sm" onClick={() => setMostrarTarjetaDialog(true)}>
+                + Agregar tarjeta
+              </Button>
+            </div>
+            {cargandoTarjetas ? (
+              <p className="text-xs text-gray-400">Cargando...</p>
+            ) : tarjetasAsociadas.length === 0 ? (
+              <p className="text-xs text-gray-400">Todavía no tiene ninguna tarjeta cargada.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {tarjetasAsociadas.map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex items-center justify-between rounded-md bg-gray-50 px-2.5 py-1.5 text-xs"
+                  >
+                    <div>
+                      <span className="font-medium text-gray-900">{t.nombre}</span>
+                      <span className="text-gray-500">
+                        {t.banco ? ` · ${t.banco}` : ''}
+                        {t.ultimosDigitos ? ` · **** ${t.ultimosDigitos}` : ''}
+                        {!t.activa ? ' · inactiva' : ''}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => eliminarTarjeta(t.id)}
+                      className="text-gray-400 hover:text-red-600"
+                      title="Eliminar"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -384,6 +521,14 @@ function EditarFamiliarDialog({
           onOpenChange={setMostrarIngresoDialog}
           integranteFijo={{ id: usuario.id, nombre: usuario.nombre ?? usuario.email ?? 'Sin nombre' }}
           onSave={guardarIngreso}
+        />
+      )}
+
+      {usuario && (
+        <TarjetaDialog
+          open={mostrarTarjetaDialog}
+          onOpenChange={setMostrarTarjetaDialog}
+          onSave={guardarTarjeta}
         />
       )}
     </Dialog>

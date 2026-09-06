@@ -70,6 +70,9 @@ type HomeKeepAction =
   | { type: 'TOGGLE_TARJETA_ACTIVA'; payload: { id: string } }
   | { type: 'ADD_RESUMEN_TARJETA'; payload: ResumenTarjeta }
   | { type: 'PAGAR_RESUMEN_TARJETA'; payload: { resumenId: string; monto: number; fecha: string; medioPago: LineaPago['medioPago']; cuentaBancariaId?: string } }
+  // Fase 72 -- consumos "abiertos" (día a día, sin resumen todavía).
+  | { type: 'ADD_CONSUMO_ABIERTO'; payload: ConsumoTarjeta }
+  | { type: 'DELETE_CONSUMO_ABIERTO'; payload: { id: string } }
   | { type: 'SET_STATE'; payload: HomeKeepState };
 
 // ─── Reducer ───────────────────────────────────────────────────
@@ -264,8 +267,24 @@ function homeKeepReducer(state: HomeKeepState, action: HomeKeepAction): HomeKeep
         ),
       };
 
-    case 'ADD_RESUMEN_TARJETA':
-      return { ...state, resumenesTarjeta: [...state.resumenesTarjeta, action.payload] };
+    case 'ADD_RESUMEN_TARJETA': {
+      // Fase 72: si algún consumo del resumen reusa el id de un consumo
+      // "abierto" (prellenado desde ResumenTarjetaDialog, ver
+      // TarjetasCredito.tsx), ese abierto queda facturado -- se saca de
+      // la lista de abiertos para no contarlo dos veces.
+      const idsFacturados = new Set(action.payload.consumos.map((c) => c.id));
+      return {
+        ...state,
+        resumenesTarjeta: [...state.resumenesTarjeta, action.payload],
+        consumosAbiertos: state.consumosAbiertos.filter((c) => !idsFacturados.has(c.id)),
+      };
+    }
+
+    case 'ADD_CONSUMO_ABIERTO':
+      return { ...state, consumosAbiertos: [...state.consumosAbiertos, action.payload] };
+
+    case 'DELETE_CONSUMO_ABIERTO':
+      return { ...state, consumosAbiertos: state.consumosAbiertos.filter((c) => c.id !== action.payload.id) };
 
     case 'PAGAR_RESUMEN_TARJETA': {
       const resumen = state.resumenesTarjeta.find((r) => r.id === action.payload.resumenId);
@@ -460,6 +479,7 @@ function tarjetaToRow(t: TarjetaCredito, clienteId: string) {
     nombre: t.nombre,
     banco: t.banco ?? null,
     titular: t.titular ?? null,
+    usuario_cliente_id: t.usuarioClienteId ?? null,
     ultimos_digitos: t.ultimosDigitos ?? null,
     dia_cierre: t.diaCierre ?? null,
     dia_vencimiento: t.diaVencimiento ?? null,
@@ -485,9 +505,10 @@ function resumenTarjetaToRow(r: ResumenTarjeta, clienteId: string) {
   };
 }
 
-function consumoTarjetaToRow(c: ConsumoTarjeta, resumenId: string, tarjetaId: string) {
+function consumoTarjetaToRow(c: ConsumoTarjeta, clienteId: string, tarjetaId: string, resumenId: string | null) {
   return {
     id: c.id,
+    cliente_id: clienteId,
     resumen_id: resumenId,
     tarjeta_id: tarjetaId,
     descripcion: c.descripcion,
@@ -497,7 +518,29 @@ function consumoTarjetaToRow(c: ConsumoTarjeta, resumenId: string, tarjetaId: st
     cuotas_totales: c.cuotasTotales,
     compra_id: c.compraId ?? null,
     categoria_gasto_id: c.categoriaGastoId ?? null,
+    reintegro_concepto: c.reintegroConcepto ?? null,
+    reintegro_monto: c.reintegroMonto ?? null,
   };
+}
+
+// Fase 72: si un consumo (de resumen o abierto) trae un reintegro
+// esperado, genera su fila en creditos_pendientes -- mismo mecanismo que
+// ya existía para líneas de pago (Fase 67), visible en Tesorería >
+// Créditos y Reintegros. `modulo: 'home_keep_tarjeta'` distingue que acá
+// pago_id apunta a un consumo, no a un pago.
+function crearCreditoPorConsumo(c: ConsumoTarjeta, clienteId: string) {
+  if (!c.reintegroMonto || c.reintegroMonto <= 0) return;
+  supabase
+    .from('creditos_pendientes')
+    .insert({
+      cliente_id: clienteId,
+      modulo: 'home_keep_tarjeta',
+      pago_id: c.id,
+      concepto: c.reintegroConcepto?.trim() || `Reintegro — ${c.descripcion}`,
+      monto_esperado: c.reintegroMonto,
+      estado: 'pendiente',
+    })
+    .then(logErr('alta de crédito pendiente por consumo de tarjeta'));
 }
 
 function logErr(label: string) {
@@ -742,14 +785,34 @@ function syncToSupabase(action: HomeKeepAction, nextState: HomeKeepState, client
         .then((res) => {
           logErr('alta de resumen de tarjeta')(res);
           if (!res.error && r.consumos.length) {
+            // Fase 72: upsert en vez de insert -- si el consumo ya existía
+            // "abierto" (mismo id, prellenado desde TarjetasCredito.tsx),
+            // esto lo actualiza en el lugar (le fija resumen_id) en vez de
+            // duplicarlo.
             supabase
               .from('consumos_tarjeta_hogar')
-              .insert(r.consumos.map((c) => consumoTarjetaToRow(c, r.id, r.tarjetaId)))
+              .upsert(r.consumos.map((c) => consumoTarjetaToRow(c, clienteId, r.tarjetaId, r.id)))
               .then(logErr('consumos de resumen de tarjeta'));
+            r.consumos.forEach((c) => crearCreditoPorConsumo(c, clienteId));
           }
         });
       return;
     }
+
+    // ─── Fase 72: consumos "abiertos" (día a día) ─────────────
+    case 'ADD_CONSUMO_ABIERTO': {
+      const c = action.payload;
+      supabase
+        .from('consumos_tarjeta_hogar')
+        .insert(consumoTarjetaToRow(c, clienteId, c.tarjetaId, null))
+        .then(logErr('alta de consumo abierto de tarjeta'));
+      crearCreditoPorConsumo(c, clienteId);
+      return;
+    }
+
+    case 'DELETE_CONSUMO_ABIERTO':
+      supabase.from('consumos_tarjeta_hogar').delete().eq('id', action.payload.id).then(logErr('borrado de consumo abierto de tarjeta'));
+      return;
 
     case 'PAGAR_RESUMEN_TARJETA': {
       const r = nextState.resumenesTarjeta.find((x) => x.id === action.payload.resumenId);
@@ -922,6 +985,7 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     nombre: r.nombre,
     banco: r.banco ?? undefined,
     titular: r.titular ?? undefined,
+    usuarioClienteId: r.usuario_cliente_id ?? undefined,
     ultimosDigitos: r.ultimos_digitos ?? undefined,
     diaCierre: r.dia_cierre ?? undefined,
     diaVencimiento: r.dia_vencimiento ?? undefined,
@@ -931,11 +995,16 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     updatedAt: r.updated_at,
   }));
 
+  // Fase 72: un consumo con resumen_id null es "abierto" (todavía sin
+  // facturar en ningún resumen mensual) -- se separa aparte en vez de
+  // agruparse por resumen.
   const consumosByResumen = new Map<string, ConsumoTarjeta[]>();
+  const consumosAbiertos: ConsumoTarjeta[] = [];
   for (const r of consumosRes.data ?? []) {
-    const arr = consumosByResumen.get(r.resumen_id) ?? [];
-    arr.push({
+    const consumo: ConsumoTarjeta = {
       id: r.id,
+      tarjetaId: r.tarjeta_id,
+      resumenId: r.resumen_id ?? undefined,
       descripcion: r.descripcion,
       fechaConsumo: r.fecha_consumo ?? undefined,
       monto: Number(r.monto),
@@ -943,7 +1012,15 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
       cuotasTotales: r.cuotas_totales,
       compraId: r.compra_id ?? undefined,
       categoriaGastoId: r.categoria_gasto_id ?? undefined,
-    });
+      reintegroConcepto: r.reintegro_concepto ?? undefined,
+      reintegroMonto: r.reintegro_monto != null ? Number(r.reintegro_monto) : undefined,
+    };
+    if (!r.resumen_id) {
+      consumosAbiertos.push(consumo);
+      continue;
+    }
+    const arr = consumosByResumen.get(r.resumen_id) ?? [];
+    arr.push(consumo);
     consumosByResumen.set(r.resumen_id, arr);
   }
 
@@ -971,6 +1048,7 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     ingresos,
     tarjetas,
     resumenesTarjeta,
+    consumosAbiertos,
     categoriasGasto,
     nextNumeroComprobante,
     nextNumeroPago: maxNumero(pagos) + 1,
@@ -990,6 +1068,7 @@ const emptyState: HomeKeepState = {
   ingresos: [],
   tarjetas: [],
   resumenesTarjeta: [],
+  consumosAbiertos: [],
   categoriasGasto: [],
   nextNumeroComprobante: { factura: 1, nota_credito: 1, nota_debito: 1 },
   nextNumeroPago: 1,
@@ -1160,6 +1239,83 @@ export function useResumenesTarjeta(tarjetaId?: string): ResumenTarjeta[] {
     if (!tarjetaId) return resumenesTarjeta;
     return resumenesTarjeta.filter((r) => r.tarjetaId === tarjetaId);
   }, [resumenesTarjeta, tarjetaId]);
+}
+
+/** Fase 72: consumos cargados el día a día que todavía no aparecieron en
+ * ningún resumen mensual (ver ConsumoTarjeta.resumenId). */
+export function useConsumosAbiertos(tarjetaId?: string): ConsumoTarjeta[] {
+  const { consumosAbiertos } = useHomeKeep();
+  return useMemo(() => {
+    if (!tarjetaId) return consumosAbiertos;
+    return consumosAbiertos.filter((c) => c.tarjetaId === tarjetaId);
+  }, [consumosAbiertos, tarjetaId]);
+}
+
+export interface CupoTarjeta {
+  limite?: number;
+  /** Suma de saldoPendiente de todos los resúmenes no pagados. */
+  deudaFacturada: number;
+  /** Suma de los consumos abiertos (cargados pero sin facturar todavía). */
+  consumidoAbierto: number;
+  /** límite - deudaFacturada - consumidoAbierto -- undefined si la
+   * tarjeta no tiene límite cargado (no hay con qué calcularlo). */
+  disponible?: number;
+}
+
+/** Fase 72: cupo disponible de UNA tarjeta -- mismo criterio que la
+ * cuenta corriente de un proveedor (Compras): límite menos lo que ya se
+ * debe. Acá "lo que se debe" suma dos cosas: los resúmenes ya cerrados y
+ * todavía no pagados del todo, más los consumos sueltos del día a día
+ * que ya se hicieron pero todavía no aparecieron en ningún resumen.
+ */
+export function useCupoDisponible(tarjetaId: string): CupoTarjeta {
+  const { tarjetas, resumenesTarjeta, consumosAbiertos } = useHomeKeep();
+  return useMemo(() => {
+    const tarjeta = tarjetas.find((t) => t.id === tarjetaId);
+    const deudaFacturada = resumenesTarjeta
+      .filter((r) => r.tarjetaId === tarjetaId && r.estado !== 'pagado')
+      .reduce((sum, r) => sum + r.saldoPendiente, 0);
+    const consumidoAbierto = consumosAbiertos
+      .filter((c) => c.tarjetaId === tarjetaId)
+      .reduce((sum, c) => sum + c.monto, 0);
+    const limite = tarjeta?.limite;
+    return {
+      limite,
+      deudaFacturada,
+      consumidoAbierto,
+      disponible: limite != null ? limite - deudaFacturada - consumidoAbierto : undefined,
+    };
+  }, [tarjetas, resumenesTarjeta, consumosAbiertos, tarjetaId]);
+}
+
+export interface PuntoGastoAcumulado {
+  fecha: string;
+  gastoDelDia: number;
+  acumulado: number;
+}
+
+/** Fase 72: curva de gasto acumulado día a día del período todavía
+ * abierto de una tarjeta (para el "informe vivo" del mes) -- solo mira
+ * los consumos sueltos (sin resumen), porque una vez que el resumen
+ * cierra ese gasto pasa a ser historia, no algo que siga acumulando. */
+export function useGastoAcumuladoAbierto(tarjetaId: string): PuntoGastoAcumulado[] {
+  const consumos = useConsumosAbiertos(tarjetaId);
+  return useMemo(() => {
+    const porDia = new Map<string, number>();
+    for (const c of consumos) {
+      const fecha = c.fechaConsumo ?? 'sin-fecha';
+      porDia.set(fecha, (porDia.get(fecha) ?? 0) + c.monto);
+    }
+    const dias = Array.from(porDia.keys())
+      .filter((f) => f !== 'sin-fecha')
+      .sort();
+    let acumulado = 0;
+    return dias.map((fecha) => {
+      const gastoDelDia = porDia.get(fecha) ?? 0;
+      acumulado += gastoDelDia;
+      return { fecha, gastoDelDia, acumulado };
+    });
+  }, [consumos]);
 }
 
 interface SaldoHogar {

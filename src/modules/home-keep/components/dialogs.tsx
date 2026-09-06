@@ -1720,6 +1720,11 @@ interface ResumenTarjetaDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tarjetas: TarjetaCredito[];
+  /** Fase 72: consumos "abiertos" (día a día, sin resumen todavía) de la
+   * tarjeta para la que se abrió este diálogo -- se prellenan acá para
+   * no tener que retipearlos; al guardar, quedan facturados dentro de
+   * este resumen (mismo id, ver ADD_RESUMEN_TARJETA en store.tsx). */
+  consumosAbiertos?: ConsumoTarjeta[];
   onSave: (data: {
     tarjetaId: string;
     periodo: string;
@@ -1727,11 +1732,11 @@ interface ResumenTarjetaDialogProps {
     fechaVencimiento: string;
     pagoMinimo?: number;
     notas: string;
-    consumos: Omit<ConsumoTarjeta, 'id' | 'compraId'>[];
+    consumos: Omit<ConsumoTarjeta, 'compraId' | 'tarjetaId' | 'resumenId'>[];
   }) => void;
 }
 
-export function ResumenTarjetaDialog({ open, onOpenChange, tarjetas, onSave }: ResumenTarjetaDialogProps) {
+export function ResumenTarjetaDialog({ open, onOpenChange, tarjetas, consumosAbiertos, onSave }: ResumenTarjetaDialogProps) {
   const [tarjetaId, setTarjetaId] = useState('');
   const [periodo, setPeriodo] = useState(() => todayISO().slice(0, 7));
   const [fechaCierre, setFechaCierre] = useState(todayISO());
@@ -1749,11 +1754,25 @@ export function ResumenTarjetaDialog({ open, onOpenChange, tarjetas, onSave }: R
       setFechaVencimiento(todayISO());
       setPagoMinimo('');
       setNotas('');
-      setConsumos([newConsumoRow()]);
+      // Fase 72: si hay consumos abiertos de esta tarjeta, arrancar con
+      // esos ya cargados (mismo id -- ver comentario en la interfaz de
+      // arriba) en vez de una fila en blanco.
+      setConsumos(
+        consumosAbiertos && consumosAbiertos.length > 0
+          ? consumosAbiertos.map((c) => ({
+              id: c.id,
+              descripcion: c.descripcion,
+              fechaConsumo: c.fechaConsumo ?? todayISO(),
+              monto: c.monto,
+              cuotaActual: c.cuotaActual,
+              cuotasTotales: c.cuotasTotales,
+            }))
+          : [newConsumoRow()],
+      );
       setError('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, consumosAbiertos]);
 
   const updateConsumo = (idx: number, field: keyof ConsumoRow, value: string | number) => {
     setConsumos((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c)));
@@ -1787,6 +1806,7 @@ export function ResumenTarjetaDialog({ open, onOpenChange, tarjetas, onSave }: R
       pagoMinimo: pagoMinimo === '' ? undefined : Number(pagoMinimo),
       notas: notas.trim(),
       consumos: consumos.map((c) => ({
+        id: c.id,
         descripcion: c.descripcion.trim(),
         fechaConsumo: c.fechaConsumo,
         monto: Number(c.monto),
@@ -1908,6 +1928,166 @@ export function ResumenTarjetaDialog({ open, onOpenChange, tarjetas, onSave }: R
             </div>
 
             <div className="flex justify-end text-sm font-semibold text-gray-900">Total: {formatARS(total)}</div>
+
+            {error && <p className="text-xs text-red-600">{error}</p>}
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── RegistrarConsumoDialog (Fase 72) ───────────────────────
+// Carga liviana de UN consumo el día que se hace la compra -- a
+// diferencia de ResumenTarjetaDialog (que carga el resumen mensual
+// completo de una vez), esto es pensado para ir anotando gasto a gasto
+// y ver el cupo disponible bajar en tiempo real. Se guarda "abierto"
+// (sin resumen todavía, ver ConsumoTarjeta.resumenId) y se concilia solo
+// cuando llega el resumen real de esa tarjeta.
+
+interface RegistrarConsumoDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  tarjetaNombre?: string;
+  onSave: (data: {
+    descripcion: string;
+    fechaConsumo: string;
+    monto: number;
+    cuotaActual: number;
+    cuotasTotales: number;
+    reintegroConcepto?: string;
+    reintegroMonto?: number;
+  }) => void;
+}
+
+export function RegistrarConsumoDialog({ open, onOpenChange, tarjetaNombre, onSave }: RegistrarConsumoDialogProps) {
+  const [descripcion, setDescripcion] = useState('');
+  const [fechaConsumo, setFechaConsumo] = useState(todayISO());
+  const [monto, setMonto] = useState(0);
+  const [cuotaActual, setCuotaActual] = useState(1);
+  const [cuotasTotales, setCuotasTotales] = useState(1);
+  const [tieneReintegro, setTieneReintegro] = useState(false);
+  const [reintegroConcepto, setReintegroConcepto] = useState('');
+  const [reintegroMonto, setReintegroMonto] = useState<number | ''>('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setDescripcion('');
+      setFechaConsumo(todayISO());
+      setMonto(0);
+      setCuotaActual(1);
+      setCuotasTotales(1);
+      setTieneReintegro(false);
+      setReintegroConcepto('');
+      setReintegroMonto('');
+      setError('');
+    }
+  }, [open]);
+
+  const handleSave = () => {
+    if (!descripcion.trim()) {
+      setError('Completá una descripción');
+      return;
+    }
+    if (monto <= 0) {
+      setError('El monto debe ser mayor a cero');
+      return;
+    }
+    onSave({
+      descripcion: descripcion.trim(),
+      fechaConsumo,
+      monto,
+      cuotaActual,
+      cuotasTotales,
+      reintegroConcepto: tieneReintegro ? reintegroConcepto.trim() || undefined : undefined,
+      reintegroMonto: tieneReintegro && reintegroMonto !== '' ? Number(reintegroMonto) : undefined,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">
+              Registrar consumo{tarjetaNombre ? ` — ${tarjetaNombre}` : ''}
+            </Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>Descripción *</label>
+              <input className={inputClass} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Ej. Supermercado" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Fecha</label>
+                <input type="date" className={inputClass} value={fechaConsumo} onChange={(e) => setFechaConsumo(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Monto *</label>
+                <input type="number" className={inputClass} value={monto || ''} onChange={(e) => setMonto(Number(e.target.value))} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Cuota actual</label>
+                <input type="number" min={1} className={inputClass} value={cuotaActual} onChange={(e) => setCuotaActual(Number(e.target.value))} />
+              </div>
+              <div>
+                <label className={labelClass}>Cuotas totales</label>
+                <input type="number" min={1} className={inputClass} value={cuotasTotales} onChange={(e) => setCuotasTotales(Number(e.target.value))} />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="consumo-reintegro"
+                checked={tieneReintegro}
+                onChange={(e) => setTieneReintegro(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <label htmlFor="consumo-reintegro" className="text-sm text-gray-700">
+                Esta compra tiene reintegro esperado (promo bancaria)
+              </label>
+            </div>
+            {tieneReintegro && (
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-gray-100 p-3">
+                <div>
+                  <label className={labelClass}>Concepto</label>
+                  <input
+                    className={inputClass}
+                    value={reintegroConcepto}
+                    onChange={(e) => setReintegroConcepto(e.target.value)}
+                    placeholder="Ej. Promo Pampa 10%"
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Monto esperado</label>
+                  <input
+                    type="number"
+                    className={inputClass}
+                    value={reintegroMonto}
+                    onChange={(e) => setReintegroMonto(e.target.value === '' ? '' : Number(e.target.value))}
+                  />
+                </div>
+                <p className="col-span-2 text-xs text-gray-400">
+                  Se suma a Tesorería &gt; Créditos y Reintegros para hacerle seguimiento hasta que el banco lo acredite.
+                </p>
+              </div>
+            )}
 
             {error && <p className="text-xs text-red-600">{error}</p>}
           </div>

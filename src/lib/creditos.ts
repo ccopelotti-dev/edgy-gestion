@@ -15,7 +15,11 @@
 
 import { supabase } from '@/lib/supabase';
 
-export type ModuloCredito = 'compras' | 'home_keep';
+// Fase 72 (06/09): 'home_keep_tarjeta' -- reintegro esperado por un
+// consumo de tarjeta de crédito (Home Keep > Tarjetas), a diferencia de
+// 'home_keep' que es un pago de comprobante normal. pago_id apunta a
+// consumos_tarjeta_hogar.id en vez de una fila de pagos_*.
+export type ModuloCredito = 'compras' | 'home_keep' | 'home_keep_tarjeta';
 export type EstadoCredito = 'pendiente' | 'acreditado' | 'perdido';
 
 export interface CreditoPendiente {
@@ -180,4 +184,5 @@ export const ESTADO_CREDITO_LABEL: Record<EstadoCredito, string> = {
 export const MODULO_CREDITO_LABEL: Record<ModuloCredito, string> = {
   compras: 'Compras',
   home_keep: 'Home Keep',
+  home_keep_tarjeta: 'Home Keep — Tarjeta',
 };

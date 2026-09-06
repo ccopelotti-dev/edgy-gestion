@@ -15,6 +15,14 @@ export function formatDate(isoDate: string): string {
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+// Fase 72: etiqueta corta (sin año) para ejes de gráficos -- formatDate
+// completo (dd/mm/aaaa) queda apretado en el eje X de una curva diaria.
+export function formatDateShort(isoDate: string): string {
+  if (!isoDate) return '—';
+  const d = new Date(isoDate + (isoDate.includes('T') ? '' : 'T00:00:00'));
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
+}
+
 export function formatDateTime(isoDate: string): string {
   if (!isoDate) return '—';
   const d = new Date(isoDate);

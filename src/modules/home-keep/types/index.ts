@@ -240,7 +240,15 @@ export interface TarjetaCredito {
   id: string;
   nombre: string; // ej. "Visa Santander - Carlos"
   banco?: string;
+  /** Texto libre legado -- aclaración manual opcional. El vínculo real
+   * al titular es usuarioClienteId (Fase 72c). */
   titular?: string;
+  /** Fase 72c (06/09, a pedido de Carlos): integrante de la familia
+   * (usuarios_cliente) titular de la tarjeta. El alta de una tarjeta se
+   * hace desde su ficha en Perfil Familiar -- Home Keep > Tarjetas sigue
+   * siendo donde se maneja su funcionamiento (resúmenes, consumos,
+   * cupo, pagos), no el alta. */
+  usuarioClienteId?: string;
   ultimosDigitos?: string;
   diaCierre?: number;
   diaVencimiento?: number;
@@ -252,6 +260,15 @@ export interface TarjetaCredito {
 
 export interface ConsumoTarjeta {
   id: string;
+  /** Fase 72: explícito ahora porque un consumo puede existir "abierto"
+   * (ver resumenId) sin estar anidado bajo ningún ResumenTarjeta.consumos. */
+  tarjetaId: string;
+  /** Fase 72: id del ResumenTarjeta que ya facturó este consumo. undefined
+   * = consumo "abierto" -- cargado el día de la compra (o por el agente de
+   * WhatsApp más adelante), todavía no apareció en ningún resumen mensual.
+   * Se concilia (barre de abierto a facturado) al cargar el resumen real,
+   * ver ADD_RESUMEN_TARJETA en store.tsx. */
+  resumenId?: string;
   descripcion: string;
   fechaConsumo?: string;
   /** Monto de ESTA cuota puntual, no el total de la compra original. */
@@ -262,6 +279,12 @@ export interface ConsumoTarjeta {
    * resúmenes/meses -- ver matcheo por descripción en store.tsx. */
   compraId?: string;
   categoriaGastoId?: string;
+  /** Fase 72: reintegro esperado por promoción bancaria en ESTE consumo
+   * (ej. Promo Pampa) -- si se completa, genera una fila en
+   * creditos_pendientes (mismo mecanismo que ya existía para líneas de
+   * pago, Fase 67), visible en Tesorería > Créditos y Reintegros. */
+  reintegroConcepto?: string;
+  reintegroMonto?: number;
 }
 
 export type EstadoResumenTarjeta = 'pendiente' | 'pagado_parcial' | 'pagado';
@@ -308,6 +331,11 @@ export interface HomeKeepState {
   ingresos: Ingreso[];
   tarjetas: TarjetaCredito[];
   resumenesTarjeta: ResumenTarjeta[];
+  /** Fase 72: consumos de tarjeta sin resumen todavía (ver
+   * ConsumoTarjeta.resumenId) -- se muestran aparte para "cupo disponible"
+   * y el gasto acumulado del mes, y se barren cuando se cargan dentro de
+   * un resumen real. */
+  consumosAbiertos: ConsumoTarjeta[];
   categoriasGasto: CategoriaGasto[];
   nextNumeroComprobante: Record<TipoComprobante, number>;
   nextNumeroPago: number;

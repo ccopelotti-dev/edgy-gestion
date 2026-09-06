@@ -183,6 +183,7 @@ export function CreditosReintegros() {
               <option value="">Todos los módulos</option>
               <option value="compras">Compras</option>
               <option value="home_keep">Home Keep</option>
+              <option value="home_keep_tarjeta">Home Keep — Tarjeta</option>
             </select>
             <select
               className="h-9 rounded-md border border-input bg-background px-2 text-sm"

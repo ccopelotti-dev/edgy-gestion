@@ -14,9 +14,10 @@ import {
   FileText,
   AlertTriangle,
   PieChart,
+  CreditCard,
 } from 'lucide-react';
 
-import { useDashboardHomeKeep, useComprobantes, useProveedores } from '../data/store';
+import { useDashboardHomeKeep, useComprobantes, useProveedores, useTarjetas, useResumenesTarjeta } from '../data/store';
 import {
   KpiCard,
   EstadoComprobanteBadge,
@@ -38,6 +39,8 @@ export default function Dashboard() {
   const stats = useDashboardHomeKeep();
   const comprobantes = useComprobantes();
   const proveedores = useProveedores();
+  const tarjetas = useTarjetas();
+  const resumenesTarjeta = useResumenesTarjeta();
 
   // ── Ultimos comprobantes ──────────────────────────────────
 
@@ -65,6 +68,20 @@ export default function Dashboard() {
     proveedores.find((p) => p.id === proveedorId)?.nombre ?? 'Desconocido';
 
   const diasAntiguo = (fecha: string) => Math.abs(daysUntil(fecha));
+
+  // Fase 72: previsión de caja -- resúmenes de tarjeta con saldo
+  // pendiente, ordenados por fecha de vencimiento (el más próximo
+  // primero), mismo criterio visual que las Alertas de pago de arriba
+  // pero mirando para adelante en vez de para atrás.
+  const nombreTarjeta = (tarjetaId: string) => tarjetas.find((t) => t.id === tarjetaId)?.nombre ?? 'Tarjeta';
+
+  const vencimientosTarjeta = useMemo(
+    () =>
+      resumenesTarjeta
+        .filter((r) => r.estado !== 'pagado' && r.fechaVencimiento)
+        .sort((a, b) => (a.fechaVencimiento! < b.fechaVencimiento! ? -1 : 1)),
+    [resumenesTarjeta],
+  );
 
   // ── Render ────────────────────────────────────────────────
 
@@ -246,6 +263,53 @@ export default function Dashboard() {
                     <div className="text-right">
                       <p className="text-xs text-gray-500">Pendiente</p>
                       <Amount value={c.saldoPendiente} size="sm" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Fase 72: previsión de caja -- vencimientos de tarjeta */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <CreditCard className="h-5 w-5 text-indigo-500" />
+          <h2 className="text-lg font-semibold text-gray-900">Próximos vencimientos de tarjetas</h2>
+        </div>
+
+        {vencimientosTarjeta.length === 0 ? (
+          <EmptyState title="No hay resúmenes de tarjeta pendientes de pago" />
+        ) : (
+          <div className="space-y-2">
+            {vencimientosTarjeta.map((r) => {
+              const dias = r.fechaVencimiento ? daysUntil(r.fechaVencimiento) : null;
+              const vencido = dias != null && dias < 0;
+              return (
+                <div
+                  key={r.id}
+                  className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
+                    vencido ? 'border-red-100 bg-red-50' : 'border-indigo-100 bg-indigo-50'
+                  }`}
+                >
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {nombreTarjeta(r.tarjetaId)} — {r.periodo}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Vence el {r.fechaVencimiento ? formatDate(r.fechaVencimiento) : '—'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {dias != null && (
+                      <span className={`text-sm font-semibold ${vencido ? 'text-red-700' : 'text-indigo-700'}`}>
+                        {vencido ? `Vencido hace ${Math.abs(dias)} ${Math.abs(dias) === 1 ? 'día' : 'días'}` : `En ${dias} ${dias === 1 ? 'día' : 'días'}`}
+                      </span>
+                    )}
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Saldo</p>
+                      <Amount value={r.saldoPendiente} size="sm" />
                     </div>
                   </div>
                 </div>
