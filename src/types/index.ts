@@ -180,6 +180,14 @@ export interface UsuarioCliente {
   /** Color hex (ej. "#4F46E5") para diferenciar al integrante de un
    * vistazo en listados/gráficos. null = gris por defecto en la UI. */
   color: string | null
+  /** Fase 71i (06/09): datos personales puntuales sin columna propia
+   * todavía (ej. datos de jubilación/Anses de un integrante) -- formato
+   * libre {clave: valor}. Se promueve a columna dedicada si el sistema
+   * empieza a usarlo de verdad (filtrar, calcular, etc.), como pasó con
+   * fecha_nacimiento/telefono/color. Nombre en snake_case a propósito:
+   * esta interfaz espeja la fila cruda de `usuarios_cliente` tal como la
+   * devuelve `select('*')` (ver PerfilFamiliar.tsx), sin mapeo intermedio. */
+  datos_extra: Record<string, string> | null
 }
 
 export interface Permiso {

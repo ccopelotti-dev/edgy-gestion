@@ -48,6 +48,8 @@ import {
 
 import { formatARS, todayISO } from '../lib/format';
 import { esCuitValido } from '@/lib/validarCuit';
+import { supabase } from '@/lib/supabase';
+import { useClienteActual } from '@/hooks/useClienteActual';
 import { UNIDADES, type UnidadMedida } from '@/modules/productos-stock/types';
 import {
   subirImagenComprobanteManual,
@@ -1294,6 +1296,16 @@ export function ConfirmarPagoDialog({ open, onOpenChange, pago, proveedorNombre,
 // De dónde sale la plata: aporte de la Charcutería (con doble registro
 // en su Tesorería, ver store.tsx) o ingreso fijo de un familiar.
 
+interface IntegranteOpcion {
+  id: string;
+  nombre: string;
+}
+
+/** Sentinel para "no está en la lista / prefiero escribirlo a mano" en el
+ * selector de integrante -- evita pisar el flujo de texto libre que ya
+ * existía para 'otro' y para altas viejas sin vínculo. */
+const SIN_VINCULAR = '__sin_vincular__';
+
 interface IngresoDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1301,6 +1313,7 @@ interface IngresoDialogProps {
     fecha: string;
     tipo: TipoIngreso;
     origen: string;
+    usuarioClienteId?: string;
     concepto: string;
     monto: number;
     medioPago?: MedioPago;
@@ -1308,12 +1321,22 @@ interface IngresoDialogProps {
     diaMesRecurrente?: number;
     notas: string;
   }) => void;
+  /**
+   * Fase 71i: cuando este diálogo se abre desde la ficha de un
+   * integrante en Perfil Familiar (en vez de desde Home Keep > Ingresos),
+   * llega la persona ya fijada -- el tipo se fuerza a 'ingreso_familiar'
+   * y no se puede elegir otro integrante ni volver a "sin vincular".
+   */
+  integranteFijo?: IntegranteOpcion;
 }
 
-export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps) {
+export function IngresoDialog({ open, onOpenChange, onSave, integranteFijo }: IngresoDialogProps) {
+  const { cliente } = useClienteActual();
   const [fecha, setFecha] = useState(todayISO());
-  const [tipo, setTipo] = useState<TipoIngreso>('aporte_negocio');
-  const [origen, setOrigen] = useState('La Charcutería');
+  const [tipo, setTipo] = useState<TipoIngreso>(integranteFijo ? 'ingreso_familiar' : 'aporte_negocio');
+  const [origen, setOrigen] = useState(integranteFijo ? integranteFijo.nombre : 'La Charcutería');
+  const [integrantes, setIntegrantes] = useState<IntegranteOpcion[]>([]);
+  const [usuarioClienteId, setUsuarioClienteId] = useState<string>(integranteFijo?.id ?? SIN_VINCULAR);
   const [concepto, setConcepto] = useState('');
   const [monto, setMonto] = useState(0);
   const [medioPago, setMedioPago] = useState<MedioPago>('transferencia');
@@ -1325,8 +1348,9 @@ export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps
   useEffect(() => {
     if (open) {
       setFecha(todayISO());
-      setTipo('aporte_negocio');
-      setOrigen('La Charcutería');
+      setTipo(integranteFijo ? 'ingreso_familiar' : 'aporte_negocio');
+      setOrigen(integranteFijo ? integranteFijo.nombre : 'La Charcutería');
+      setUsuarioClienteId(integranteFijo?.id ?? SIN_VINCULAR);
       setConcepto('');
       setMonto(0);
       setMedioPago('transferencia');
@@ -1335,12 +1359,47 @@ export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps
       setNotas('');
       setError('');
     }
-  }, [open]);
+  }, [open, integranteFijo]);
+
+  // Trae la lista de integrantes (Dueño + familia) para el selector --
+  // solo hace falta si el usuario puede llegar a elegir tipo='ingreso_familiar'
+  // (si ya viene fijo desde la ficha, no hace falta ofrecer opciones).
+  useEffect(() => {
+    if (!open || integranteFijo || !cliente) return;
+    supabase
+      .from('usuarios_cliente')
+      .select('id, nombre, email')
+      .eq('cliente_id', cliente.id)
+      .order('nombre')
+      .then(({ data }) => {
+        setIntegrantes(
+          (data ?? []).map((u: any) => ({ id: u.id, nombre: u.nombre || u.email || 'Sin nombre' })),
+        );
+      });
+  }, [open, integranteFijo, cliente]);
 
   const handleTipo = (nuevo: TipoIngreso) => {
     setTipo(nuevo);
-    if (nuevo === 'aporte_negocio') setOrigen('La Charcutería');
-    else if (origen === 'La Charcutería') setOrigen('');
+    if (nuevo === 'aporte_negocio') {
+      setOrigen('La Charcutería');
+      setUsuarioClienteId(SIN_VINCULAR);
+    } else if (nuevo === 'ingreso_familiar') {
+      setOrigen('');
+      setUsuarioClienteId(SIN_VINCULAR);
+    } else if (origen === 'La Charcutería') {
+      setOrigen('');
+      setUsuarioClienteId(SIN_VINCULAR);
+    }
+  };
+
+  const handleIntegrante = (id: string) => {
+    setUsuarioClienteId(id);
+    if (id === SIN_VINCULAR) {
+      setOrigen('');
+    } else {
+      const persona = integrantes.find((i) => i.id === id);
+      if (persona) setOrigen(persona.nombre);
+    }
   };
 
   const handleSave = () => {
@@ -1352,6 +1411,7 @@ export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps
       fecha,
       tipo,
       origen: origen.trim(),
+      usuarioClienteId: usuarioClienteId !== SIN_VINCULAR ? usuarioClienteId : undefined,
       concepto: concepto.trim(),
       monto,
       medioPago: tipo === 'aporte_negocio' ? medioPago : undefined,
@@ -1375,7 +1435,12 @@ export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps
           <div className="space-y-4">
             <div>
               <label className={labelClass}>Tipo</label>
-              <select className={selectClass} value={tipo} onChange={(e) => handleTipo(e.target.value as TipoIngreso)}>
+              <select
+                className={selectClass}
+                value={tipo}
+                onChange={(e) => handleTipo(e.target.value as TipoIngreso)}
+                disabled={!!integranteFijo}
+              >
                 {(Object.entries(TIPO_INGRESO_LABEL) as [TipoIngreso, string][]).map(([val, label]) => (
                   <option key={val} value={val}>{label}</option>
                 ))}
@@ -1398,15 +1463,49 @@ export function IngresoDialog({ open, onOpenChange, onSave }: IngresoDialogProps
               </div>
             </div>
 
-            <div>
-              <label className={labelClass}>{tipo === 'ingreso_familiar' ? 'Nombre del familiar' : 'Origen'}</label>
-              <input
-                className={inputClass}
-                value={origen}
-                onChange={(e) => setOrigen(e.target.value)}
-                placeholder={tipo === 'ingreso_familiar' ? 'Ej. Esposa' : 'Ej. La Charcutería'}
-              />
-            </div>
+            {tipo === 'ingreso_familiar' ? (
+              integranteFijo ? (
+                <div>
+                  <label className={labelClass}>Integrante</label>
+                  <p className="text-sm text-gray-900 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                    {integranteFijo.nombre}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className={labelClass}>Integrante</label>
+                  <select className={selectClass} value={usuarioClienteId} onChange={(e) => handleIntegrante(e.target.value)}>
+                    <option value={SIN_VINCULAR}>Otro / no está en la lista</option>
+                    {integrantes.map((i) => (
+                      <option key={i.id} value={i.id}>{i.nombre}</option>
+                    ))}
+                  </select>
+                  {usuarioClienteId === SIN_VINCULAR && (
+                    <input
+                      className={`${inputClass} mt-2`}
+                      value={origen}
+                      onChange={(e) => setOrigen(e.target.value)}
+                      placeholder="Nombre del familiar"
+                    />
+                  )}
+                  {usuarioClienteId !== SIN_VINCULAR && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Este ingreso también va a verse desde la ficha de {origen} en Perfil Familiar.
+                    </p>
+                  )}
+                </div>
+              )
+            ) : (
+              <div>
+                <label className={labelClass}>Origen</label>
+                <input
+                  className={inputClass}
+                  value={origen}
+                  onChange={(e) => setOrigen(e.target.value)}
+                  placeholder="Ej. La Charcutería"
+                />
+              </div>
+            )}
 
             <div>
               <label className={labelClass}>Concepto</label>

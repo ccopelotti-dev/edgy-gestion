@@ -46,6 +46,15 @@ import {
 } from '@/components/ui/dialog'
 import { AccesoRestringido } from '@/modules/AccesoRestringido'
 import type { UsuarioCliente } from '@/types'
+// Fase 71i (06/09, a pedido de Carlos): un Ingreso de tipo 'ingreso_familiar'
+// (Home Keep) puede quedar vinculado a la persona real -- se reutiliza acá
+// el mismo diálogo de alta de Home Keep en vez de duplicar el formulario,
+// con la persona ya fijada (`integranteFijo`). Esta pantalla vive fuera del
+// árbol de HomeKeepProvider, así que el guardado NO pasa por su store/reducer
+// -- inserta directo en `ingresos_hogar` con el mismo mapeo de columnas.
+import { IngresoDialog } from '@/modules/home-keep/components/dialogs'
+import { formatARS, formatDate } from '@/modules/home-keep/lib/format'
+import { TIPO_INGRESO_LABEL, generarId, type Ingreso } from '@/modules/home-keep/types'
 
 interface RolLiviano {
   id: string
@@ -131,6 +140,13 @@ function EditarFamiliarDialog({
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Fase 71i: ingresos de Home Keep (tipo 'ingreso_familiar') vinculados
+  // a esta persona -- misma tabla que ve Home Keep > Ingresos, mostrada
+  // acá como la otra puerta de entrada de la relación.
+  const [ingresosAsociados, setIngresosAsociados] = useState<Ingreso[]>([])
+  const [cargandoIngresos, setCargandoIngresos] = useState(false)
+  const [mostrarIngresoDialog, setMostrarIngresoDialog] = useState(false)
+
   useEffect(() => {
     if (!usuario) return
     setNombre(usuario.nombre ?? '')
@@ -139,6 +155,103 @@ function EditarFamiliarDialog({
     setColor(usuario.color ?? COLORES_PERFIL[0])
     setError(null)
   }, [usuario])
+
+  useEffect(() => {
+    if (!usuario) {
+      setIngresosAsociados([])
+      return
+    }
+    let activo = true
+    setCargandoIngresos(true)
+    supabase
+      .from('ingresos_hogar')
+      .select('*')
+      .eq('usuario_cliente_id', usuario.id)
+      .order('fecha', { ascending: false })
+      .then(({ data }) => {
+        if (!activo) return
+        const filas: Ingreso[] = (data ?? []).map((r: any) => ({
+          id: r.id,
+          fecha: r.fecha,
+          tipo: r.tipo,
+          origen: r.origen ?? undefined,
+          usuarioClienteId: r.usuario_cliente_id ?? undefined,
+          concepto: r.concepto ?? undefined,
+          monto: Number(r.monto),
+          medioPago: r.medio_pago ?? undefined,
+          recurrente: r.recurrente,
+          diaMesRecurrente: r.dia_mes_recurrente ?? undefined,
+          notas: r.notas ?? undefined,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }))
+        setIngresosAsociados(filas)
+        setCargandoIngresos(false)
+      })
+    return () => {
+      activo = false
+    }
+  }, [usuario])
+
+  async function guardarIngreso(data: {
+    fecha: string
+    tipo: Ingreso['tipo']
+    origen: string
+    usuarioClienteId?: string
+    concepto: string
+    monto: number
+    recurrente: boolean
+    diaMesRecurrente?: number
+    notas: string
+  }) {
+    if (!usuario) return
+    const { data: creado, error: errInsert } = await supabase
+      .from('ingresos_hogar')
+      .insert({
+        id: generarId(),
+        cliente_id: usuario.cliente_id,
+        fecha: data.fecha,
+        tipo: data.tipo,
+        origen: data.origen || null,
+        usuario_cliente_id: data.usuarioClienteId ?? usuario.id,
+        concepto: data.concepto || null,
+        monto: data.monto,
+        medio_pago: null,
+        recurrente: data.recurrente,
+        dia_mes_recurrente: data.diaMesRecurrente ?? null,
+        notas: data.notas || null,
+      })
+      .select()
+      .single()
+
+    if (errInsert || !creado) {
+      console.error('PerfilFamiliar: error insertando ingresos_hogar', errInsert)
+      return
+    }
+
+    setIngresosAsociados((prev) => [
+      {
+        id: creado.id,
+        fecha: creado.fecha,
+        tipo: creado.tipo,
+        origen: creado.origen ?? undefined,
+        usuarioClienteId: creado.usuario_cliente_id ?? undefined,
+        concepto: creado.concepto ?? undefined,
+        monto: Number(creado.monto),
+        recurrente: creado.recurrente,
+        diaMesRecurrente: creado.dia_mes_recurrente ?? undefined,
+        notas: creado.notas ?? undefined,
+        createdAt: creado.created_at,
+        updatedAt: creado.updated_at,
+      },
+      ...prev,
+    ])
+  }
+
+  async function eliminarIngreso(id: string) {
+    await supabase.from('ingresos_hogar').delete().eq('id', id)
+    setIngresosAsociados((prev) => prev.filter((i) => i.id !== id))
+  }
 
   async function guardar() {
     if (!usuario) return
@@ -211,6 +324,48 @@ function EditarFamiliarDialog({
             <SelectorColor value={color} onChange={setColor} />
           </div>
           {error && <p className="text-sm text-red-500">{error}</p>}
+
+          {/* Fase 71i: ingresos que aporta -- misma tabla que Home Keep >
+              Ingresos (tipo 'ingreso_familiar'), vista desde la ficha. */}
+          <div className="space-y-2 border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-gray-500">Ingresos que aporta</label>
+              <Button variant="outline" size="sm" onClick={() => setMostrarIngresoDialog(true)}>
+                + Agregar ingreso
+              </Button>
+            </div>
+            {cargandoIngresos ? (
+              <p className="text-xs text-gray-400">Cargando...</p>
+            ) : ingresosAsociados.length === 0 ? (
+              <p className="text-xs text-gray-400">Todavía no tiene ningún ingreso cargado.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {ingresosAsociados.map((i) => (
+                  <li
+                    key={i.id}
+                    className="flex items-center justify-between rounded-md bg-gray-50 px-2.5 py-1.5 text-xs"
+                  >
+                    <div>
+                      <span className="font-medium text-gray-900">{formatARS(i.monto)}</span>
+                      <span className="text-gray-500">
+                        {' '}
+                        · {i.concepto || TIPO_INGRESO_LABEL[i.tipo]} · {formatDate(i.fecha)}
+                        {i.recurrente ? ` · fijo (día ${i.diaMesRecurrente ?? '—'})` : ''}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => eliminarIngreso(i.id)}
+                      className="text-gray-400 hover:text-red-600"
+                      title="Eliminar"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -222,6 +377,15 @@ function EditarFamiliarDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {usuario && (
+        <IngresoDialog
+          open={mostrarIngresoDialog}
+          onOpenChange={setMostrarIngresoDialog}
+          integranteFijo={{ id: usuario.id, nombre: usuario.nombre ?? usuario.email ?? 'Sin nombre' }}
+          onSave={guardarIngreso}
+        />
+      )}
     </Dialog>
   )
 }

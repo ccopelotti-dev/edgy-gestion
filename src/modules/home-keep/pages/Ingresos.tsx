@@ -26,6 +26,7 @@ export default function Ingresos() {
     fecha: string;
     tipo: Ingreso['tipo'];
     origen: string;
+    usuarioClienteId?: string;
     concepto: string;
     monto: number;
     medioPago?: Ingreso['medioPago'];
@@ -41,6 +42,7 @@ export default function Ingresos() {
         fecha: data.fecha,
         tipo: data.tipo,
         origen: data.origen || undefined,
+        usuarioClienteId: data.usuarioClienteId,
         concepto: data.concepto || undefined,
         monto: data.monto,
         medioPago: data.medioPago,

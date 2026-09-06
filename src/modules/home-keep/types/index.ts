@@ -196,8 +196,15 @@ export interface Ingreso {
   fecha: string;
   tipo: TipoIngreso;
   /** "La Charcutería" para aporte_negocio, nombre del familiar para
-   * ingreso_familiar, libre para 'otro'. */
+   * ingreso_familiar, libre para 'otro'. Cuando hay `usuarioClienteId`
+   * cargado, `origen` se autocompleta con su nombre (queda igual como
+   * texto de respaldo/legado, pero la relación real vive en el id). */
   origen?: string;
+  /** Fase 71i (06/09): integrante de la familia (usuarios_cliente) que
+   * aporta este ingreso -- solo tiene sentido para tipo='ingreso_familiar'.
+   * Permite mostrar/cargar el mismo ingreso tanto desde acá (Ingresos)
+   * como desde la ficha de la persona en Perfil Familiar. */
+  usuarioClienteId?: string;
   concepto?: string;
   monto: number;
   /** Solo relevante para tipo='aporte_negocio' -- cómo salió la plata
