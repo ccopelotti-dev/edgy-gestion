@@ -1,0 +1,317 @@
+// ============================================================
+// Perfil Familiar (Fase 71b, 05/09, a pedido de Carlos)
+// ============================================================
+// Pantalla para que el Admin/Dueño de la cuenta dé de alta a otros
+// integrantes de la familia con login propio, y les asigne un rol
+// restringido (ej. "Hijo" -- ve solo Home Keep, ver useClienteActual.ts
+// y ModuloRoute.tsx, Fase 71). No es un módulo de negocio (no vive bajo
+// /m/:slug ni en el registro de módulos) -- es una pantalla de cuenta,
+// por eso se accede desde el dropdown "Cuenta" del header (Layout.tsx),
+// el mismo círculo que Carlos marcó en su mockup.
+//
+// El alta en sí (insert en usuarios_cliente) se hace directo desde acá
+// con el cliente de Supabase normal -- la política RLS
+// `usuarios_cliente_insert_admin` ya permite que un admin cree filas
+// para su propio cliente_id, no hace falta pasar por una función. Lo
+// único que SÍ necesita la service_role key (y por eso pasa por
+// invitar-familiar.js) es el paso de darle acceso real.
+//
+// Fase 71c (05/09, a pedido de Carlos): cargar a alguien y darle acceso
+// son dos pasos separados a propósito -- un hijo chico se puede cargar
+// hoy (nombre, rol) y activarle el acceso más adelante, cuando el admin
+// lo decida. Por eso ya NO se manda la invitación automáticamente al
+// guardar: cada fila "pendiente" ofrece dos caminos --
+//   - "Enviar invitación por mail": la persona define su propia
+//     contraseña (Supabase le manda el link). Pensado para alguien que
+//     ya maneja su correo.
+//   - "Definir contraseña yo": el admin la elige acá mismo, sin mandar
+//     ningún mail. Pensado para un hijo chico -- el admin le da el
+//     usuario y la contraseña de palabra cuando le parece.
+
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useClienteActual } from '@/hooks/useClienteActual'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { AccesoRestringido } from '@/modules/AccesoRestringido'
+import type { UsuarioCliente } from '@/types'
+
+interface RolLiviano {
+  id: string
+  nombre: string
+}
+
+export default function PerfilFamiliar() {
+  const { cliente, rolActual, cargando: cargandoCliente } = useClienteActual()
+
+  const [usuarios, setUsuarios] = useState<UsuarioCliente[]>([])
+  const [rolesDisponibles, setRolesDisponibles] = useState<RolLiviano[]>([])
+  const [cargando, setCargando] = useState(true)
+
+  const [mostrarForm, setMostrarForm] = useState(false)
+  const [nombre, setNombre] = useState('')
+  const [email, setEmail] = useState('')
+  const [rolId, setRolId] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const [invitandoId, setInvitandoId] = useState<string | null>(null)
+  const [asignandoId, setAsignandoId] = useState<string | null>(null)
+  // Fase 71c: fila donde está abierto el campo para que el admin
+  // escriba la contraseña, y su valor mientras se completa.
+  const [passwordFormId, setPasswordFormId] = useState<string | null>(null)
+  const [passwordValor, setPasswordValor] = useState('')
+
+  useEffect(() => {
+    if (!cliente) return
+    let activo = true
+
+    async function cargar() {
+      setCargando(true)
+      const [{ data: usuariosData }, { data: rolesData }] = await Promise.all([
+        supabase
+          .from('usuarios_cliente')
+          .select('*')
+          .eq('cliente_id', cliente!.id)
+          .order('created_at'),
+        // Solo roles NO admin -- este formulario es a propósito acotado
+        // a integrantes restringidos (ej. "Hijo"). Sumar otro admin a la
+        // cuenta sigue siendo cosa del flujo de Equipo existente, no de
+        // Perfil Familiar.
+        supabase
+          .from('roles')
+          .select('id, nombre')
+          .eq('cliente_id', cliente!.id)
+          .eq('es_admin', false)
+          .order('nombre'),
+      ])
+
+      if (!activo) return
+      const usuariosOrdenados = (usuariosData as UsuarioCliente[]) ?? []
+      const roles = (rolesData as RolLiviano[]) ?? []
+      setUsuarios(usuariosOrdenados)
+      setRolesDisponibles(roles)
+      setRolId((prev) => prev || roles[0]?.id || '')
+      setCargando(false)
+    }
+
+    cargar()
+    return () => {
+      activo = false
+    }
+  }, [cliente])
+
+  // Fase 71c: un solo helper para los dos caminos -- si viene `password`
+  // el admin la eligió él mismo (sin mail); si no, es el camino de
+  // invitación por mail de siempre. `setCargandoUi` deja que cada botón
+  // muestre su propio estado de "enviando" sin pisarse entre sí.
+  async function activarAcceso(usuarioClienteId: string, password: string | null, setCargandoUi: (v: boolean) => void) {
+    setCargandoUi(true)
+    setError(null)
+    try {
+      const { data: sesion } = await supabase.auth.getSession()
+      const token = sesion?.session?.access_token
+      const resp = await fetch('/.netlify/functions/invitar-familiar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ usuarioClienteId, password }),
+      })
+      const json = await resp.json()
+      if (json.ok) {
+        setUsuarios((prev) =>
+          prev.map((u) => (u.id === usuarioClienteId ? { ...u, user_id: json.userId ?? u.user_id ?? 'pendiente' } : u)),
+        )
+        setPasswordFormId(null)
+        setPasswordValor('')
+      } else {
+        setError(json.error ?? 'No se pudo dar el acceso.')
+      }
+    } catch (e) {
+      console.error('PerfilFamiliar: error activando acceso', e)
+      setError('No se pudo dar el acceso. Probá de nuevo en un momento.')
+    } finally {
+      setCargandoUi(false)
+    }
+  }
+
+  async function agregarFamiliar() {
+    if (!cliente || !nombre.trim() || !email.trim() || !rolId) return
+    setGuardando(true)
+    setError(null)
+
+    const rol = rolesDisponibles.find((r) => r.id === rolId)
+    const { data: creado, error: errInsert } = await supabase
+      .from('usuarios_cliente')
+      .insert({
+        cliente_id: cliente.id,
+        rol_id: rolId,
+        rol: rol?.nombre ?? '',
+        nombre: nombre.trim(),
+        email: email.trim(),
+        auth_mode: 'full',
+        cuil: null,
+      })
+      .select()
+      .single()
+
+    setGuardando(false)
+
+    if (errInsert || !creado) {
+      console.error('PerfilFamiliar: error insertando usuarios_cliente', errInsert)
+      setError('No se pudo guardar. Revisá los datos e intentá de nuevo.')
+      return
+    }
+
+    setUsuarios((prev) => [...prev, creado as UsuarioCliente])
+    setNombre('')
+    setEmail('')
+    setMostrarForm(false)
+    // Fase 71c: ya no se manda nada automáticamente -- queda "pendiente"
+    // hasta que el admin elija cómo darle acceso (ver la fila del
+    // listado, más abajo).
+  }
+
+  if (cargandoCliente || cargando) {
+    return <p className="text-sm text-gray-400">Cargando...</p>
+  }
+
+  // Fase 71: solo el/la admin de la cuenta administra a la familia --
+  // un integrante restringido (ej. "Hijo") no debería poder invitar a
+  // nadie más, ni ver esta lista.
+  if (rolActual && !rolActual.esAdmin) {
+    return <AccesoRestringido slug="Perfil Familiar" />
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <div>
+        <h1 className="text-lg font-medium text-gray-900">Perfil Familiar</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Dale acceso a otros integrantes de la familia. Cada uno entra con su propio usuario, y ve
+          solo lo que su rol permite -- hoy, "Hijo" ve únicamente Home Keep.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {usuarios.map((u) => {
+          const invitacionPendiente = u.auth_mode === 'full' && !u.user_id
+          const formAbierto = passwordFormId === u.id
+          return (
+            <Card key={u.id} className="space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{u.nombre ?? u.email ?? 'Sin nombre'}</p>
+                  <p className="text-sm text-gray-500">
+                    {u.rol}
+                    {u.email ? ` · ${u.email}` : ''}
+                  </p>
+                </div>
+                {invitacionPendiente ? (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={invitandoId === u.id}
+                      onClick={() => activarAcceso(u.id, null, (v) => setInvitandoId(v ? u.id : null))}
+                    >
+                      {invitandoId === u.id ? 'Enviando...' : 'Enviar invitación por mail'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setPasswordFormId(formAbierto ? null : u.id)
+                        setPasswordValor('')
+                        setError(null)
+                      }}
+                    >
+                      Definir contraseña yo
+                    </Button>
+                  </div>
+                ) : u.user_id ? (
+                  <span className="text-xs text-gray-400">Activo</span>
+                ) : null}
+              </div>
+
+              {formAbierto && (
+                <div className="flex items-center gap-2 border-t border-gray-100 pt-3">
+                  <Input
+                    type="text"
+                    placeholder="Contraseña (mínimo 6 caracteres)"
+                    value={passwordValor}
+                    onChange={(e) => setPasswordValor(e.target.value)}
+                    className="max-w-xs"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={asignandoId === u.id || passwordValor.length < 6}
+                    onClick={() => activarAcceso(u.id, passwordValor, (v) => setAsignandoId(v ? u.id : null))}
+                  >
+                    {asignandoId === u.id ? 'Guardando...' : 'Confirmar'}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setPasswordFormId(null)}>
+                    Cancelar
+                  </Button>
+                </div>
+              )}
+            </Card>
+          )
+        })}
+        {usuarios.length === 0 && (
+          <p className="text-sm text-gray-400">Todavía no hay nadie cargado.</p>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      {mostrarForm ? (
+        <Card className="space-y-3 p-4">
+          <Input
+            placeholder="Nombre y apellido"
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+          />
+          <Input
+            placeholder="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          {rolesDisponibles.length === 0 ? (
+            <p className="text-sm text-amber-600">
+              Todavía no hay ningún rol familiar creado (ej. "Hijo"). Pedile a Edgy que lo cargue.
+            </p>
+          ) : (
+            <select
+              className="w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
+              value={rolId}
+              onChange={(e) => setRolId(e.target.value)}
+            >
+              {rolesDisponibles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.nombre}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="flex gap-2">
+            <Button
+              onClick={agregarFamiliar}
+              disabled={guardando || !nombre.trim() || !email.trim() || !rolId}
+            >
+              {guardando ? 'Guardando...' : 'Agregar'}
+            </Button>
+            <Button variant="ghost" onClick={() => setMostrarForm(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <Button variant="secondary" onClick={() => setMostrarForm(true)}>
+          + Agregar familiar
+        </Button>
+      )}
+    </div>
+  )
+}

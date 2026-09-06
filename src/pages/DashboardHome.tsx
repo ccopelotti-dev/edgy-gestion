@@ -1,3 +1,4 @@
+import { Navigate } from 'react-router-dom'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { useModoMostrador } from '@/hooks/useModoMostrador'
 import { DashboardAdministrativo } from './DashboardAdministrativo'
@@ -24,6 +25,19 @@ export function DashboardHome() {
 
   if (cargando) {
     return <div className="flex h-40 items-center justify-center text-gray-400">Cargando...</div>
+  }
+
+  // Fase 71 (05/09, control parental / rol "Hijo" en Home Keep): un rol
+  // restringido a un único módulo (ver useClienteActual -- modulosActivos
+  // ya viene filtrado por permisos_rol) no tiene ningún sentido en
+  // ninguno de los dos dashboards -- el administrativo muestra KPIs de
+  // todo el negocio, y el operativo (sobre todo el gastronómico) expone
+  // datos de mesas/cocina/turno que ese rol no debería ver aunque estén
+  // "vacíos" a propósito. Si solo puede ver un módulo, se lo manda
+  // directo ahí. No afecta a ningún rol existente: hoy todos tienen más
+  // de un módulo activo.
+  if (modulosActivos.length === 1) {
+    return <Navigate to={`/m/${modulosActivos[0].slug}`} replace />
   }
 
   // Fase 26: Modo Mostrador -- pantalla de accesos grandes (Facturar,

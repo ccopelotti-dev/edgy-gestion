@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { Cliente, ClienteModulo, Modulo, VistaRol } from '@/types'
+import type { Cliente, ClienteModulo, Modulo, NivelPermiso, VistaRol } from '@/types'
 
 interface ModuloActivo extends Modulo {
   activo: boolean
@@ -60,6 +60,18 @@ interface BrandingActual {
 
 interface UseClienteActualResult {
   cliente: Cliente | null
+  /** Fase 71 (05/09, a pedido de Carlos -- pieza base para "control
+   * parental" de Home Keep): módulos activos del cliente YA filtrados
+   * por lo que el rol del usuario logueado puede ver (permisos_rol,
+   * nivel 'sin_acceso'). Es la única fuente que consumen Sidebar y los
+   * Dashboard (administrativo/operativo) -- así un rol restringido
+   * (ej. "Hijo") deja de ver un módulo en todos lados con un solo
+   * cambio, sin tocar cada pantalla. Un módulo SIN fila en permisos_rol
+   * para ese rol se considera permitido (falta de dato = acceso, igual
+   * que siempre fue) -- solo una fila explícita en 'sin_acceso' oculta
+   * algo. Roles legados sin rol_id, o sin ninguna fila de permisos
+   * cargada (ej. Dueño), ven la lista completa, sin cambios de
+   * comportamiento para nadie que no haya sido restringido a mano. */
   modulosActivos: ModuloActivo[]
   rolActual: RolActual | null
   /** Fase 27a: todos los puntos de venta del cliente (vacío si nunca
@@ -152,6 +164,21 @@ export function useClienteActual(): UseClienteActualResult {
         .eq('cliente_id', usuarioCliente.cliente_id)
         .eq('activo', true)
 
+      // Fase 71: permisos explícitos de este rol, si tiene uno asignado.
+      // Solo interesa 'sin_acceso' -- lectura/escritura/admin no cambian
+      // nada acá (el nivel de detalle de acciones queda para más
+      // adelante); esto es pura visibilidad de módulo.
+      let permisosPorModulo: Record<string, NivelPermiso> = {}
+      if (usuarioCliente.rol_id) {
+        const { data: permisosData } = await supabase
+          .from('permisos_rol')
+          .select('modulo_id, nivel')
+          .eq('rol_id', usuarioCliente.rol_id)
+        permisosPorModulo = Object.fromEntries(
+          (permisosData ?? []).map((p: any) => [p.modulo_id as string, p.nivel as NivelPermiso]),
+        )
+      }
+
       // Fase 27a: lista de puntos de venta del cliente (vacía en
       // clientes de un solo local, que son la inmensa mayoría hoy --
       // no rompe nada).
@@ -195,10 +222,15 @@ export function useClienteActual(): UseClienteActualResult {
       )
       setDebeCambiarEmail(!!usuarioCliente.debe_cambiar_email)
       setModulosActivos(
-        (clienteModulos ?? []).map((row: any) => ({
-          ...(row.modulos as Modulo),
-          activo: row.activo as boolean,
-        })),
+        (clienteModulos ?? [])
+          .map((row: any) => ({
+            ...(row.modulos as Modulo),
+            activo: row.activo as boolean,
+          }))
+          // Fase 71: oculta lo que el rol tiene explícitamente en
+          // 'sin_acceso'. Sin fila para ese módulo = se ve, como
+          // siempre (ver comentario en UseClienteActualResult).
+          .filter((m) => permisosPorModulo[m.id] !== 'sin_acceso'),
       )
 
       const rolRow = (usuarioCliente as any).roles as

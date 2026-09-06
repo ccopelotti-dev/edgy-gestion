@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Outlet, Navigate, Link, useNavigate } from 'react-router-dom'
-import { Store, LogOut, Menu, X } from 'lucide-react'
+import { Store, LogOut, Menu, X, Users } from 'lucide-react'
 import { Sidebar } from '@/components/Sidebar'
 import { CambiarEmailObligatorio } from '@/pages/CambiarEmailObligatorio'
 import { useClienteActual } from '@/hooks/useClienteActual'
@@ -22,7 +22,7 @@ function iniciales(nombre: string): string {
 }
 
 export function DashboardLayout() {
-  const { cliente, modulosActivos, brandingActual, debeCambiarEmail, cargando, error } =
+  const { cliente, modulosActivos, rolActual, brandingActual, debeCambiarEmail, cargando, error } =
     useClienteActual()
   const { esStaff, cargando: cargandoStaff } = usePersonalEdgy()
   const navigate = useNavigate()
@@ -177,6 +177,19 @@ export function DashboardLayout() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {/* Fase 71b: "Perfil Familiar" -- mismo círculo que Carlos
+                  marcó en su mockup para dar de alta integrantes de la
+                  familia con rol restringido. Solo visible para quien
+                  administra la cuenta (rolActual null = usuario legado,
+                  se trata como admin, igual criterio que el resto de la
+                  app -- ver useClienteActual.ts). Un "Hijo" no ve esta
+                  opción. */}
+              {(!rolActual || rolActual.esAdmin) && (
+                <DropdownMenuItem onClick={() => navigate('/perfil-familiar')}>
+                  <Users className="mr-2 h-4 w-4" />
+                  Perfil Familiar
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={cerrarSesion}>
                 <LogOut className="mr-2 h-4 w-4" />
                 Cerrar sesión

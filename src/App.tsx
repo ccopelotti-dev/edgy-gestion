@@ -3,6 +3,7 @@ import { DashboardLayout } from '@/components/Layout'
 import { PanelLayout } from '@/components/PanelLayout'
 import { RutaStaff } from '@/components/RutaStaff'
 import { DashboardHome } from '@/pages/DashboardHome'
+import PerfilFamiliar from '@/pages/PerfilFamiliar'
 import { ModuloRoute } from '@/pages/ModuloRoute'
 import { NuevoProyecto } from '@/pages/onboarding/NuevoProyecto'
 import { ClientesListado } from '@/pages/panel/ClientesListado'
@@ -52,6 +53,13 @@ export default function App() {
         </Route>
         <Route path="/dashboard" element={<DashboardLayout />}>
           <Route index element={<DashboardHome />} />
+        </Route>
+        {/* Fase 71b: Perfil Familiar -- pantalla de cuenta, no un módulo de
+            negocio, por eso vive afuera de /m/:slug (se accede desde el
+            dropdown "Cuenta" del header, ver Layout.tsx). Usa el mismo
+            DashboardLayout para conservar header/sidebar. */}
+        <Route path="/perfil-familiar" element={<DashboardLayout />}>
+          <Route index element={<PerfilFamiliar />} />
         </Route>
        <Route path="/m/:slug/*" element={<DashboardLayout />}>
   <Route index element={<ModuloRoute />} />
