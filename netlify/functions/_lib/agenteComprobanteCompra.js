@@ -34,9 +34,54 @@ function soloDigitos(s) {
 function normalizarFormaPago(valor) {
   const v = String(valor || '').trim().toLowerCase()
   if (!v) return null
+  // Fase 73 -- "tarjeta" es una forma de pago propia de Home Keep (ver
+  // más abajo, requiere elegir CUÁL tarjeta familiar). Débito se trata
+  // como efectivo -- sale de la cuenta en el momento, no genera un
+  // consumo a pagar después como sí hace el crédito.
+  if (v.includes('debito') || v.includes('débito')) return 'efectivo'
+  if (v.includes('tarjeta') || v.includes('credito') || v.includes('crédito')) return 'tarjeta'
   if (v.includes('cuenta') || v.includes('cta')) return 'cuenta_corriente'
   if (v.includes('contado') || v.includes('efectivo') || v.includes('cash')) return 'efectivo'
   return null
+}
+
+// Fase 73 -- matchea la respuesta del admin ("BNA", "la del BBVA", "7014")
+// contra las tarjetas familiares activas, comparando por nombre, banco y
+// últimos dígitos. Mismo criterio conservador de siempre: si matchea 0 o
+// 2+, no se adivina.
+function matchearTarjetaPorTexto(texto, tarjetas) {
+  const t = String(texto || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  if (!t) return { tarjeta: null, candidatas: 0 }
+  const soloNumeros = t.replace(/\D/g, '')
+  const candidatas = tarjetas.filter((tarjeta) => {
+    const nombre = String(tarjeta.nombre || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const banco = String(tarjeta.banco || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const ultimos = String(tarjeta.ultimos_digitos || '').replace(/\D/g, '')
+    const matcheaTexto = (nombre && (nombre.includes(t) || t.includes(nombre))) || (banco && (banco.includes(t) || t.includes(banco)))
+    const matcheaDigitos = soloNumeros.length >= 3 && ultimos && ultimos === soloNumeros
+    return matcheaTexto || matcheaDigitos
+  })
+  if (candidatas.length !== 1) return { tarjeta: null, candidatas: candidatas.length }
+  return { tarjeta: candidatas[0], candidatas: 1 }
+}
+
+// Fase 73 -- interpreta la respuesta a "¿esperás reintegro?": "no"/"sin
+// reintegro"/"nada" -> sin reintegro; un número (con o sin $) -> monto en
+// pesos; un número seguido de % -> porcentaje del monto del consumo.
+// Devuelve null si genuinamente no se entendió (para volver a preguntar
+// en vez de asumir "no" por defecto -- más vale preguntar de más que
+// perder un reintegro real por no entender la respuesta).
+function parsearReintegroTexto(texto) {
+  const t = String(texto || '').trim().toLowerCase()
+  if (!t) return null
+  if (/^(no|nada|ninguno|sin reintegro|no espero|no hay)\b/.test(t)) {
+    return { valor: 0, esPorcentaje: false }
+  }
+  const match = t.match(/\$?\s*([\d.,]+)\s*(%)?/)
+  if (!match) return null
+  const valor = parsearMontoArg(match[1])
+  if (!Number.isFinite(valor)) return null
+  return { valor, esPorcentaje: Boolean(match[2]) }
 }
 
 function numero(n, fallback = 0) {
@@ -564,6 +609,134 @@ async function actualizarStockPorCompraServer(supabaseAdmin, { clienteId, provee
   return { ok: true, recepcionId }
 }
 
+// Fase 73 -- cierre del flujo de "pagué con tarjeta": crea el comprobante
+// en Home Keep (marcado 'pagado', sin generar movimiento de caja -- la
+// plata no salió de ningún lado todavía, sale recién cuando se pague el
+// resumen de la tarjeta) y el consumo abierto en consumos_tarjeta_hogar
+// (mismo mecanismo que RegistrarConsumoDialog, Fase 72), que es lo que
+// realmente descuenta cupo disponible y va a aparecer en el próximo
+// resumen. Solo aplica a Home Keep -- Compras real no tiene tarjetas
+// familiares.
+async function registrarConsumoTarjetaDesdeAgente({
+  supabaseAdmin,
+  clienteId,
+  comprobanteRecibidoId,
+  tarjetaId,
+  proveedor,
+  total,
+  fecha,
+  reintegroValor,
+  reintegroEsPorcentaje,
+  categoriaGastoId,
+  esPrueba,
+}) {
+  if (!(total > 0)) {
+    return { creado: false, motivo: 'monto_invalido' }
+  }
+
+  const proveedorNombre = proveedor.nombre_fantasia || proveedor.nombre || 'Proveedor'
+  const reintegroMonto = reintegroEsPorcentaje ? total * (reintegroValor / 100) : reintegroValor
+
+  const { data: maxRow } = await supabaseAdmin
+    .from('comprobantes_hogar')
+    .select('numero')
+    .eq('cliente_id', clienteId)
+    .eq('tipo', 'factura')
+    .order('numero', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const nuevoNumero = numero(maxRow?.numero, 0) + 1
+
+  const notaTrazabilidad = `Cargado automáticamente por el agente de WhatsApp -- pagado con tarjeta familiar (Fase 73), comprobantes_recibidos#${comprobanteRecibidoId}.`
+
+  const { data: comprobante, error: errComprobante } = await supabaseAdmin
+    .from('comprobantes_hogar')
+    .insert([{
+      cliente_id: clienteId,
+      tipo: 'factura',
+      numero: nuevoNumero,
+      proveedor_id: proveedor.id,
+      fecha,
+      subtotal: total,
+      monto_iva: 0,
+      otros_impuestos: [],
+      total,
+      // Fase 73, a pedido de Carlos: queda 'pagado' -- no genera una
+      // deuda visible en Home Keep porque ya se ve reflejado como
+      // consumo abierto en Tarjetas (no duplicar la misma plata en dos
+      // lugares distintos del sistema).
+      estado: 'pagado',
+      medio_pago: 'tarjeta',
+      monto_pagado: total,
+      saldo_pendiente: 0,
+      numero_comprobante_proveedor: null,
+      notas: notaTrazabilidad,
+      es_prueba: Boolean(esPrueba),
+    }])
+    .select('id')
+    .single()
+
+  if (errComprobante) {
+    console.error('registrarConsumoTarjetaDesdeAgente: error creando comprobante', errComprobante)
+    return { creado: false, motivo: 'error_al_crear_comprobante', error: errComprobante.message }
+  }
+
+  const { error: errItem } = await supabaseAdmin.from('comprobante_hogar_items').insert([{
+    id: crypto.randomUUID(),
+    comprobante_id: comprobante.id,
+    descripcion: `Compra en ${proveedorNombre} (extracción automática)`,
+    cantidad: 1,
+    precio_unitario: total,
+    descuento: 0,
+    alicuota_iva: 0,
+    subtotal: total,
+    monto_iva: 0,
+    categoria_gasto_id: categoriaGastoId,
+    unidad: null,
+  }])
+  if (errItem) {
+    console.error('registrarConsumoTarjetaDesdeAgente: error creando item', errItem)
+  }
+
+  const { error: errConsumo } = await supabaseAdmin.from('consumos_tarjeta_hogar').insert([{
+    id: crypto.randomUUID(),
+    cliente_id: clienteId,
+    tarjeta_id: tarjetaId,
+    descripcion: proveedorNombre,
+    fecha_consumo: fecha,
+    monto: total,
+    cuota_actual: 1,
+    cuotas_totales: 1,
+    compra_id: null,
+    categoria_gasto_id: categoriaGastoId,
+    ...(reintegroMonto > 0
+      ? { reintegro_concepto: `Reintegro tarjeta - ${proveedorNombre}`, reintegro_monto: reintegroMonto }
+      : {}),
+  }])
+  if (errConsumo) {
+    console.error('registrarConsumoTarjetaDesdeAgente: error creando consumo de tarjeta', errConsumo)
+    // El comprobante ya se creó -- no se revierte (mismo criterio del
+    // resto del archivo, no hay transacciones multi-tabla acá), pero se
+    // devuelve creado:false para que quede claro en el WhatsApp que algo
+    // no cerró del todo y hay que revisar a mano.
+    return { creado: false, motivo: 'error_al_crear_consumo', error: errConsumo.message, comprobanteId: comprobante.id }
+  }
+
+  await supabaseAdmin
+    .from('comprobantes_recibidos')
+    .update({ estado: 'revisado', pendiente_aclaracion: null, comprobante_hogar_id: comprobante.id })
+    .eq('id', comprobanteRecibidoId)
+
+  return {
+    creado: true,
+    motivo: 'consumo_tarjeta_registrado',
+    comprobanteId: comprobante.id,
+    proveedorNombre,
+    total,
+    reintegroMonto,
+  }
+}
+
 // Intenta cargar el comprobante en Compras (o en Home Keep, según
 // `destino`) a partir de lo que se pudo extraer de la imagen. Devuelve
 // siempre un resultado -- nunca lanza por datos incompletos, eso es
@@ -575,6 +748,8 @@ export async function intentarCargarComprobante({
   datosExtraidos,
   formaPagoRespuesta, // si viene de la respuesta del admin (texto libre)
   cuitManual, // Fase 68a -- si viene de la respuesta del admin a la aclaración de CUIT
+  tarjetaRespuesta, // Fase 73 -- respuesta del admin a "¿cuál tarjeta?" (texto libre)
+  reintegroRespuesta, // Fase 73 -- respuesta del admin a "¿esperás reintegro?" (texto libre)
   esPrueba,
   destino = 'compras', // 'compras' (default) | 'hogar' (Fase 56, Home Keep)
   captionTexto, // Fase 68c (extensión) -- pie de foto de WhatsApp, ver parseCaptionPagoFactura
@@ -653,7 +828,16 @@ export async function intentarCargarComprobante({
   const tablas = TABLAS_POR_DESTINO[destino] || TABLAS_POR_DESTINO.compras
   const esHogar = destino === 'hogar'
 
-  const formaPago = normalizarFormaPago(formaPagoRespuesta) || normalizarFormaPago(datosExtraidos.formaPagoDetectada)
+  // Fase 73 (a pedido de Carlos, 06/09) -- Home Keep dejó de autodetectar
+  // la forma de pago a partir de lo que la IA leyó del ticket: siempre se
+  // le pregunta al admin por WhatsApp, para que sea preciso y para poder
+  // ofrecer "tarjeta" como tercera opción (que necesita una pregunta de
+  // seguimiento, cuál tarjeta, imposible de adivinar del ticket). Compras
+  // real (Punto Tex) no cambia -- sigue intentando la autodetección desde
+  // datosExtraidos.formaPagoDetectada como siempre (Fase 54/70e).
+  const formaPago = esHogar
+    ? normalizarFormaPago(formaPagoRespuesta)
+    : normalizarFormaPago(formaPagoRespuesta) || normalizarFormaPago(datosExtraidos.formaPagoDetectada)
 
   // Fase 68a -- el CUIT manual (respuesta del admin a la aclaración) pisa
   // al extraído por la IA: si el admin lo escribe a mano es porque la
@@ -717,14 +901,12 @@ export async function intentarCargarComprobante({
     return { creado: false, motivo: 'forma_pago_pendiente', proveedorNombre: proveedor.nombre_fantasia || proveedor.nombre }
   }
 
-  // Todo resuelto -- se carga el comprobante.
-  const tipo = TIPOS_VALIDOS.includes(datosExtraidos.tipo) ? datosExtraidos.tipo : 'factura'
-
-  // Categoría de gasto (Fase 55, tenant Hogar) -- si la IA sugirió una y
-  // matchea EXACTO (por nombre) contra las categorías cargadas para este
-  // cliente, se la asigna a todos los ítems. Si el cliente no tiene
-  // categorías (caso normal de Punto Tex/Charcutería) o no hay match,
-  // queda null -- no bloquea la carga, es solo un dato extra.
+  // Categoría de gasto (Fase 55, tenant Hogar) -- se calcula acá (antes de
+  // la rama de tarjeta, Fase 73, que también la necesita) -- si la IA
+  // sugirió una y matchea EXACTO (por nombre) contra las categorías
+  // cargadas para este cliente, se la asigna a todos los ítems. Si el
+  // cliente no tiene categorías (caso normal de Punto Tex/Charcutería) o
+  // no hay match, queda null -- no bloquea la carga, es solo un dato extra.
   //
   // Fase 70g (05/09, bug real detectado en carga masiva de tickets Hogar):
   // el match era 100% literal por string (solo lowercase) -- el prompt de
@@ -745,6 +927,101 @@ export async function intentarCargarComprobante({
     const match = (categorias || []).find((c) => sinAcentos(c.nombre) === buscado)
     categoriaGastoId = match ? match.id : null
   }
+
+  // Fase 73 -- forma de pago 'tarjeta': todavía no alcanza, hace falta
+  // saber CUÁL tarjeta familiar (Home Keep, Perfil Familiar) y si esa
+  // compra tiene reintegro esperado, antes de cargar nada. Se pregunta
+  // siempre por WhatsApp -- nunca se adivina ni se lee del ticket (a
+  // pedido de Carlos, 06/09). Solo aplica a Home Keep -- Compras real no
+  // tiene tarjetas familiares, así que si algún día 'tarjeta' aparece ahí
+  // se cae al camino normal más abajo (queda 'pendiente', igual que
+  // cuenta_corriente, en vez de romper).
+  if (esHogar && formaPago === 'tarjeta') {
+    const pasoTarjeta = datosExtraidos._pagoTarjeta || {}
+    const proveedorNombreActual = proveedor.nombre_fantasia || proveedor.nombre || 'Proveedor'
+
+    if (!pasoTarjeta.tarjetaId) {
+      const { data: tarjetasActivas, error: errTarjetas } = await supabaseAdmin
+        .from('tarjetas_credito_hogar')
+        .select('id, nombre, banco, ultimos_digitos')
+        .eq('cliente_id', clienteId)
+        .eq('activa', true)
+      if (errTarjetas) {
+        console.error('intentarCargarComprobante: error listando tarjetas familiares', errTarjetas)
+      }
+      const listaTarjetas = (tarjetasActivas || []).map((t) => ({
+        nombre: t.nombre,
+        banco: t.banco,
+        ultimosDigitos: t.ultimos_digitos,
+      }))
+
+      if (!tarjetaRespuesta) {
+        // Primera vez que llegamos acá -- recién contestó "tarjeta" a la
+        // pregunta de forma de pago. Se pregunta cuál, listando las
+        // activas para que n8n arme el mensaje.
+        await marcarPendiente(supabaseAdmin, comprobanteRecibidoId, { pendienteAclaracion: 'cual_tarjeta' })
+        return { creado: false, motivo: 'cual_tarjeta_pendiente', proveedorNombre: proveedorNombreActual, tarjetas: listaTarjetas }
+      }
+
+      const { tarjeta, candidatas } = matchearTarjetaPorTexto(tarjetaRespuesta, tarjetasActivas || [])
+      if (!tarjeta) {
+        // 0 o 2+ matches -- no se adivina, se vuelve a preguntar.
+        await marcarPendiente(supabaseAdmin, comprobanteRecibidoId, { pendienteAclaracion: 'cual_tarjeta' })
+        return {
+          creado: false,
+          motivo: candidatas > 1 ? 'cual_tarjeta_ambigua' : 'cual_tarjeta_no_encontrada',
+          tarjetas: listaTarjetas,
+        }
+      }
+
+      // Tarjeta resuelta -- se persiste en datos_extraidos para que el
+      // PRÓXIMO llamado (cuando conteste el reintegro) sepa a qué tarjeta
+      // corresponde sin tener que volver a preguntar.
+      await supabaseAdmin
+        .from('comprobantes_recibidos')
+        .update({
+          datos_extraidos: { ...datosExtraidos, _pagoTarjeta: { tarjetaId: tarjeta.id } },
+          pendiente_aclaracion: 'reintegro_tarjeta',
+        })
+        .eq('id', comprobanteRecibidoId)
+
+      return { creado: false, motivo: 'reintegro_tarjeta_pendiente', tarjetaNombre: tarjeta.nombre }
+    }
+
+    // Ya eligió tarjeta (quedó guardada en datos_extraidos) -- falta el
+    // reintegro para cerrar el círculo y recién ahí cargar el consumo.
+    if (!reintegroRespuesta) {
+      await marcarPendiente(supabaseAdmin, comprobanteRecibidoId, { pendienteAclaracion: 'reintegro_tarjeta' })
+      return { creado: false, motivo: 'reintegro_tarjeta_pendiente' }
+    }
+
+    const reintegro = parsearReintegroTexto(reintegroRespuesta)
+    if (!reintegro) {
+      // No se entendió (ni "no", ni un número) -- se vuelve a preguntar
+      // en vez de asumir que no hay reintegro.
+      await marcarPendiente(supabaseAdmin, comprobanteRecibidoId, { pendienteAclaracion: 'reintegro_tarjeta' })
+      return { creado: false, motivo: 'reintegro_tarjeta_no_entendido' }
+    }
+
+    const totalConsumo = numero(datosExtraidos.total, 0)
+    const resultadoConsumo = await registrarConsumoTarjetaDesdeAgente({
+      supabaseAdmin,
+      clienteId,
+      comprobanteRecibidoId,
+      tarjetaId: pasoTarjeta.tarjetaId,
+      proveedor,
+      total: totalConsumo,
+      fecha: datosExtraidos.fecha || new Date().toISOString().slice(0, 10),
+      reintegroValor: reintegro.valor,
+      reintegroEsPorcentaje: reintegro.esPorcentaje,
+      categoriaGastoId,
+      esPrueba,
+    })
+    return resultadoConsumo
+  }
+
+  // Todo resuelto -- se carga el comprobante.
+  const tipo = TIPOS_VALIDOS.includes(datosExtraidos.tipo) ? datosExtraidos.tipo : 'factura'
 
   const { data: maxRow } = await supabaseAdmin
     .from(tablas.comprobantes)

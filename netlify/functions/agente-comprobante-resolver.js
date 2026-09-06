@@ -69,7 +69,7 @@ export default async (req) => {
     .select('id, datos_extraidos, es_prueba, destino, pendiente_aclaracion')
     .eq('cliente_id', agente.clienteId)
     .eq('admin_id', admin.id)
-    .in('pendiente_aclaracion', ['forma_pago', 'cuit', 'confirmar_recepcion_oc'])
+    .in('pendiente_aclaracion', ['forma_pago', 'cuit', 'confirmar_recepcion_oc', 'cual_tarjeta', 'reintegro_tarjeta'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -165,6 +165,49 @@ export default async (req) => {
         confirmar,
         cargaCompras: resultado,
       }),
+      { status: 200 },
+    )
+  }
+
+  // Fase 73 -- rama "cual_tarjeta": el admin contestó cuál tarjeta
+  // familiar usó (nombre, banco o últimos dígitos). No hay un parser acá
+  // -- intentarCargarComprobante ya sabe matchear tarjetaRespuesta contra
+  // las activas del cliente y decide sola si entendió o si hay que
+  // volver a preguntar (0 o 2+ matches).
+  if (tipoAclaracion === 'cual_tarjeta') {
+    const resultado = await intentarCargarComprobante({
+      supabaseAdmin,
+      clienteId: agente.clienteId,
+      comprobanteRecibidoId: pendiente.id,
+      datosExtraidos: pendiente.datos_extraidos,
+      formaPagoRespuesta: 'tarjeta', // ya se sabe que la forma de pago es tarjeta, solo falta cuál
+      tarjetaRespuesta: texto,
+      esPrueba: pendiente.es_prueba,
+      destino: pendiente.destino === 'hogar' ? 'hogar' : 'compras',
+    })
+    return new Response(
+      JSON.stringify({ ok: true, huboPendiente: true, entendido: true, pendienteAclaracion: 'cual_tarjeta', cargaCompras: resultado }),
+      { status: 200 },
+    )
+  }
+
+  // Fase 73 -- rama "reintegro_tarjeta": el admin ya eligió la tarjeta
+  // (persistida en datos_extraidos._pagoTarjeta), ahora contesta si
+  // espera reintegro y cuánto. Este es el último paso -- si se entiende
+  // la respuesta, acá se crea el consumo.
+  if (tipoAclaracion === 'reintegro_tarjeta') {
+    const resultado = await intentarCargarComprobante({
+      supabaseAdmin,
+      clienteId: agente.clienteId,
+      comprobanteRecibidoId: pendiente.id,
+      datosExtraidos: pendiente.datos_extraidos,
+      formaPagoRespuesta: 'tarjeta',
+      reintegroRespuesta: texto,
+      esPrueba: pendiente.es_prueba,
+      destino: pendiente.destino === 'hogar' ? 'hogar' : 'compras',
+    })
+    return new Response(
+      JSON.stringify({ ok: true, huboPendiente: true, entendido: true, pendienteAclaracion: 'reintegro_tarjeta', cargaCompras: resultado }),
       { status: 200 },
     )
   }
