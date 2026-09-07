@@ -15,6 +15,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   esElectron: true,
   guardarNegocio: (slug) => ipcRenderer.invoke('guardar-negocio', slug),
+  // Fase 75b: vuelve a la pantalla de onboarding para cargar otro negocio.
+  cambiarEmpresa: () => ipcRenderer.invoke('cambiar-negocio'),
   // Fase 38: `copias` -- cuántas veces mandarlo a la impresora
   // (Carlos definió 2 por defecto para comprobantes: cliente + local).
   imprimir: (pdfBytes, nombreArchivo, copias) => ipcRenderer.invoke('imprimir-pdf', pdfBytes, nombreArchivo, copias),

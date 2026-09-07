@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Outlet, Navigate, Link, useNavigate } from 'react-router-dom'
-import { Store, LogOut, Menu, X, Users } from 'lucide-react'
+import { Store, LogOut, Menu, X, Users, Building2 } from 'lucide-react'
+import { corriendoEnElectron } from '@/lib/electronBridge'
 import { Sidebar } from '@/components/Sidebar'
 import { CambiarEmailObligatorio } from '@/pages/CambiarEmailObligatorio'
 import { useClienteActual } from '@/hooks/useClienteActual'
@@ -103,6 +104,18 @@ export function DashboardLayout() {
     navigate('/ingresar', { replace: true })
   }
 
+  // Fase 75b: "Cambiar de empresa" -- solo tiene sentido dentro de la app
+  // de escritorio (cada PC guarda un único negocio en config.json). Antes
+  // había que borrar ese archivo a mano en %APPDATA%\Edgy Gestion; ahora
+  // lo resuelve el propio Electron (ver cambiarEmpresa en preload.js) y
+  // la ventana vuelve sola a la pantalla de onboarding.
+  async function cambiarEmpresa() {
+    if (!window.confirm('¿Cambiar de empresa? Vas a tener que ingresar el subdominio del negocio de nuevo.')) {
+      return
+    }
+    await window.electronAPI?.cambiarEmpresa()
+  }
+
   return (
     <div className="flex h-screen">
       {/* Fase 45k: en mobile el rail queda fuera de flujo (fixed) y
@@ -188,6 +201,12 @@ export function DashboardLayout() {
                 <DropdownMenuItem onClick={() => navigate('/perfil-familiar')}>
                   <Users className="mr-2 h-4 w-4" />
                   Perfil Familiar
+                </DropdownMenuItem>
+              )}
+              {corriendoEnElectron() && (
+                <DropdownMenuItem onClick={cambiarEmpresa}>
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Cambiar de empresa
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={cerrarSesion}>

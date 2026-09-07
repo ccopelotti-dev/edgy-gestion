@@ -44,6 +44,10 @@ export interface ElectronAPI {
   listarImpresoras: () => Promise<ImpresoraDisponible[]>;
   obtenerImpresoraPredeterminada: () => Promise<string | null>;
   guardarImpresoraPredeterminada: (nombre: string) => Promise<void>;
+  /** Fase 75b: borra el negocio guardado y vuelve a la pantalla de
+   * onboarding para cargar otro (o el mismo, si solo se quería corregir
+   * un subdominio mal escrito). */
+  cambiarEmpresa: () => Promise<void>;
 }
 
 declare global {

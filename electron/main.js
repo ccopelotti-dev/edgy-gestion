@@ -135,6 +135,21 @@ ipcMain.handle('guardar-negocio', (_evt, slug) => {
   if (ventanaPrincipal && urlApp) ventanaPrincipal.loadURL(urlApp);
 });
 
+// Fase 75b: "Cambiar de empresa" desde el dropdown de Cuenta (antes había
+// que borrar config.json a mano en %APPDATA%\Edgy Gestion). Se borran
+// `slug` y `url` (el escape hatch manual) y se vuelve a onboarding.html --
+// el resto de config.json (impresora predeterminada, etc.) queda intacto,
+// no hace falta perderlo solo por cambiar de negocio.
+ipcMain.handle('cambiar-negocio', () => {
+  const config = leerConfig();
+  delete config.slug;
+  delete config.url;
+  guardarConfig(config);
+  if (ventanaPrincipal) {
+    ventanaPrincipal.loadFile(path.join(__dirname, 'onboarding.html'));
+  }
+});
+
 // ── IPC: impresoras + impresión silenciosa ──────────────────
 
 ipcMain.handle('listar-impresoras', async () => {
