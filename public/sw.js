@@ -7,7 +7,15 @@
 // Importante: subir CACHE_NAME (v1 -> v2 -> v3...) en cada entrega
 // grande de cambios de la app shell, si no el navegador no detecta que
 // hay una versión nueva y la app instalada queda pegada a la vieja.
-const CACHE_NAME = 'edgy-gestion-v1'
+//
+// Fase 74d (07/09): subido a v2 -- la app de escritorio (Electron, perfil
+// persistente, a diferencia de una pestaña de Chrome nueva) quedó
+// pegada a una versión vieja de /index.html cacheada de antes del
+// deploy de Fase 74, y por eso el módulo Home Keep tiraba error incluso
+// después de "Recargar página" (el SW seguía sirviendo la cáscara
+// vieja en vez de ir a buscar la nueva). Subir la versión fuerza a
+// todos los clientes viejos a invalidar su caché y traer todo de nuevo.
+const CACHE_NAME = 'edgy-gestion-v2'
 const APP_SHELL = ['/', '/index.html', '/icon-192.png', '/icon-512.png', '/manifest.json']
 
 self.addEventListener('install', (event) => {
