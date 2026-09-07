@@ -49,9 +49,24 @@ function normalizarFormaPago(valor) {
 // contra las tarjetas familiares activas, comparando por nombre, banco y
 // últimos dígitos. Mismo criterio conservador de siempre: si matchea 0 o
 // 2+, no se adivina.
+//
+// Fase 73b (07/09, a pedido de Carlos) -- con nombres parecidos entre
+// tarjetas (ej. "Pampa Visa" / "Pampa Master") matchear por texto se
+// vuelve ambiguo a propósito (las dos contienen "pampa"). Se agrega
+// selección por NÚMERO de la lista que se mandó por WhatsApp (1, 01,
+// 2, etc.) -- requiere que `tarjetas` venga en el MISMO orden que se
+// usó para armar ese mensaje (ver `.order('nombre')` más abajo).
 function matchearTarjetaPorTexto(texto, tarjetas) {
   const t = String(texto || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   if (!t) return { tarjeta: null, candidatas: 0 }
+  const soloIndice = t.match(/^0*(\d{1,2})\.?$/)
+  if (soloIndice) {
+    const idx = Number(soloIndice[1])
+    if (idx >= 1 && idx <= tarjetas.length) {
+      return { tarjeta: tarjetas[idx - 1], candidatas: 1 }
+    }
+    return { tarjeta: null, candidatas: 0 }
+  }
   const soloNumeros = t.replace(/\D/g, '')
   const candidatas = tarjetas.filter((tarjeta) => {
     const nombre = String(tarjeta.nombre || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -77,7 +92,13 @@ function parsearReintegroTexto(texto) {
   if (/^(no|nada|ninguno|sin reintegro|no espero|no hay)\b/.test(t)) {
     return { valor: 0, esPorcentaje: false }
   }
-  const match = t.match(/\$?\s*([\d.,]+)\s*(%)?/)
+  // Fase 73b (07/09) -- bug real detectado en prueba con Carlos: la
+  // clase [\d.,]+ matcheaba una coma sola ("Si, 25%" -> agarraba la
+  // "," de "Si," antes de llegar al "25%" real), y esa coma después
+  // fallaba al convertirse a número. Ahora se exige que el número
+  // empiece con un dígito -- así se ignora cualquier relleno
+  // conversacional ("si", "dale", etc.) antes del valor real.
+  const match = t.match(/\$?\s*(\d[\d.,]*)\s*(%)?/)
   if (!match) return null
   const valor = parsearMontoArg(match[1])
   if (!Number.isFinite(valor)) return null
@@ -946,6 +967,10 @@ export async function intentarCargarComprobante({
         .select('id, nombre, banco, ultimos_digitos')
         .eq('cliente_id', clienteId)
         .eq('activa', true)
+        // Fase 73b -- orden estable (alfabético) para que el número de
+        // lista que se manda por WhatsApp sea el MISMO que se usa acá
+        // para matchear la respuesta (ver matchearTarjetaPorTexto).
+        .order('nombre', { ascending: true })
       if (errTarjetas) {
         console.error('intentarCargarComprobante: error listando tarjetas familiares', errTarjetas)
       }
