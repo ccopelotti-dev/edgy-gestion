@@ -112,7 +112,13 @@ export default function ControlStock() {
         (r) => !r.rubroId || r.rubroId === p.rubroId,
       )
 
-      if (p.tipo === 'con_variantes') {
+      // Fase 75 (fix): si el producto quedó marcado "con variantes" pero
+      // todavía no tiene ninguna variante real cargada (ej. se tildó "usa
+      // color" pero nunca se le agregó el color), el for de abajo no genera
+      // ninguna fila y el "continue" lo saltaba del todo -- desaparecía en
+      // silencio de Control de Stock. Mientras no tenga variantes reales,
+      // se lo trata como producto simple (cae al bloque de abajo).
+      if (p.tipo === 'con_variantes' && p.variantes.length > 0) {
         for (const v of p.variantes) {
           const lastRegistro = state.registrosControl
             .filter((rc) => rc.itemTipo === 'producto' && rc.itemId === v.id)

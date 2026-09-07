@@ -94,7 +94,14 @@ export default function Stock() {
     const fromProductos: StockItem[] = state.productos
       .filter((p) => p.controlaStock)
       .flatMap((p) => {
-        if (p.tipo === 'con_variantes') {
+        // Fase 75 (fix): un producto marcado "con variantes" pero sin
+        // ninguna variante cargada todavía (ej. se tildó "usa color" al
+        // cargarlo pero nunca se le agregó el color) antes desaparecía en
+        // silencio de Control de Stock -- el .map de variantes vacío no
+        // generaba ninguna fila y el producto quedaba sin forma de
+        // ajustarle el stock. Mientras no tenga variantes reales, se lo
+        // trata como producto simple (usa su propio stock).
+        if (p.tipo === 'con_variantes' && p.variantes.length > 0) {
           return p.variantes.map((v) => ({
             id: v.id,
             nombre: `${p.nombre} — ${[v.color, v.talle].filter(Boolean).join(' / ') || '(sin nombre)'}`,
