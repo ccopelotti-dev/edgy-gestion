@@ -40,6 +40,9 @@ import type {
   ConsumoTarjeta,
   EstadoResumenTarjeta,
   CategoriaGasto,
+  Vehiculo,
+  Inmueble,
+  ServicioHogar,
 } from '../types';
 
 import { generarId } from '../types';
@@ -73,6 +76,16 @@ type HomeKeepAction =
   // Fase 72 -- consumos "abiertos" (día a día, sin resumen todavía).
   | { type: 'ADD_CONSUMO_ABIERTO'; payload: ConsumoTarjeta }
   | { type: 'DELETE_CONSUMO_ABIERTO'; payload: { id: string } }
+  // Fase 74 -- Vehículos, Inmuebles y Servicios (pagos de servicios continuos).
+  | { type: 'ADD_VEHICULO'; payload: Vehiculo }
+  | { type: 'UPDATE_VEHICULO'; payload: Vehiculo }
+  | { type: 'TOGGLE_VEHICULO_ACTIVO'; payload: { id: string } }
+  | { type: 'ADD_INMUEBLE'; payload: Inmueble }
+  | { type: 'UPDATE_INMUEBLE'; payload: Inmueble }
+  | { type: 'TOGGLE_INMUEBLE_ACTIVO'; payload: { id: string } }
+  | { type: 'ADD_SERVICIO_HOGAR'; payload: ServicioHogar }
+  | { type: 'UPDATE_SERVICIO_HOGAR'; payload: ServicioHogar }
+  | { type: 'TOGGLE_SERVICIO_HOGAR_ACTIVO'; payload: { id: string } }
   | { type: 'SET_STATE'; payload: HomeKeepState };
 
 // ─── Reducer ───────────────────────────────────────────────────
@@ -286,6 +299,51 @@ function homeKeepReducer(state: HomeKeepState, action: HomeKeepAction): HomeKeep
     case 'DELETE_CONSUMO_ABIERTO':
       return { ...state, consumosAbiertos: state.consumosAbiertos.filter((c) => c.id !== action.payload.id) };
 
+    // ─── Fase 74: Vehículos ────────────────────────────────────
+    case 'ADD_VEHICULO':
+      return { ...state, vehiculos: [...state.vehiculos, action.payload] };
+
+    case 'UPDATE_VEHICULO':
+      return { ...state, vehiculos: state.vehiculos.map((v) => (v.id === action.payload.id ? action.payload : v)) };
+
+    case 'TOGGLE_VEHICULO_ACTIVO':
+      return {
+        ...state,
+        vehiculos: state.vehiculos.map((v) =>
+          v.id === action.payload.id ? { ...v, activo: !v.activo, updatedAt: now } : v,
+        ),
+      };
+
+    // ─── Fase 74: Inmuebles ────────────────────────────────────
+    case 'ADD_INMUEBLE':
+      return { ...state, inmuebles: [...state.inmuebles, action.payload] };
+
+    case 'UPDATE_INMUEBLE':
+      return { ...state, inmuebles: state.inmuebles.map((i) => (i.id === action.payload.id ? action.payload : i)) };
+
+    case 'TOGGLE_INMUEBLE_ACTIVO':
+      return {
+        ...state,
+        inmuebles: state.inmuebles.map((i) =>
+          i.id === action.payload.id ? { ...i, activo: !i.activo, updatedAt: now } : i,
+        ),
+      };
+
+    // ─── Fase 74: Servicios (obligaciones recurrentes) ─────────
+    case 'ADD_SERVICIO_HOGAR':
+      return { ...state, serviciosHogar: [...state.serviciosHogar, action.payload] };
+
+    case 'UPDATE_SERVICIO_HOGAR':
+      return { ...state, serviciosHogar: state.serviciosHogar.map((s) => (s.id === action.payload.id ? action.payload : s)) };
+
+    case 'TOGGLE_SERVICIO_HOGAR_ACTIVO':
+      return {
+        ...state,
+        serviciosHogar: state.serviciosHogar.map((s) =>
+          s.id === action.payload.id ? { ...s, activo: !s.activo, updatedAt: now } : s,
+        ),
+      };
+
     case 'PAGAR_RESUMEN_TARJETA': {
       const resumen = state.resumenesTarjeta.find((r) => r.id === action.payload.resumenId);
       if (!resumen) return state;
@@ -434,6 +492,7 @@ function comprobanteToRow(c: Comprobante, clienteId: string) {
     monto_pagado: c.montoPagado,
     saldo_pendiente: c.saldoPendiente,
     numero_comprobante_proveedor: c.numeroComprobanteProveedor ?? null,
+    servicio_hogar_id: c.servicioHogarId ?? null,
     notas: c.notas ?? null,
   };
 }
@@ -541,6 +600,52 @@ function crearCreditoPorConsumo(c: ConsumoTarjeta, clienteId: string) {
       estado: 'pendiente',
     })
     .then(logErr('alta de crédito pendiente por consumo de tarjeta'));
+}
+
+function vehiculoToRow(v: Vehiculo, clienteId: string) {
+  return {
+    id: v.id,
+    cliente_id: clienteId,
+    usuario_cliente_id: v.usuarioClienteId ?? null,
+    patente: v.patente ?? null,
+    marca: v.marca ?? null,
+    modelo: v.modelo ?? null,
+    anio: v.anio ?? null,
+    notas: v.notas ?? null,
+    activo: v.activo,
+  };
+}
+
+function inmuebleToRow(i: Inmueble, clienteId: string) {
+  return {
+    id: i.id,
+    cliente_id: clienteId,
+    usuario_cliente_id: i.usuarioClienteId ?? null,
+    nombre: i.nombre,
+    direccion: i.direccion ?? null,
+    partida_inmobiliaria: i.partidaInmobiliaria ?? null,
+    notas: i.notas ?? null,
+    activo: i.activo,
+  };
+}
+
+function servicioHogarToRow(s: ServicioHogar, clienteId: string) {
+  return {
+    id: s.id,
+    cliente_id: clienteId,
+    nombre: s.nombre,
+    categoria_gasto_id: s.categoriaGastoId ?? null,
+    proveedor_id: s.proveedorId ?? null,
+    tipo_vinculo: s.tipoVinculo,
+    vehiculo_id: s.vehiculoId ?? null,
+    inmueble_id: s.inmuebleId ?? null,
+    usuario_cliente_id: s.usuarioClienteId ?? null,
+    periodicidad: s.periodicidad,
+    dia_vencimiento_aproximado: s.diaVencimientoAproximado ?? null,
+    monto_estimado: s.montoEstimado ?? null,
+    activo: s.activo,
+    notas: s.notas ?? null,
+  };
 }
 
 function logErr(label: string) {
@@ -814,6 +919,51 @@ function syncToSupabase(action: HomeKeepAction, nextState: HomeKeepState, client
       supabase.from('consumos_tarjeta_hogar').delete().eq('id', action.payload.id).then(logErr('borrado de consumo abierto de tarjeta'));
       return;
 
+    // ─── Fase 74: Vehículos ────────────────────────────────────
+    case 'ADD_VEHICULO':
+      supabase.from('vehiculos_hogar').insert(vehiculoToRow(action.payload, clienteId)).then(logErr('alta de vehículo'));
+      return;
+
+    case 'UPDATE_VEHICULO':
+      supabase.from('vehiculos_hogar').update(vehiculoToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de vehículo'));
+      return;
+
+    case 'TOGGLE_VEHICULO_ACTIVO': {
+      const v = nextState.vehiculos.find((x) => x.id === action.payload.id);
+      if (v) supabase.from('vehiculos_hogar').update({ activo: v.activo }).eq('id', v.id).then(logErr('activar/desactivar vehículo'));
+      return;
+    }
+
+    // ─── Fase 74: Inmuebles ────────────────────────────────────
+    case 'ADD_INMUEBLE':
+      supabase.from('inmuebles_hogar').insert(inmuebleToRow(action.payload, clienteId)).then(logErr('alta de inmueble'));
+      return;
+
+    case 'UPDATE_INMUEBLE':
+      supabase.from('inmuebles_hogar').update(inmuebleToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de inmueble'));
+      return;
+
+    case 'TOGGLE_INMUEBLE_ACTIVO': {
+      const i = nextState.inmuebles.find((x) => x.id === action.payload.id);
+      if (i) supabase.from('inmuebles_hogar').update({ activo: i.activo }).eq('id', i.id).then(logErr('activar/desactivar inmueble'));
+      return;
+    }
+
+    // ─── Fase 74: Servicios (obligaciones recurrentes) ─────────
+    case 'ADD_SERVICIO_HOGAR':
+      supabase.from('servicios_hogar').insert(servicioHogarToRow(action.payload, clienteId)).then(logErr('alta de servicio'));
+      return;
+
+    case 'UPDATE_SERVICIO_HOGAR':
+      supabase.from('servicios_hogar').update(servicioHogarToRow(action.payload, clienteId)).eq('id', action.payload.id).then(logErr('edición de servicio'));
+      return;
+
+    case 'TOGGLE_SERVICIO_HOGAR_ACTIVO': {
+      const s = nextState.serviciosHogar.find((x) => x.id === action.payload.id);
+      if (s) supabase.from('servicios_hogar').update({ activo: s.activo }).eq('id', s.id).then(logErr('activar/desactivar servicio'));
+      return;
+    }
+
     case 'PAGAR_RESUMEN_TARJETA': {
       const r = nextState.resumenesTarjeta.find((x) => x.id === action.payload.resumenId);
       if (!r) return;
@@ -863,7 +1013,7 @@ function itemComprobanteFromRow(r: any): ItemComprobante {
 }
 
 async function fetchHomeKeepState(): Promise<HomeKeepState> {
-  const [proveedoresRes, comprobantesRes, compItemsRes, pagosRes, impRes, ingresosRes, tarjetasRes, resumenesRes, consumosRes, categoriasRes] = await Promise.all([
+  const [proveedoresRes, comprobantesRes, compItemsRes, pagosRes, impRes, ingresosRes, tarjetasRes, resumenesRes, consumosRes, categoriasRes, vehiculosRes, inmueblesRes, serviciosRes] = await Promise.all([
     supabase.from('proveedores_hogar').select('*').order('created_at'),
     supabase.from('comprobantes_hogar').select('*').order('numero'),
     supabase.from('comprobante_hogar_items').select('*'),
@@ -875,6 +1025,10 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     supabase.from('consumos_tarjeta_hogar').select('*'),
     // Fase 70g: categorías de gasto personal, para el desglose del Dashboard.
     supabase.from('categorias_gasto').select('id, nombre').order('nombre'),
+    // Fase 74: vehículos, inmuebles y servicios (pagos de servicios continuos).
+    supabase.from('vehiculos_hogar').select('*').order('created_at'),
+    supabase.from('inmuebles_hogar').select('*').order('created_at'),
+    supabase.from('servicios_hogar').select('*').order('created_at'),
   ]);
 
   const categoriasGasto: CategoriaGasto[] = (categoriasRes.data ?? []).map((r: any) => ({
@@ -928,6 +1082,7 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     montoPagado: Number(r.monto_pagado),
     saldoPendiente: Number(r.saldo_pendiente),
     numeroComprobanteProveedor: r.numero_comprobante_proveedor ?? undefined,
+    servicioHogarId: r.servicio_hogar_id ?? undefined,
     notas: r.notas ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -1041,6 +1196,49 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     updatedAt: r.updated_at,
   }));
 
+  const vehiculos: Vehiculo[] = (vehiculosRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    usuarioClienteId: r.usuario_cliente_id ?? undefined,
+    patente: r.patente ?? undefined,
+    marca: r.marca ?? undefined,
+    modelo: r.modelo ?? undefined,
+    anio: r.anio ?? undefined,
+    notas: r.notas ?? undefined,
+    activo: r.activo,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+
+  const inmuebles: Inmueble[] = (inmueblesRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    usuarioClienteId: r.usuario_cliente_id ?? undefined,
+    nombre: r.nombre,
+    direccion: r.direccion ?? undefined,
+    partidaInmobiliaria: r.partida_inmobiliaria ?? undefined,
+    notas: r.notas ?? undefined,
+    activo: r.activo,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+
+  const serviciosHogar: ServicioHogar[] = (serviciosRes.data ?? []).map((r: any) => ({
+    id: r.id,
+    nombre: r.nombre,
+    categoriaGastoId: r.categoria_gasto_id ?? undefined,
+    proveedorId: r.proveedor_id ?? undefined,
+    tipoVinculo: r.tipo_vinculo,
+    vehiculoId: r.vehiculo_id ?? undefined,
+    inmuebleId: r.inmueble_id ?? undefined,
+    usuarioClienteId: r.usuario_cliente_id ?? undefined,
+    periodicidad: r.periodicidad,
+    diaVencimientoAproximado: r.dia_vencimiento_aproximado ?? undefined,
+    montoEstimado: r.monto_estimado != null ? Number(r.monto_estimado) : undefined,
+    activo: r.activo,
+    notas: r.notas ?? undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+
   return {
     proveedores,
     comprobantes,
@@ -1050,6 +1248,9 @@ async function fetchHomeKeepState(): Promise<HomeKeepState> {
     resumenesTarjeta,
     consumosAbiertos,
     categoriasGasto,
+    vehiculos,
+    inmuebles,
+    serviciosHogar,
     nextNumeroComprobante,
     nextNumeroPago: maxNumero(pagos) + 1,
     config: SEED_STATE.config,
@@ -1070,6 +1271,9 @@ const emptyState: HomeKeepState = {
   resumenesTarjeta: [],
   consumosAbiertos: [],
   categoriasGasto: [],
+  vehiculos: [],
+  inmuebles: [],
+  serviciosHogar: [],
   nextNumeroComprobante: { factura: 1, nota_credito: 1, nota_debito: 1 },
   nextNumeroPago: 1,
   config: SEED_STATE.config,
@@ -1339,6 +1543,114 @@ export function useSaldoHogar(): SaldoHogar {
     const totalEgresos = comprobantes.filter((c) => c.estado !== 'anulado').reduce((sum, c) => sum + c.montoPagado, 0);
     return { totalIngresos, totalEgresos, saldoDisponible: totalIngresos - totalEgresos };
   }, [ingresos, comprobantes]);
+}
+
+// ─── Fase 74: Vehículos, Inmuebles y Servicios ─────────────────
+
+export function useVehiculos(): Vehiculo[] {
+  const { vehiculos } = useHomeKeep();
+  return vehiculos;
+}
+
+export function useVehiculo(id?: string): Vehiculo | undefined {
+  const { vehiculos } = useHomeKeep();
+  return useMemo(() => vehiculos.find((v) => v.id === id), [vehiculos, id]);
+}
+
+/** Vehículos de un integrante puntual -- para mostrarlos en su ficha de
+ * Perfil Familiar (mismo criterio que useTarjetas filtrado a mano por
+ * usuarioClienteId en EditarFamiliarDialog). */
+export function useVehiculosDeIntegrante(usuarioClienteId?: string): Vehiculo[] {
+  const { vehiculos } = useHomeKeep();
+  return useMemo(() => {
+    if (!usuarioClienteId) return [];
+    return vehiculos.filter((v) => v.usuarioClienteId === usuarioClienteId);
+  }, [vehiculos, usuarioClienteId]);
+}
+
+export function useInmuebles(): Inmueble[] {
+  const { inmuebles } = useHomeKeep();
+  return inmuebles;
+}
+
+export function useInmueble(id?: string): Inmueble | undefined {
+  const { inmuebles } = useHomeKeep();
+  return useMemo(() => inmuebles.find((i) => i.id === id), [inmuebles, id]);
+}
+
+/** Inmuebles de un integrante puntual (titular único, Fase 74) -- para
+ * mostrarlos en su ficha de Perfil Familiar. */
+export function useInmueblesDeIntegrante(usuarioClienteId?: string): Inmueble[] {
+  const { inmuebles } = useHomeKeep();
+  return useMemo(() => {
+    if (!usuarioClienteId) return [];
+    return inmuebles.filter((i) => i.usuarioClienteId === usuarioClienteId);
+  }, [inmuebles, usuarioClienteId]);
+}
+
+export function useServiciosHogar(): ServicioHogar[] {
+  const { serviciosHogar } = useHomeKeep();
+  return serviciosHogar;
+}
+
+export function useServicioHogar(id?: string): ServicioHogar | undefined {
+  const { serviciosHogar } = useHomeKeep();
+  return useMemo(() => serviciosHogar.find((s) => s.id === id), [serviciosHogar, id]);
+}
+
+export type EstadoItemPanelServicio = 'cubierto' | 'pendiente_pago' | 'pendiente_carga';
+
+export interface ItemPanelServicio {
+  servicio: ServicioHogar;
+  /** Comprobante real ya vinculado a este servicio, si llegó (Fase 74:
+   * link vía Comprobante.servicioHogarId). undefined = todavía no llegó
+   * ningún comprobante para el período actual -- se muestra la
+   * estimación (monto/día aproximado) precargada en la Servicio. */
+  comprobante?: Comprobante;
+  monto: number;
+  /** 'cubierto' = ya se pagó (se "desagota" del panel de pendientes,
+   * a pedido de Carlos); 'pendiente_pago' = llegó el comprobante real
+   * pero todavía no se pagó; 'pendiente_carga' = todavía no llegó
+   * ningún comprobante, se muestra la estimación. */
+  estado: EstadoItemPanelServicio;
+}
+
+/** Fase 74: arma el panel dinámico de "pagos de servicios continuos"
+ * pedido por Carlos -- toma cada Servicio activo, busca si ya tiene un
+ * Comprobante real vinculado (el más reciente, vía servicioHogarId) y
+ * decide su estado: si está pagado se excluye de pendientes (criterio
+ * de "desagotarse" pedido explícitamente), si no se muestra con el
+ * monto real (comprobante ya cargado) o estimado (todavía no llegó).
+ */
+export function usePanelServicios(): { items: ItemPanelServicio[]; totalPendiente: number } {
+  const { serviciosHogar, comprobantes } = useHomeKeep();
+  return useMemo(() => {
+    const comprobantesPorServicio = new Map<string, Comprobante[]>();
+    for (const c of comprobantes) {
+      if (!c.servicioHogarId || c.estado === 'anulado') continue;
+      const arr = comprobantesPorServicio.get(c.servicioHogarId) ?? [];
+      arr.push(c);
+      comprobantesPorServicio.set(c.servicioHogarId, arr);
+    }
+
+    const items: ItemPanelServicio[] = serviciosHogar
+      .filter((s) => s.activo)
+      .map((servicio) => {
+        // El más reciente por fecha -- se asume un comprobante real por
+        // período (mensual/bimestral/etc.), el anterior ya quedó cerrado.
+        const candidatos = (comprobantesPorServicio.get(servicio.id) ?? []).slice().sort((a, b) => b.fecha.localeCompare(a.fecha));
+        const comprobante = candidatos[0];
+
+        if (comprobante) {
+          const estado: EstadoItemPanelServicio = comprobante.estado === 'pagado' ? 'cubierto' : 'pendiente_pago';
+          return { servicio, comprobante, monto: comprobante.total, estado };
+        }
+        return { servicio, monto: servicio.montoEstimado ?? 0, estado: 'pendiente_carga' as EstadoItemPanelServicio };
+      });
+
+    const totalPendiente = items.filter((i) => i.estado !== 'cubierto').reduce((sum, i) => sum + i.monto, 0);
+    return { items, totalPendiente };
+  }, [serviciosHogar, comprobantes]);
 }
 
 export type { HomeKeepAction };

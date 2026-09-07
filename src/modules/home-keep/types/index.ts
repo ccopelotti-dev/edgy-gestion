@@ -111,6 +111,11 @@ export interface Comprobante {
    * correlativo interno de Edgy Gestión.
    */
   numeroComprobanteProveedor?: string;
+  /** Fase 74 (07/09): vínculo opcional a la Servicio (obligación
+   * recurrente -- ver ServicioHogar) que este comprobante puntual está
+   * pagando. Cuando se completa, el panel de Servicios lo toma como
+   * "cubierto" para el período y lo saca de pendientes. */
+  servicioHogarId?: string;
   notas?: string;
   createdAt: string;
   updatedAt: string;
@@ -313,6 +318,95 @@ export const ESTADO_RESUMEN_TARJETA_LABEL: Record<EstadoResumenTarjeta, string> 
   pagado: 'Pagado',
 };
 
+// ─── Vehículos e Inmuebles (Fase 74) ────────────────────────────
+// Mismo patrón que TarjetaCredito (Fase 72c): el alta se hace desde la
+// ficha del titular en Perfil Familiar (usuarioClienteId), y la
+// gestión funcional (a qué se le asocia, qué se paga) vive en Home
+// Keep. Inmuebles se simplificó a titular único a pedido explícito de
+// Carlos (07/09) -- la cotitularidad (uno o los dos cónyuges) queda
+// para una fase futura.
+
+export interface Vehiculo {
+  id: string;
+  /** Integrante de la familia (usuarios_cliente) titular -- el alta se
+   * hace desde su ficha en Perfil Familiar. */
+  usuarioClienteId?: string;
+  patente?: string;
+  marca?: string;
+  modelo?: string;
+  anio?: number;
+  notas?: string;
+  activo: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Inmueble {
+  id: string;
+  /** Titular único (Fase 74, simplificado a pedido de Carlos) -- el
+   * alta se hace desde su ficha en Perfil Familiar, mismo criterio que
+   * Vehiculo y TarjetaCredito. */
+  usuarioClienteId?: string;
+  nombre: string;
+  direccion?: string;
+  /** Identificador catastral/partida (ej. "47-03-J-3-030") -- formato
+   * libre porque cada municipio/provincia lo referencia distinto. */
+  partidaInmobiliaria?: string;
+  notas?: string;
+  activo: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Servicios (Fase 74) ─────────────────────────────────────────
+// Definición de una obligación recurrente (impuestos, tasas, seguros,
+// luz/gas/internet, colegio, etc.) -- no es el pago puntual (eso sigue
+// siendo un Comprobante), sino la "ficha" del servicio en sí, con una
+// estimación de monto/vencimiento para precargar el panel antes de que
+// llegue el comprobante real del mes.
+
+export type TipoVinculoServicio = 'vehiculo' | 'inmueble' | 'persona' | 'general';
+
+export type PeriodicidadServicio = 'mensual' | 'bimestral' | 'trimestral' | 'semestral' | 'anual';
+
+export interface ServicioHogar {
+  id: string;
+  nombre: string; // ej. "Seguro Auto NATIVA", "Impuesto Inmobiliario Casa 1"
+  categoriaGastoId?: string;
+  proveedorId?: string;
+  /** Con qué está vinculada esta obligación, para trazabilidad -- ver
+   * criterio pedido por Carlos: vehículos/inmuebles se cargan primero
+   * en Perfil Familiar, y el servicio (póliza, impuesto) se vincula acá. */
+  tipoVinculo: TipoVinculoServicio;
+  vehiculoId?: string;
+  inmuebleId?: string;
+  /** Solo para tipoVinculo='persona' -- ej. colegio o psicóloga de un
+   * integrante puntual. */
+  usuarioClienteId?: string;
+  periodicidad: PeriodicidadServicio;
+  diaVencimientoAproximado?: number;
+  montoEstimado?: number;
+  activo: boolean;
+  notas?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const TIPO_VINCULO_SERVICIO_LABEL: Record<TipoVinculoServicio, string> = {
+  vehiculo: 'Vehículo',
+  inmueble: 'Inmueble',
+  persona: 'Persona',
+  general: 'General',
+};
+
+export const PERIODICIDAD_SERVICIO_LABEL: Record<PeriodicidadServicio, string> = {
+  mensual: 'Mensual',
+  bimestral: 'Bimestral',
+  trimestral: 'Trimestral',
+  semestral: 'Semestral',
+  anual: 'Anual',
+};
+
 // ─── Estado global ───────────────────────────────────────────
 
 /** Fase 70g (05/09, a pedido de Carlos): categoría de gasto personal
@@ -337,6 +431,12 @@ export interface HomeKeepState {
    * un resumen real. */
   consumosAbiertos: ConsumoTarjeta[];
   categoriasGasto: CategoriaGasto[];
+  /** Fase 74: vehículos e inmuebles (alta desde Perfil Familiar) y
+   * servicios (obligaciones recurrentes) que arma el panel dinámico
+   * de pagos de servicios continuos. */
+  vehiculos: Vehiculo[];
+  inmuebles: Inmueble[];
+  serviciosHogar: ServicioHogar[];
   nextNumeroComprobante: Record<TipoComprobante, number>;
   nextNumeroPago: number;
   config: HomeKeepConfig;

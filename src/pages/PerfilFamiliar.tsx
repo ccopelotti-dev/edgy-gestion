@@ -52,9 +52,9 @@ import type { UsuarioCliente } from '@/types'
 // con la persona ya fijada (`integranteFijo`). Esta pantalla vive fuera del
 // árbol de HomeKeepProvider, así que el guardado NO pasa por su store/reducer
 // -- inserta directo en `ingresos_hogar` con el mismo mapeo de columnas.
-import { IngresoDialog, TarjetaDialog } from '@/modules/home-keep/components/dialogs'
+import { IngresoDialog, TarjetaDialog, VehiculoDialog, InmuebleDialog } from '@/modules/home-keep/components/dialogs'
 import { formatARS, formatDate } from '@/modules/home-keep/lib/format'
-import { TIPO_INGRESO_LABEL, generarId, type Ingreso, type TarjetaCredito } from '@/modules/home-keep/types'
+import { TIPO_INGRESO_LABEL, generarId, type Ingreso, type TarjetaCredito, type Vehiculo, type Inmueble } from '@/modules/home-keep/types'
 
 interface RolLiviano {
   id: string
@@ -154,6 +154,18 @@ function EditarFamiliarDialog({
   const [tarjetasAsociadas, setTarjetasAsociadas] = useState<TarjetaCredito[]>([])
   const [cargandoTarjetas, setCargandoTarjetas] = useState(false)
   const [mostrarTarjetaDialog, setMostrarTarjetaDialog] = useState(false)
+
+  // Fase 74 (07/09, a pedido de Carlos): mismo patrón que Tarjetas --
+  // vehículos e inmuebles se dan de alta acá, con este integrante como
+  // titular único. Home Keep > Servicios es donde se maneja el pago de
+  // lo que se les asocie (patente, seguro, impuestos), no el alta.
+  const [vehiculosAsociados, setVehiculosAsociados] = useState<Vehiculo[]>([])
+  const [cargandoVehiculos, setCargandoVehiculos] = useState(false)
+  const [mostrarVehiculoDialog, setMostrarVehiculoDialog] = useState(false)
+
+  const [inmueblesAsociados, setInmueblesAsociados] = useState<Inmueble[]>([])
+  const [cargandoInmuebles, setCargandoInmuebles] = useState(false)
+  const [mostrarInmuebleDialog, setMostrarInmuebleDialog] = useState(false)
 
   useEffect(() => {
     if (!usuario) return
@@ -348,6 +360,165 @@ function EditarFamiliarDialog({
     setTarjetasAsociadas((prev) => prev.filter((t) => t.id !== id))
   }
 
+  // Fase 74: vehículos de los que esta persona es titular -- misma
+  // tabla que ve Home Keep > Servicios, filtrada por usuario_cliente_id.
+  useEffect(() => {
+    if (!usuario) {
+      setVehiculosAsociados([])
+      return
+    }
+    let activo = true
+    setCargandoVehiculos(true)
+    supabase
+      .from('vehiculos_hogar')
+      .select('*')
+      .eq('usuario_cliente_id', usuario.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (!activo) return
+        const filas: Vehiculo[] = (data ?? []).map((r: any) => ({
+          id: r.id,
+          usuarioClienteId: r.usuario_cliente_id ?? undefined,
+          patente: r.patente ?? undefined,
+          marca: r.marca ?? undefined,
+          modelo: r.modelo ?? undefined,
+          anio: r.anio ?? undefined,
+          notas: r.notas ?? undefined,
+          activo: r.activo,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }))
+        setVehiculosAsociados(filas)
+        setCargandoVehiculos(false)
+      })
+    return () => {
+      activo = false
+    }
+  }, [usuario])
+
+  async function guardarVehiculo(data: Omit<Vehiculo, 'id' | 'usuarioClienteId' | 'activo' | 'createdAt' | 'updatedAt'>) {
+    if (!usuario) return
+    const { data: creado, error: errInsert } = await supabase
+      .from('vehiculos_hogar')
+      .insert({
+        id: generarId(),
+        cliente_id: usuario.cliente_id,
+        usuario_cliente_id: usuario.id,
+        patente: data.patente ?? null,
+        marca: data.marca ?? null,
+        modelo: data.modelo ?? null,
+        anio: data.anio ?? null,
+        notas: data.notas ?? null,
+        activo: true,
+      })
+      .select()
+      .single()
+
+    if (errInsert || !creado) {
+      console.error('PerfilFamiliar: error insertando vehiculos_hogar', errInsert)
+      return
+    }
+
+    setVehiculosAsociados((prev) => [
+      {
+        id: creado.id,
+        usuarioClienteId: creado.usuario_cliente_id ?? undefined,
+        patente: creado.patente ?? undefined,
+        marca: creado.marca ?? undefined,
+        modelo: creado.modelo ?? undefined,
+        anio: creado.anio ?? undefined,
+        notas: creado.notas ?? undefined,
+        activo: creado.activo,
+        createdAt: creado.created_at,
+        updatedAt: creado.updated_at,
+      },
+      ...prev,
+    ])
+  }
+
+  async function eliminarVehiculo(id: string) {
+    await supabase.from('vehiculos_hogar').delete().eq('id', id)
+    setVehiculosAsociados((prev) => prev.filter((v) => v.id !== id))
+  }
+
+  // Fase 74: inmuebles de los que esta persona es titular (único, por
+  // ahora -- ver nota de diseño arriba en el import de tipos).
+  useEffect(() => {
+    if (!usuario) {
+      setInmueblesAsociados([])
+      return
+    }
+    let activo = true
+    setCargandoInmuebles(true)
+    supabase
+      .from('inmuebles_hogar')
+      .select('*')
+      .eq('usuario_cliente_id', usuario.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (!activo) return
+        const filas: Inmueble[] = (data ?? []).map((r: any) => ({
+          id: r.id,
+          usuarioClienteId: r.usuario_cliente_id ?? undefined,
+          nombre: r.nombre,
+          direccion: r.direccion ?? undefined,
+          partidaInmobiliaria: r.partida_inmobiliaria ?? undefined,
+          notas: r.notas ?? undefined,
+          activo: r.activo,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }))
+        setInmueblesAsociados(filas)
+        setCargandoInmuebles(false)
+      })
+    return () => {
+      activo = false
+    }
+  }, [usuario])
+
+  async function guardarInmueble(data: Omit<Inmueble, 'id' | 'usuarioClienteId' | 'activo' | 'createdAt' | 'updatedAt'>) {
+    if (!usuario) return
+    const { data: creado, error: errInsert } = await supabase
+      .from('inmuebles_hogar')
+      .insert({
+        id: generarId(),
+        cliente_id: usuario.cliente_id,
+        usuario_cliente_id: usuario.id,
+        nombre: data.nombre,
+        direccion: data.direccion ?? null,
+        partida_inmobiliaria: data.partidaInmobiliaria ?? null,
+        notas: data.notas ?? null,
+        activo: true,
+      })
+      .select()
+      .single()
+
+    if (errInsert || !creado) {
+      console.error('PerfilFamiliar: error insertando inmuebles_hogar', errInsert)
+      return
+    }
+
+    setInmueblesAsociados((prev) => [
+      {
+        id: creado.id,
+        usuarioClienteId: creado.usuario_cliente_id ?? undefined,
+        nombre: creado.nombre,
+        direccion: creado.direccion ?? undefined,
+        partidaInmobiliaria: creado.partida_inmobiliaria ?? undefined,
+        notas: creado.notas ?? undefined,
+        activo: creado.activo,
+        createdAt: creado.created_at,
+        updatedAt: creado.updated_at,
+      },
+      ...prev,
+    ])
+  }
+
+  async function eliminarInmueble(id: string) {
+    await supabase.from('inmuebles_hogar').delete().eq('id', id)
+    setInmueblesAsociados((prev) => prev.filter((i) => i.id !== id))
+  }
+
   async function guardar() {
     if (!usuario) return
     setGuardando(true)
@@ -503,6 +674,92 @@ function EditarFamiliarDialog({
               </ul>
             )}
           </div>
+
+          {/* Fase 74: vehículos -- el alta pasa a estar acá; el pago de
+              lo que se les asocie (patente, seguro) se maneja en Home
+              Keep > Servicios. */}
+          <div className="space-y-2 border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-gray-500">Vehículos</label>
+              <Button variant="outline" size="sm" onClick={() => setMostrarVehiculoDialog(true)}>
+                + Agregar vehículo
+              </Button>
+            </div>
+            {cargandoVehiculos ? (
+              <p className="text-xs text-gray-400">Cargando...</p>
+            ) : vehiculosAsociados.length === 0 ? (
+              <p className="text-xs text-gray-400">Todavía no tiene ningún vehículo cargado.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {vehiculosAsociados.map((v) => (
+                  <li
+                    key={v.id}
+                    className="flex items-center justify-between rounded-md bg-gray-50 px-2.5 py-1.5 text-xs"
+                  >
+                    <div>
+                      <span className="font-medium text-gray-900">
+                        {[v.marca, v.modelo].filter(Boolean).join(' ') || v.patente || 'Vehículo'}
+                      </span>
+                      <span className="text-gray-500">
+                        {v.patente ? ` · ${v.patente}` : ''}
+                        {v.anio ? ` · ${v.anio}` : ''}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => eliminarVehiculo(v.id)}
+                      className="text-gray-400 hover:text-red-600"
+                      title="Eliminar"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Fase 74: inmuebles -- titular único por ahora (a pedido de
+              Carlos). Los impuestos/tasas/servicios de lo que se
+              vincule acá se pagan en Home Keep > Servicios. */}
+          <div className="space-y-2 border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-gray-500">Inmuebles</label>
+              <Button variant="outline" size="sm" onClick={() => setMostrarInmuebleDialog(true)}>
+                + Agregar inmueble
+              </Button>
+            </div>
+            {cargandoInmuebles ? (
+              <p className="text-xs text-gray-400">Cargando...</p>
+            ) : inmueblesAsociados.length === 0 ? (
+              <p className="text-xs text-gray-400">Todavía no tiene ningún inmueble cargado.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {inmueblesAsociados.map((i) => (
+                  <li
+                    key={i.id}
+                    className="flex items-center justify-between rounded-md bg-gray-50 px-2.5 py-1.5 text-xs"
+                  >
+                    <div>
+                      <span className="font-medium text-gray-900">{i.nombre}</span>
+                      <span className="text-gray-500">
+                        {i.direccion ? ` · ${i.direccion}` : ''}
+                        {i.partidaInmobiliaria ? ` · ${i.partidaInmobiliaria}` : ''}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => eliminarInmueble(i.id)}
+                      className="text-gray-400 hover:text-red-600"
+                      title="Eliminar"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -529,6 +786,22 @@ function EditarFamiliarDialog({
           open={mostrarTarjetaDialog}
           onOpenChange={setMostrarTarjetaDialog}
           onSave={guardarTarjeta}
+        />
+      )}
+
+      {usuario && (
+        <VehiculoDialog
+          open={mostrarVehiculoDialog}
+          onOpenChange={setMostrarVehiculoDialog}
+          onSave={guardarVehiculo}
+        />
+      )}
+
+      {usuario && (
+        <InmuebleDialog
+          open={mostrarInmuebleDialog}
+          onOpenChange={setMostrarInmuebleDialog}
+          onSave={guardarInmueble}
         />
       )}
     </Dialog>

@@ -13,6 +13,7 @@ import {
   Wallet,
   TrendingUp,
   CreditCard,
+  Wrench,
 } from 'lucide-react';
 import { AtajoPerfilFamiliar } from '@/components/AtajoPerfilFamiliar';
 
@@ -38,6 +39,10 @@ const tabs: TabDef[] = [
   // de datos interno sigue llamándose "pago".
   { to: `${BASE}/pagos`,        label: 'Pagos',        icon: Wallet },
   { to: `${BASE}/tarjetas`,    label: 'Tarjetas',     icon: CreditCard },
+  // Fase 74: pagos de servicios continuos (impuestos, tasas, seguros,
+  // luz/gas/internet, colegios, etc.) -- panel dinámico que reemplaza
+  // el Excel manual que usaba Rosana.
+  { to: `${BASE}/servicios`,   label: 'Servicios',    icon: Wrench },
 ];
 
 export default function HomeKeepLayout() {

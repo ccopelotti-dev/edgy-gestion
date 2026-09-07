@@ -35,6 +35,12 @@ import type {
   TarjetaCredito,
   ConsumoTarjeta,
   ResumenTarjeta,
+  Vehiculo,
+  Inmueble,
+  CategoriaGasto,
+  ServicioHogar,
+  TipoVinculoServicio,
+  PeriodicidadServicio,
 } from '../types';
 
 import {
@@ -44,6 +50,8 @@ import {
   TIPO_COMPROBANTE_LABEL,
   MEDIO_PAGO_LABEL,
   TIPO_INGRESO_LABEL,
+  TIPO_VINCULO_SERVICIO_LABEL,
+  PERIODICIDAD_SERVICIO_LABEL,
 } from '../types';
 
 import { formatARS, todayISO } from '../lib/format';
@@ -1684,6 +1692,397 @@ export function TarjetaDialog({ open, onOpenChange, tarjeta, onSave }: TarjetaDi
                 value={limite}
                 onChange={(e) => setLimite(e.target.value === '' ? '' : Number(e.target.value))}
               />
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── VehiculoDialog (Fase 74) ────────────────────────────────
+// Mismo criterio que TarjetaDialog (Fase 72c): el alta se hace desde la
+// ficha del titular en Perfil Familiar, no acá -- este dialog no pide
+// usuarioClienteId porque ya viene fijo desde el llamador.
+
+interface VehiculoDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  vehiculo?: Vehiculo;
+  onSave: (data: Omit<Vehiculo, 'id' | 'usuarioClienteId' | 'activo' | 'createdAt' | 'updatedAt'>) => void;
+}
+
+export function VehiculoDialog({ open, onOpenChange, vehiculo, onSave }: VehiculoDialogProps) {
+  const [patente, setPatente] = useState('');
+  const [marca, setMarca] = useState('');
+  const [modelo, setModelo] = useState('');
+  const [anio, setAnio] = useState<number | ''>('');
+  const [notas, setNotas] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setPatente(vehiculo?.patente ?? '');
+      setMarca(vehiculo?.marca ?? '');
+      setModelo(vehiculo?.modelo ?? '');
+      setAnio(vehiculo?.anio ?? '');
+      setNotas(vehiculo?.notas ?? '');
+    }
+  }, [open, vehiculo]);
+
+  const handleSave = () => {
+    onSave({
+      patente: patente.trim() || undefined,
+      marca: marca.trim() || undefined,
+      modelo: modelo.trim() || undefined,
+      anio: anio === '' ? undefined : Number(anio),
+      notas: notas.trim() || undefined,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">{vehiculo ? 'Editar vehículo' : 'Nuevo vehículo'}</Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Patente</label>
+                <input className={inputClass} value={patente} onChange={(e) => setPatente(e.target.value)} placeholder="Ej. AE766BT" />
+              </div>
+              <div>
+                <label className={labelClass}>Año</label>
+                <input
+                  type="number"
+                  className={inputClass}
+                  value={anio}
+                  onChange={(e) => setAnio(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Marca</label>
+                <input className={inputClass} value={marca} onChange={(e) => setMarca(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Modelo</label>
+                <input className={inputClass} value={modelo} onChange={(e) => setModelo(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className={labelClass}>Notas</label>
+              <input className={inputClass} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── InmuebleDialog (Fase 74) ────────────────────────────────
+// Simplificado a titular único a pedido de Carlos (07/09) -- mismo
+// patrón que VehiculoDialog: usuarioClienteId ya viene fijo desde la
+// ficha de Perfil Familiar donde se abre este dialog.
+
+interface InmuebleDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  inmueble?: Inmueble;
+  onSave: (data: Omit<Inmueble, 'id' | 'usuarioClienteId' | 'activo' | 'createdAt' | 'updatedAt'>) => void;
+}
+
+export function InmuebleDialog({ open, onOpenChange, inmueble, onSave }: InmuebleDialogProps) {
+  const [nombre, setNombre] = useState('');
+  const [direccion, setDireccion] = useState('');
+  const [partidaInmobiliaria, setPartidaInmobiliaria] = useState('');
+  const [notas, setNotas] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setNombre(inmueble?.nombre ?? '');
+      setDireccion(inmueble?.direccion ?? '');
+      setPartidaInmobiliaria(inmueble?.partidaInmobiliaria ?? '');
+      setNotas(inmueble?.notas ?? '');
+      setError('');
+    }
+  }, [open, inmueble]);
+
+  const handleSave = () => {
+    if (!nombre.trim()) {
+      setError('El nombre es obligatorio');
+      return;
+    }
+    onSave({
+      nombre: nombre.trim(),
+      direccion: direccion.trim() || undefined,
+      partidaInmobiliaria: partidaInmobiliaria.trim() || undefined,
+      notas: notas.trim() || undefined,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">{inmueble ? 'Editar inmueble' : 'Nuevo inmueble'}</Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>Nombre *</label>
+              <input className={inputClass} value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Casa 1, Terreno" />
+              {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+            </div>
+            <div>
+              <label className={labelClass}>Dirección</label>
+              <input className={inputClass} value={direccion} onChange={(e) => setDireccion(e.target.value)} />
+            </div>
+            <div>
+              <label className={labelClass}>Partida inmobiliaria / referencia catastral</label>
+              <input
+                className={inputClass}
+                value={partidaInmobiliaria}
+                onChange={(e) => setPartidaInmobiliaria(e.target.value)}
+                placeholder="Ej. 47-03-J-3-030"
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Notas</label>
+              <input className={inputClass} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <Dialog.Close className={btnSecondary}>Cancelar</Dialog.Close>
+            <button className={btnPrimary} onClick={handleSave}>Guardar</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+// ─── ServicioDialog (Fase 74) ────────────────────────────────
+// Alta/edición de una obligación recurrente (impuesto, tasa, seguro,
+// servicio, colegio, etc.) -- vive en Home Keep > Servicios (a
+// diferencia de Vehículo/Inmueble, esto NO se da de alta desde Perfil
+// Familiar porque no tiene un "titular" único, sino un vínculo a algo
+// que ya se cargó ahí (vehículo/inmueble/persona) o nada.
+
+interface ServicioDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  servicio?: ServicioHogar;
+  categorias: CategoriaGasto[];
+  proveedores: Proveedor[];
+  vehiculos: Vehiculo[];
+  inmuebles: Inmueble[];
+  personas: { id: string; nombre: string }[];
+  onSave: (data: Omit<ServicioHogar, 'id' | 'activo' | 'createdAt' | 'updatedAt'>) => void;
+}
+
+export function ServicioDialog({
+  open,
+  onOpenChange,
+  servicio,
+  categorias,
+  proveedores,
+  vehiculos,
+  inmuebles,
+  personas,
+  onSave,
+}: ServicioDialogProps) {
+  const [nombre, setNombre] = useState('');
+  const [categoriaGastoId, setCategoriaGastoId] = useState('');
+  const [proveedorId, setProveedorId] = useState('');
+  const [tipoVinculo, setTipoVinculo] = useState<TipoVinculoServicio>('general');
+  const [vehiculoId, setVehiculoId] = useState('');
+  const [inmuebleId, setInmuebleId] = useState('');
+  const [usuarioClienteId, setUsuarioClienteId] = useState('');
+  const [periodicidad, setPeriodicidad] = useState<PeriodicidadServicio>('mensual');
+  const [diaVencimientoAproximado, setDiaVencimientoAproximado] = useState<number | ''>('');
+  const [montoEstimado, setMontoEstimado] = useState<number | ''>('');
+  const [notas, setNotas] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setNombre(servicio?.nombre ?? '');
+      setCategoriaGastoId(servicio?.categoriaGastoId ?? '');
+      setProveedorId(servicio?.proveedorId ?? '');
+      setTipoVinculo(servicio?.tipoVinculo ?? 'general');
+      setVehiculoId(servicio?.vehiculoId ?? '');
+      setInmuebleId(servicio?.inmuebleId ?? '');
+      setUsuarioClienteId(servicio?.usuarioClienteId ?? '');
+      setPeriodicidad(servicio?.periodicidad ?? 'mensual');
+      setDiaVencimientoAproximado(servicio?.diaVencimientoAproximado ?? '');
+      setMontoEstimado(servicio?.montoEstimado ?? '');
+      setNotas(servicio?.notas ?? '');
+      setError('');
+    }
+  }, [open, servicio]);
+
+  const handleSave = () => {
+    if (!nombre.trim()) {
+      setError('El nombre es obligatorio');
+      return;
+    }
+    onSave({
+      nombre: nombre.trim(),
+      categoriaGastoId: categoriaGastoId || undefined,
+      proveedorId: proveedorId || undefined,
+      tipoVinculo,
+      vehiculoId: tipoVinculo === 'vehiculo' ? vehiculoId || undefined : undefined,
+      inmuebleId: tipoVinculo === 'inmueble' ? inmuebleId || undefined : undefined,
+      usuarioClienteId: tipoVinculo === 'persona' ? usuarioClienteId || undefined : undefined,
+      periodicidad,
+      diaVencimientoAproximado: diaVencimientoAproximado === '' ? undefined : Number(diaVencimientoAproximado),
+      montoEstimado: montoEstimado === '' ? undefined : Number(montoEstimado),
+      notas: notas.trim() || undefined,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlayClass} />
+        <Dialog.Content className={contentClass}>
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="text-lg font-semibold text-gray-900">{servicio ? 'Editar servicio' : 'Nuevo servicio'}</Dialog.Title>
+            <Dialog.Close className={btnIcon}><X className="w-5 h-5" /></Dialog.Close>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>Nombre *</label>
+              <input className={inputClass} value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Seguro Auto NATIVA, Impuesto Inmobiliario Casa 1" />
+              {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Categoría de gasto</label>
+                <select className={selectClass} value={categoriaGastoId} onChange={(e) => setCategoriaGastoId(e.target.value)}>
+                  <option value="">Sin categoría</option>
+                  {categorias.map((c) => (
+                    <option key={c.id} value={c.id}>{c.nombre}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Proveedor</label>
+                <select className={selectClass} value={proveedorId} onChange={(e) => setProveedorId(e.target.value)}>
+                  <option value="">Sin proveedor</option>
+                  {proveedores.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nombreFantasia || p.nombre}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Fase 74: criterio de trazabilidad pedido por Carlos -- el
+                vehículo/inmueble/persona ya se cargó antes en Perfil
+                Familiar, acá solo se elige a cuál se vincula este servicio. */}
+            <div>
+              <label className={labelClass}>Vinculado a</label>
+              <select className={selectClass} value={tipoVinculo} onChange={(e) => setTipoVinculo(e.target.value as TipoVinculoServicio)}>
+                {(Object.keys(TIPO_VINCULO_SERVICIO_LABEL) as TipoVinculoServicio[]).map((t) => (
+                  <option key={t} value={t}>{TIPO_VINCULO_SERVICIO_LABEL[t]}</option>
+                ))}
+              </select>
+            </div>
+            {tipoVinculo === 'vehiculo' && (
+              <div>
+                <label className={labelClass}>Vehículo</label>
+                <select className={selectClass} value={vehiculoId} onChange={(e) => setVehiculoId(e.target.value)}>
+                  <option value="">Elegir vehículo...</option>
+                  {vehiculos.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {[v.marca, v.modelo].filter(Boolean).join(' ') || v.patente || 'Vehículo'}{v.patente ? ` (${v.patente})` : ''}
+                    </option>
+                  ))}
+                </select>
+                {vehiculos.length === 0 && (
+                  <p className="mt-1 text-xs text-gray-400">No hay vehículos cargados todavía -- se dan de alta desde Perfil Familiar.</p>
+                )}
+              </div>
+            )}
+            {tipoVinculo === 'inmueble' && (
+              <div>
+                <label className={labelClass}>Inmueble</label>
+                <select className={selectClass} value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)}>
+                  <option value="">Elegir inmueble...</option>
+                  {inmuebles.map((i) => (
+                    <option key={i.id} value={i.id}>{i.nombre}</option>
+                  ))}
+                </select>
+                {inmuebles.length === 0 && (
+                  <p className="mt-1 text-xs text-gray-400">No hay inmuebles cargados todavía -- se dan de alta desde Perfil Familiar.</p>
+                )}
+              </div>
+            )}
+            {tipoVinculo === 'persona' && (
+              <div>
+                <label className={labelClass}>Integrante de la familia</label>
+                <select className={selectClass} value={usuarioClienteId} onChange={(e) => setUsuarioClienteId(e.target.value)}>
+                  <option value="">Elegir integrante...</option>
+                  {personas.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelClass}>Periodicidad</label>
+                <select className={selectClass} value={periodicidad} onChange={(e) => setPeriodicidad(e.target.value as PeriodicidadServicio)}>
+                  {(Object.keys(PERIODICIDAD_SERVICIO_LABEL) as PeriodicidadServicio[]).map((p) => (
+                    <option key={p} value={p}>{PERIODICIDAD_SERVICIO_LABEL[p]}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Día vencimiento aprox.</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className={inputClass}
+                  value={diaVencimientoAproximado}
+                  onChange={(e) => setDiaVencimientoAproximado(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Monto estimado</label>
+                <input
+                  type="number"
+                  className={inputClass}
+                  value={montoEstimado}
+                  onChange={(e) => setMontoEstimado(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className={labelClass}>Notas</label>
+              <input className={inputClass} value={notas} onChange={(e) => setNotas(e.target.value)} />
             </div>
           </div>
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">

@@ -15,6 +15,7 @@ import Comprobantes from './pages/Comprobantes';
 import Pagos from './pages/Pagos';
 import Ingresos from './pages/Ingresos';
 import TarjetasCredito from './pages/TarjetasCredito';
+import Servicios from './pages/Servicios';
 
 export default function HomeKeepModule() {
   return (
@@ -27,6 +28,7 @@ export default function HomeKeepModule() {
           <Route path="comprobantes" element={<Comprobantes />} />
           <Route path="pagos" element={<Pagos />} />
           <Route path="tarjetas" element={<TarjetasCredito />} />
+          <Route path="servicios" element={<Servicios />} />
         </Route>
       </Routes>
     </HomeKeepProvider>
