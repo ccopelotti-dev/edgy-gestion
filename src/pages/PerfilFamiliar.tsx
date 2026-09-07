@@ -29,7 +29,7 @@
 //     usuario y la contraseña de palabra cuando le parece.
 
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
@@ -810,6 +810,7 @@ function EditarFamiliarDialog({
 
 export default function PerfilFamiliar() {
   const { cliente, rolActual, cargando: cargandoCliente } = useClienteActual()
+  const navigate = useNavigate()
 
   const [usuarios, setUsuarios] = useState<UsuarioCliente[]>([])
   const [rolesDisponibles, setRolesDisponibles] = useState<RolLiviano[]>([])
@@ -970,14 +971,21 @@ export default function PerfilFamiliar() {
       {/* Fase 71f (06/09, a pedido de Carlos): atajo de vuelta -- Perfil
           Familiar es una pantalla de cuenta, no un módulo con tabs, así
           que a diferencia de Compras/Ventas/Home Keep no tenía ningún
-          "Dashboard" al que volver con un clic. */}
-      <Link
-        to="/dashboard"
+          "Dashboard" al que volver con un clic.
+          Fase 74b (07/09, a pedido de Carlos): antes era un Link fijo a
+          "/dashboard" (el del negocio) -- si se entraba desde Home Keep
+          (o cualquier otro módulo) igual te mandaba al dashboard del
+          negocio, no al de origen. Ahora vuelve con navigate(-1) al
+          lugar exacto de donde se vino (fallback a /dashboard si no hay
+          historial, ej. entrando por URL directa). */}
+      <button
+        type="button"
+        onClick={() => navigate(-1)}
         className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Volver al Dashboard
-      </Link>
+        Volver
+      </button>
 
       <div>
         <h1 className="text-lg font-medium text-gray-900">Perfil Familiar</h1>
