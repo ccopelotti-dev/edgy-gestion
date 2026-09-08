@@ -65,11 +65,18 @@ import {
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
 
-// ─── ids client-side para variantes nuevas (mismo patrón que Servicios) ───────
-
-let _vSeq = 0
+// ─── ids client-side para variantes nuevas ─────────────────────────────────
+// Fase 75d (08/09, a partir de un error real de Carlos en Punto Tex): antes
+// esto generaba un id con prefijo "var-..." (texto), pero producto_variantes.id
+// es `uuid` en la base -- insertarlo con ese id fallaba con "invalid input
+// syntax for type uuid", y como syncProductoVariantes primero borra TODAS las
+// variantes del producto y recién después reinserta el array completo, un solo
+// id inválido tiraba abajo el insert entero: el producto quedaba con
+// tipo='con_variantes' pero CERO filas en producto_variantes (la causa real
+// del bug de stock desaparecido de ayer). Ahora se genera un uuid real desde
+// el vamos, como en el resto del código (ver crypto.randomUUID() en store.tsx).
 function vUid(): string {
-  return `var-${Date.now()}-${++_vSeq}-${Math.random().toString(36).slice(2, 7)}`
+  return crypto.randomUUID()
 }
 
 // ─── ProductoDialog ───────────────────────────────────────────────────────────
