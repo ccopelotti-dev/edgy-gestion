@@ -35,7 +35,7 @@ export default function Productos() {
   const { state, dispatch } = useProductosStock()
   // Fase 27d: selector "Disponible en" del ProductoDialog, solo se
   // muestra si el cliente tiene 2+ locales cargados.
-  const { cliente, puntosVenta } = useClienteActual()
+  const { cliente, puntosVenta, puntoVentaUsuarioId } = useClienteActual()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Fase 16.2: acceso rápido a Movimientos filtrado por este producto.
@@ -346,6 +346,7 @@ export default function Productos() {
         }}
         plantillasGarantia={state.plantillasGarantia}
         puntosVenta={puntosVenta}
+        puntoVentaUsuarioId={puntoVentaUsuarioId ?? undefined}
         formulas={state.formulas}
         onIrAFormula={(productoId) => {
           setDialogOpen(false)

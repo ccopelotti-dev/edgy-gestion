@@ -33,7 +33,7 @@ const tipoLabel: Record<Rubro['tipo'], string> = {
 
 export default function Rubros() {
   const { state, dispatch } = useProductosStock()
-  const { cliente } = useClienteActual()
+  const { cliente, puntosVenta, puntoVentaUsuarioId } = useClienteActual()
 
   const [seleccionado, setSeleccionado] = useState<string | null>(null)
   const [eliminandoRubroId, setEliminandoRubroId] = useState<string | null>(null)
@@ -84,7 +84,14 @@ export default function Rubros() {
       if (!res.ok) return res.error
       dispatch({ type: 'CONFIRM_RUBRO', payload: res.data })
     } else {
-      const res = await crearRubroConfirmado(data, cliente.id)
+      // Fase 75f: en un cliente con 2+ puntos de venta, todo rubro nuevo
+      // queda del punto de venta del usuario que lo crea (Carlos pidió
+      // separación total, sin opción "compartido" -- a diferencia de
+      // Producto.puntoVentaId, que sí admite null). En clientes de un solo
+      // local (la inmensa mayoría) puntoVentaUsuarioId es null y este
+      // campo directamente no se usa -- sin cambio de comportamiento.
+      const puntoVentaId = puntosVenta.length >= 2 ? puntoVentaUsuarioId ?? undefined : undefined
+      const res = await crearRubroConfirmado({ ...data, puntoVentaId }, cliente.id)
       if (!res.ok) return res.error
       dispatch({ type: 'CONFIRM_RUBRO', payload: res.data })
     }

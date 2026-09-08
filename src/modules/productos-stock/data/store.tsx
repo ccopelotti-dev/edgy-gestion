@@ -1399,6 +1399,8 @@ function rubroToRow(r: Rubro, clienteId: string) {
     nombre: r.nombre,
     tipo: r.tipo,
     plantilla_garantia_id: r.plantillaGarantiaId || null,
+    // Fase 75f: ver comentario en types/index.ts (Rubro.puntoVentaId).
+    punto_venta_id: r.puntoVentaId || null,
   }
 }
 
@@ -2329,6 +2331,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     nombre: r.nombre,
     tipo: r.tipo,
     plantillaGarantiaId: r.plantilla_garantia_id ?? undefined,
+    puntoVentaId: r.punto_venta_id ?? undefined,
   }))
 
   const subRubros: SubRubro[] = (subRubrosRes.data ?? []).map((r: any) => ({
@@ -2464,6 +2467,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     origen: r.origen ?? undefined,
     origenId: r.origen_id ?? undefined,
     fechaVencimiento: r.fecha_vencimiento ?? undefined,
+    puntoVentaId: r.punto_venta_id ?? undefined,
   }))
 
   const recepcionLineasByRecepcion = new Map<string, LineaRecepcion[]>()
@@ -4303,8 +4307,43 @@ const Ctx = createContext<ContextValue | null>(null)
 
 // ─── Provider ──────────────────────────────────────────────────────────────────
 
+// Fase 75f (08/09, a pedido de Carlos -- Rúa veía todo el catálogo de
+// Casa Central): en un cliente con 2+ puntos de venta, un usuario
+// restringido a uno (puntoVentaUsuarioId no null) solo debe ver lo de su
+// propio local -- rubros/sub-rubros de forma estricta (sin "compartido",
+// ver Rubro.puntoVentaId), y productos/movimientos con el criterio que ya
+// existía (Fase 27d): null = compartido entre locales, se sigue viendo.
+// Clientes de un solo local, o un usuario con acceso global
+// (puntoVentaUsuarioId null -- ej. el Dueño), no se filtran: mismo
+// comportamiento de siempre. El filtro se aplica acá, en la vista que
+// consumen los componentes -- el reducer y syncToSupabase siguen
+// operando siempre sobre el estado COMPLETO (stateRef), así que un
+// dispatch nunca "pierde" un ítem que quedó fuera de este recorte visual.
+function filtrarPorPuntoVenta(
+  state: ProductosStockState,
+  puntosVenta: { id: string }[],
+  puntoVentaUsuarioId: string | null,
+): ProductosStockState {
+  if (puntosVenta.length < 2 || !puntoVentaUsuarioId) return state
+
+  const mio = puntoVentaUsuarioId
+  const rubros = state.rubros.filter((r) => r.puntoVentaId === mio)
+  const rubroIds = new Set(rubros.map((r) => r.id))
+
+  return {
+    ...state,
+    rubros,
+    subRubros: state.subRubros.filter((sr) => rubroIds.has(sr.rubroId)),
+    productos: state.productos.filter((p) => !p.puntoVentaId || p.puntoVentaId === mio),
+    movimientos: state.movimientos.filter((m) => !m.puntoVentaId || m.puntoVentaId === mio),
+    transferencias: state.transferencias.filter(
+      (t) => t.origenPuntoVentaId === mio || t.destinoPuntoVentaId === mio,
+    ),
+  }
+}
+
 export function ProductosStockProvider({ children }: { children: ReactNode }) {
-  const { cliente } = useClienteActual()
+  const { cliente, puntosVenta, puntoVentaUsuarioId } = useClienteActual()
   const [state, rawDispatch] = useReducer(reducer, seedState)
 
   // Fix (17/08): `dispatch` estaba memoizado con `state` como dependencia,
@@ -4345,7 +4384,12 @@ export function ProductosStockProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cliente?.id])
 
-  const value = useMemo(() => ({ state, dispatch }), [state, dispatch])
+  const stateFiltrado = useMemo(
+    () => filtrarPorPuntoVenta(state, puntosVenta, puntoVentaUsuarioId),
+    [state, puntosVenta, puntoVentaUsuarioId],
+  )
+
+  const value = useMemo(() => ({ state: stateFiltrado, dispatch }), [stateFiltrado, dispatch])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

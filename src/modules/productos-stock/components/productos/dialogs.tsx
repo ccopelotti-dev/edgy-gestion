@@ -110,6 +110,15 @@ interface ProductoDialogProps {
    * solo elemento en un cliente de un solo local: el selector de
    * "Disponible en" directamente no se muestra en ese caso. */
   puntosVenta?: { id: string; alias: string }[]
+  /** Fase 75f: punto de venta al que está restringido el usuario logueado
+   * (null/undefined = acceso global). Un producto NUEVO arranca
+   * preseleccionado en el local propio del usuario en vez de "Todos los
+   * locales" -- antes ese default compartido era fácil de dejar pasar sin
+   * querer, y así fue como productos de Rúa terminaron visibles (o, según
+   * qué seleccionara la persona sin saber la diferencia, mal asignados) en
+   * Casa Central. Al editar un producto existente esto no pisa nada -- se
+   * respeta lo que ya tenía guardado. */
+  puntoVentaUsuarioId?: string
   /** Fórmulas existentes -- para saber si este producto tiene una receta
    * real que le calcula el costo (ver Formular Producto). OJO:
    * `Producto.tieneFormula` no es confiable (no se mantiene sincronizado
@@ -164,6 +173,7 @@ export function ProductoDialog({
   onCrearMarca,
   plantillasGarantia,
   puntosVenta = [],
+  puntoVentaUsuarioId,
   formulas,
   onIrAFormula,
   editData,
@@ -303,14 +313,18 @@ export function ProductoDialog({
         setStockMinimoTexto(decimalATexto(rest.stockMinimo))
         setAnchoRolloTexto(rest.anchoRollo != null ? decimalATexto(rest.anchoRollo) : '')
       } else {
-        setForm({ ...emptyProducto, diasDisponibles: DIAS_SEMANA_ORDEN.slice() })
+        setForm({
+          ...emptyProducto,
+          diasDisponibles: DIAS_SEMANA_ORDEN.slice(),
+          puntoVentaId: puntoVentaUsuarioId,
+        })
         setPrecioVentaTexto('')
         setCostoTexto('')
         setStockMinimoTexto('')
         setAnchoRolloTexto('')
       }
     }
-  }, [open, editData])
+  }, [open, editData, puntoVentaUsuarioId])
 
   function update<K extends keyof ProductoFormData>(key: K, value: ProductoFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))

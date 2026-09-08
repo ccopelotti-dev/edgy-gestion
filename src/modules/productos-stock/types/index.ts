@@ -361,6 +361,14 @@ export interface Rubro {
    * (Fase 4). Un producto puntual puede pisarla con su propia
    * `plantillaGarantiaId` -- ver comentario en Producto. */
   plantillaGarantiaId?: string
+  /** Fase 75f (08/09, a pedido de Carlos -- Rúa necesitaba rubros propios,
+   * sin mezclarse con los de Punto Tex): dueño de este rubro cuando el
+   * cliente tiene 2+ puntos de venta. A diferencia de Producto.puntoVentaId
+   * (que admite null = "compartido entre locales"), acá NO hay opción
+   * compartida -- todo rubro nuevo en un cliente multi-local queda de un
+   * punto de venta puntual. undefined en clientes de un solo local (la
+   * inmensa mayoría), donde este concepto no aplica. */
+  puntoVentaId?: string
 }
 
 export interface SubRubro {
@@ -991,6 +999,11 @@ export interface MovimientoStock {
    * Se copia desde LineaRecepcion.fechaVencimiento al confirmar la
    * recepción -- ver Control de Stock para la alerta de "por vencer". */
   fechaVencimiento?: string
+  /** Fase 75f: la columna ya existía en la base (se completa al crear el
+   * movimiento -- ver resolverPuntoVentaId en store.tsx) pero nunca se
+   * traía al frontend. Se agrega solo para poder filtrar el listado de
+   * Movimientos por punto de venta en clientes multi-local. */
+  puntoVentaId?: string
 }
 
 // ─── Recepción ──────────────────────────────────────────────────────────────────
