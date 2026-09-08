@@ -2594,6 +2594,21 @@ export async function crearProductoConfirmado(
   const nuevo: Producto = { ...data, id: uid(), createdAt: todayISO() }
   const { error } = await supabase.from('productos').insert(productoToRow(nuevo, clienteId))
   if (error) return { ok: false, error: error.message }
+  // Fase 75e (08/09, a partir de un caso real de Carlos en Punto Tex): este
+  // flujo "confirmado" (Fase de 17/08, ver comentario grande más arriba)
+  // nunca sincronizaba producto_variantes -- solo copiaba la fila del
+  // producto y sus documentos. La UI de ProductoDialog dejaba cargar
+  // color/talle sin ningún error, pero esas variantes NUNCA llegaban a la
+  // base: el producto quedaba tipo='con_variantes' con cero filas reales.
+  // Esa es la causa de fondo del bug de stock desaparecido -- más profunda
+  // que el error de uuid ya corregido en vUid() (dialogs.tsx), que solo
+  // tapaba el síntoma de un insert que de entrada nunca se ejecutaba.
+  if (nuevo.tipo === 'con_variantes' && nuevo.variantes.length) {
+    const { error: varErr } = await supabase
+      .from('producto_variantes')
+      .insert(nuevo.variantes.map((v, idx) => productoVarianteToRow(v, nuevo.id, idx)))
+    if (varErr) return { ok: false, error: `No se pudieron guardar las variantes: ${varErr.message}` }
+  }
   // Fase 48e: mismo criterio que crearInsumoConfirmado -- documentos del
   // catálogo técnico después de que el producto padre confirmó.
   if (nuevo.documentos.length) {
@@ -2621,6 +2636,22 @@ export async function actualizarProductoConfirmado(
       error:
         'No se encontró este producto en la base -- puede que nunca se haya guardado. Probá crearlo de nuevo.',
     }
+  }
+  // Fase 75e: ver comentario en crearProductoConfirmado -- este flujo
+  // confirmado se había quedado sin sincronizar producto_variantes desde
+  // que se armó (17/08). Borra y reinserta las variantes actuales (mismo
+  // patrón que la vieja syncProductoVariantes, pero awaited y con el error
+  // devuelto de verdad en vez de tragado en consola) -- las variantes
+  // existentes mantienen su id real, así que no rompe nada que referencie
+  // producto_variantes.id.
+  const variantesActuales = p.tipo === 'con_variantes' ? p.variantes : []
+  const { error: delVarErr } = await supabase.from('producto_variantes').delete().eq('producto_id', p.id)
+  if (delVarErr) return { ok: false, error: `No se pudieron actualizar las variantes: ${delVarErr.message}` }
+  if (variantesActuales.length) {
+    const { error: varErr } = await supabase
+      .from('producto_variantes')
+      .insert(variantesActuales.map((v, idx) => productoVarianteToRow(v, p.id, idx)))
+    if (varErr) return { ok: false, error: `No se pudieron guardar las variantes: ${varErr.message}` }
   }
   const { error: delDocErr } = await supabase.from('producto_documentos').delete().eq('producto_id', p.id)
   if (!delDocErr && p.documentos.length) {
