@@ -455,7 +455,16 @@ export function ProductoDialog({
         (p) => p.id !== editData?.id && p.codigoBarras === codigoBarrasLimpio,
       )
       if (yaUsado) {
-        setErrorCodigoBarras('Ese código de barras ya lo tiene otro producto.')
+        // Fase 75g (08/09, a partir de un caso real de Carlos en Rúa): antes
+        // este error solo aparecía como texto chico junto al campo de
+        // código de barras, arriba del todo del formulario -- si el botón
+        // Guardar quedaba fuera de vista (diálogo largo, scrolleado), el
+        // click no hacía nada visible y parecía que el botón estaba roto.
+        // Ahora también se muestra en el banner de error de abajo, al lado
+        // del botón, que es donde la persona está mirando cuando hace clic.
+        const mensaje = 'Ese código de barras ya lo tiene otro producto.'
+        setErrorCodigoBarras(mensaje)
+        setErrorGuardado(mensaje)
         return
       }
     }
