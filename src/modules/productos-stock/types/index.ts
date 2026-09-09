@@ -760,6 +760,12 @@ export interface Insumo {
    * cargados (default). Ver DocumentoTecnico. */
   documentos: DocumentoTecnico[]
   createdAt: string
+  /** Fase 75h (09/09, a pedido de Carlos -- mismo caso de Rúa/Casa
+   * Central): dueño de este insumo cuando el cliente tiene 2+ puntos de
+   * venta. Mismo criterio que Rubro.puntoVentaId -- sin opción
+   * compartida, todo insumo nuevo en un cliente multi-local queda de un
+   * punto de venta puntual. undefined en clientes de un solo local. */
+  puntoVentaId?: string
 }
 
 /** Fase 48c/48d/48e: un documento del catálogo técnico de un Insumo o de
@@ -960,6 +966,10 @@ export interface Produccion {
   estado: EstadoProduccion
   /** Fase 47: ver InsumoImputado. Se congela al crear el borrador. */
   insumosImputados: InsumoImputado[]
+  /** Fase 75h: punto de venta donde se registró el lote (se resuelve solo,
+   * mismo criterio que Recepcion.puntoVentaId). undefined en clientes de
+   * un solo local. */
+  puntoVentaId?: string
 }
 
 // ─── Stock ──────────────────────────────────────────────────────────────────────
@@ -1033,6 +1043,10 @@ export interface Recepcion {
   lineas: LineaRecepcion[]
   notas: string
   createdAt: string
+  /** Fase 75h: punto de venta que recibió la mercadería (se resuelve solo,
+   * vía resolverPuntoVentaId -- mismo criterio ya usado para el stock
+   * que genera esta recepción). undefined en clientes de un solo local. */
+  puntoVentaId?: string
 }
 
 // ─── Transferencia ──────────────────────────────────────────────────────────────

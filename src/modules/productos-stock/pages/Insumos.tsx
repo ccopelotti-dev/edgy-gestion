@@ -53,7 +53,7 @@ const inputClass =
 
 export default function Insumos() {
   const { state, dispatch } = useProductosStock()
-  const { cliente } = useClienteActual()
+  const { cliente, puntosVenta, puntoVentaUsuarioId } = useClienteActual()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Fase 16.2: acceso rápido a Movimientos filtrado por este insumo.
@@ -251,7 +251,12 @@ export default function Insumos() {
       if (!res.ok) return res.error
       dispatch({ type: 'CONFIRM_INSUMO', payload: res.data })
     } else {
-      const res = await crearInsumoConfirmado({ ...data, stock: 0 }, cliente.id)
+      // Fase 75h: mismo criterio que Rubros.tsx -- un insumo nuevo se
+      // estampa con el punto de venta del usuario que lo crea (sin opción
+      // de "compartido", a diferencia de Producto). Sin efecto para
+      // clientes de un solo local (puntosVenta.length < 2).
+      const puntoVentaId = puntosVenta.length >= 2 ? puntoVentaUsuarioId ?? undefined : undefined
+      const res = await crearInsumoConfirmado({ ...data, puntoVentaId, stock: 0 }, cliente.id)
       if (!res.ok) return res.error
       dispatch({ type: 'CONFIRM_INSUMO', payload: res.data })
     }

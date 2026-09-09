@@ -1225,6 +1225,8 @@ function insumoToRow(i: Insumo, clienteId: string) {
     proveedor_id: i.proveedorId || null,
     imagen_url: i.imagenUrl || null,
     codigo_barras: i.codigoBarras || null,
+    // Fase 75h: ver comentario en types/index.ts (Insumo.puntoVentaId).
+    punto_venta_id: i.puntoVentaId || null,
   }
 }
 
@@ -1440,7 +1442,7 @@ function formulaLineaToRow(l: LineaFormula, formulaId: string) {
   }
 }
 
-function produccionToRow(p: Produccion, clienteId: string) {
+function produccionToRow(p: Produccion, clienteId: string, puntoVentaId?: string | null) {
   return {
     id: p.id,
     cliente_id: clienteId,
@@ -1456,6 +1458,8 @@ function produccionToRow(p: Produccion, clienteId: string) {
     // Fase 47: ver EstadoProduccion/InsumoImputado en types/index.ts.
     estado: p.estado,
     insumos_imputados: p.insumosImputados,
+    // Fase 75h: ver comentario en types/index.ts (Produccion.puntoVentaId).
+    punto_venta_id: puntoVentaId ?? null,
   }
 }
 
@@ -1478,7 +1482,7 @@ function movimientoToRow(m: MovimientoStock, clienteId: string) {
   }
 }
 
-function recepcionToRow(r: Recepcion, clienteId: string) {
+function recepcionToRow(r: Recepcion, clienteId: string, puntoVentaId?: string | null) {
   return {
     id: r.id,
     cliente_id: clienteId,
@@ -1487,6 +1491,8 @@ function recepcionToRow(r: Recepcion, clienteId: string) {
     numero_remito: r.numeroRemito,
     estado: r.estado,
     notas: r.notas,
+    // Fase 75h: ver comentario en types/index.ts (Recepcion.puntoVentaId).
+    punto_venta_id: puntoVentaId ?? null,
   }
 }
 
@@ -1860,17 +1866,21 @@ async function syncToSupabase(
       return
 
     case 'REGISTRAR_PRODUCCION': {
+      // Fase 27e-2: null en clientes de un solo local -- sin cambios para
+      // ellos (ver src/lib/puntoVenta.ts). Fase 75h: se resuelve ANTES del
+      // insert de `producciones` (antes se resolvía después) para poder
+      // estampar punto_venta_id en la fila misma, no solo en los
+      // movimientos que genera.
+      const puntoVentaIdProduccion = await resolverPuntoVentaId(clienteId)
+
       // Fase 9 (cierre): la fila de `producciones` es el registro real del
       // lote -- se inserta primero (igual que ADD_FORMULA/ADD_RECEPCION con
       // sus líneas) para que exista antes de que corra cualquier otra
       // política RLS que la referencie más adelante.
       const p = nextState.producciones[nextState.producciones.length - 1]
       if (p) {
-        supabase.from('producciones').insert(produccionToRow(p, clienteId)).then(logErr('alta de producción'))
+        supabase.from('producciones').insert(produccionToRow(p, clienteId, puntoVentaIdProduccion)).then(logErr('alta de producción'))
       }
-      // Fase 27e-2: null en clientes de un solo local -- sin cambios para
-      // ellos (ver src/lib/puntoVenta.ts).
-      const puntoVentaIdProduccion = await resolverPuntoVentaId(clienteId)
 
       // Mismo patrón que CONFIRMAR_RECEPCION: los movimientos nuevos son
       // los que el reducer agregó al final del array.
@@ -1926,12 +1936,15 @@ async function syncToSupabase(
 
     case 'ADD_RECEPCION': {
       const r = nextState.recepciones[nextState.recepciones.length - 1]
+      // Fase 75h: ver comentario en REGISTRAR_PRODUCCION -- se resuelve
+      // antes del insert para poder estampar punto_venta_id en la fila.
+      const puntoVentaIdRecepcionAlta = await resolverPuntoVentaId(clienteId)
       // Mismo fix que ADD_FORMULA: las líneas se insertan recién cuando el
       // INSERT de la recepción confirmó, para que la política RLS de
       // `recepcion_lineas` encuentre la fila padre ya visible.
       supabase
         .from('recepciones')
-        .insert(recepcionToRow(r, clienteId))
+        .insert(recepcionToRow(r, clienteId, puntoVentaIdRecepcionAlta))
         .then((res) => {
           logErr('alta de recepción')(res)
           if (!res.error && r.lineas.length) {
@@ -2324,6 +2337,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     codigoBarras: r.codigo_barras ?? undefined,
     documentos: documentosByInsumo.get(r.id) ?? [],
     createdAt: (r.created_at ?? '').slice(0, 10),
+    puntoVentaId: r.punto_venta_id ?? undefined,
   }))
 
   const rubros: Rubro[] = (rubrosRes.data ?? []).map((r: any) => ({
@@ -2451,6 +2465,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     fichaItemId: r.ficha_item_id ?? undefined,
     estado: (r.estado ?? 'confirmada') as EstadoProduccion,
     insumosImputados: (r.insumos_imputados ?? []) as InsumoImputado[],
+    puntoVentaId: r.punto_venta_id ?? undefined,
   }))
 
   const movimientos: MovimientoStock[] = (movimientosRes.data ?? []).map((r: any) => ({
@@ -2494,6 +2509,7 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     lineas: recepcionLineasByRecepcion.get(r.id) ?? [],
     notas: r.notas ?? '',
     createdAt: (r.created_at ?? '').slice(0, 10),
+    puntoVentaId: r.punto_venta_id ?? undefined,
   }))
 
   const transferenciaLineasByTransferencia = new Map<string, Transferencia['lineas']>()
@@ -3359,9 +3375,14 @@ export async function crearProduccionBorrador(
     insumosImputados,
   }
 
+  // Fase 75h: ver comentario en REGISTRAR_PRODUCCION (syncToSupabase) --
+  // mismo criterio, este es el camino nuevo (borrador confirmado) que usan
+  // Producción y la Ficha de medida a través de registrarProduccionConfirmada.
+  const puntoVentaIdBorrador = await resolverPuntoVentaId(clienteId)
+
   const { error: errProduccion } = await supabase
     .from('producciones')
-    .insert(produccionToRow(nuevaProduccion, clienteId))
+    .insert(produccionToRow(nuevaProduccion, clienteId, puntoVentaIdBorrador))
   if (errProduccion) {
     return { ok: false, error: `No se pudo registrar el lote de producción: ${errProduccion.message}` }
   }
@@ -3824,9 +3845,13 @@ export async function crearRecepcionConfirmada(
     estado: 'borrador',
     createdAt: todayISO(),
   }
+  // Fase 75h: ver comentario en REGISTRAR_PRODUCCION (syncToSupabase) --
+  // mismo criterio, este es el camino confirmado que usa la UI de Recepción.
+  const puntoVentaIdRecepcion = await resolverPuntoVentaId(clienteId)
+
   const { error: errRecepcion } = await supabase
     .from('recepciones')
-    .insert(recepcionToRow(nueva, clienteId))
+    .insert(recepcionToRow(nueva, clienteId, puntoVentaIdRecepcion))
   if (errRecepcion) return { ok: false, error: `No se pudo crear la recepción: ${errRecepcion.message}` }
 
   if (nueva.lineas.length) {
@@ -4329,12 +4354,25 @@ function filtrarPorPuntoVenta(
   const mio = puntoVentaUsuarioId
   const rubros = state.rubros.filter((r) => r.puntoVentaId === mio)
   const rubroIds = new Set(rubros.map((r) => r.id))
+  const productos = state.productos.filter((p) => !p.puntoVentaId || p.puntoVentaId === mio)
+  const productoIds = new Set(productos.map((p) => p.id))
+  // Fase 75h: mismo criterio que productos -- insumos/recepciones/
+  // producciones son "totalmente separados" como Rubro (sin opción
+  // compartida), pero se tolera null para no esconder filas viejas de
+  // antes de esta fase que nunca se backfillearon.
+  const insumos = state.insumos.filter((i) => !i.puntoVentaId || i.puntoVentaId === mio)
 
   return {
     ...state,
     rubros,
     subRubros: state.subRubros.filter((sr) => rubroIds.has(sr.rubroId)),
-    productos: state.productos.filter((p) => !p.puntoVentaId || p.puntoVentaId === mio),
+    productos,
+    insumos,
+    recepciones: state.recepciones.filter((r) => !r.puntoVentaId || r.puntoVentaId === mio),
+    producciones: state.producciones.filter((p) => !p.puntoVentaId || p.puntoVentaId === mio),
+    // Fórmula no tiene puntoVentaId propio -- hereda el del producto que
+    // arma (mismo patrón que subRubros hereda de su Rubro).
+    formulas: state.formulas.filter((f) => productoIds.has(f.productoId)),
     movimientos: state.movimientos.filter((m) => !m.puntoVentaId || m.puntoVentaId === mio),
     transferencias: state.transferencias.filter(
       (t) => t.origenPuntoVentaId === mio || t.destinoPuntoVentaId === mio,
