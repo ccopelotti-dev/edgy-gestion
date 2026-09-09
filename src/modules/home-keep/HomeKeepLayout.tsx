@@ -14,6 +14,7 @@ import {
   TrendingUp,
   CreditCard,
   Wrench,
+  CalendarDays,
 } from 'lucide-react';
 import { AtajoPerfilFamiliar } from '@/components/AtajoPerfilFamiliar';
 
@@ -28,6 +29,10 @@ const BASE = '/m/home_keep';
 
 const tabs: TabDef[] = [
   { to: BASE,                  label: 'Dashboard',    icon: LayoutDashboard, end: true },
+  // Fase 75k: agenda familiar propia (duplicado de la Agenda "de
+  // negocio", que Cónyuge/Hijo tienen bloqueada) -- ver comentario largo
+  // en la migración 0136_fase75k_home_keep_tareas.sql.
+  { to: `${BASE}/agenda`,      label: 'Agenda',       icon: CalendarDays },
   // Fase 70: de dónde sale la plata (aporte de la Charcutería / ingreso
   // fijo familiar) -- antes de Proveedores porque conceptualmente viene
   // primero en el flujo del hogar.

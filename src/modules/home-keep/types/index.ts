@@ -484,3 +484,55 @@ export function calcularSubtotalItem(cantidad: number, precio: number, descuento
 export function generarId(): string {
   return crypto.randomUUID();
 }
+
+// ─── Agenda familiar (Fase 75k) ──────────────────────────────
+// Duplicado deliberado del módulo Agenda (core) -- ver comentario largo
+// en la migración 0136_fase75k_home_keep_tareas.sql. Agenda "de negocio"
+// mezcla tareas de La Charcutería con lo personal en la misma tabla y
+// por eso Cónyuge/Hijo la tienen bloqueada (permisos_rol); esta es una
+// tabla propia (`home_keep_tareas`) con su propia RLS atada al permiso
+// de home_keep, que esos roles ya tienen. Categorías recortadas
+// respecto de CategoriaTarea del módulo Agenda: sin 'trabajo' ni
+// 'replanteo' (conceptos de negocio que no aplican acá).
+
+export type CategoriaTareaHogar = 'personal' | 'escolar' | 'salud' | 'pago' | 'otro';
+export type PrioridadTareaHogar = 'baja' | 'media' | 'alta';
+export type EstadoTareaHogar = 'pendiente' | 'hecho';
+
+export const CATEGORIA_TAREA_HOGAR_LABEL: Record<CategoriaTareaHogar, string> = {
+  personal: 'Personal',
+  escolar: 'Escolar',
+  salud: 'Salud',
+  pago: 'Pago',
+  otro: 'Otro',
+};
+
+export const PRIORIDAD_TAREA_HOGAR_LABEL: Record<PrioridadTareaHogar, string> = {
+  baja: 'Baja',
+  media: 'Media',
+  alta: 'Alta',
+};
+
+export interface TareaHogar {
+  id: string;
+  clienteId: string;
+  /** A quién de la familia le corresponde este evento -- null = evento
+   * compartido, visible para todos (ej. un feriado, un evento familiar).
+   * Se resuelve contra `usuarios_cliente` (mismo criterio que
+   * Ingreso.usuarioClienteId, Fase 71i). */
+  usuarioClienteId?: string;
+  titulo: string;
+  descripcion: string | null;
+  fecha: string; // YYYY-MM-DD
+  horaInicio: string | null;
+  horaFin: string | null;
+  categoria: CategoriaTareaHogar;
+  prioridad: PrioridadTareaHogar;
+  estado: EstadoTareaHogar;
+  /** Tag libre para integraciones automáticas (ej. 'acadeu') -- permite
+   * que un job de sincronización identifique sus propias filas para
+   * actualizarlas o evitar duplicarlas, sin tocar lo cargado a mano.
+   * null/undefined = cargado a mano por alguien de la familia. */
+  origen?: string;
+  createdAt: string;
+}

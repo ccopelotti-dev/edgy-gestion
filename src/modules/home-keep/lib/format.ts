@@ -79,3 +79,8 @@ export function formatCuit(cuit: string): string {
   if (!cuit || cuit.length !== 11) return cuit || '—';
   return `${cuit.slice(0, 2)}-${cuit.slice(2, 10)}-${cuit.slice(10)}`;
 }
+
+// Fase 75k (Agenda familiar): "14:30:00" -> "14:30".
+export function formatHora(hhmmss: string): string {
+  return hhmmss.slice(0, 5);
+}
