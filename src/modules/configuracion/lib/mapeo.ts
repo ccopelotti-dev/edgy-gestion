@@ -38,6 +38,7 @@ export function filaAEmpresa(fila: Record<string, any>): DatosEmpresa {
     sitioWebIconoUrl: fila.sitio_web_icono_url,
     instagramIconoUrl: fila.instagram_icono_url,
     whatsappIconoUrl: fila.whatsapp_icono_url,
+    aislarCatalogoPorPuntoVenta: fila.aislar_catalogo_por_punto_venta ?? false,
   }
 }
 
@@ -87,6 +88,11 @@ export function empresaAFila(cambios: Partial<DatosEmpresa>): Record<string, unk
   if ('sitioWebIconoUrl' in cambios) fila.sitio_web_icono_url = cambios.sitioWebIconoUrl
   if ('instagramIconoUrl' in cambios) fila.instagram_icono_url = cambios.instagramIconoUrl
   if ('whatsappIconoUrl' in cambios) fila.whatsapp_icono_url = cambios.whatsappIconoUrl
+  // Fase 75j: toggle self-service de "catálogo aislado por punto de
+  // venta" -- ver comentario largo en DatosEmpresa.aislarCatalogoPorPuntoVenta.
+  if ('aislarCatalogoPorPuntoVenta' in cambios) {
+    fila.aislar_catalogo_por_punto_venta = cambios.aislarCatalogoPorPuntoVenta
+  }
   return fila
 }
 

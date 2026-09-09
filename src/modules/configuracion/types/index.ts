@@ -100,6 +100,17 @@ export interface DatosEmpresa {
   sitioWebIconoUrl: string | null
   instagramIconoUrl: string | null
   whatsappIconoUrl: string | null
+  // Fase 75j (10/09, a pedido de Carlos): toggle self-service de la
+  // Fase 75i -- antes este flag solo se podía prender por SQL a mano.
+  // true = Rubros/Productos/Insumos/Recepciones/Producciones quedan
+  // totalmente separados entre los puntos de venta de este cliente (sin
+  // opción "compartido"), como pidió Rúa. false (default, la inmensa
+  // mayoría) = catálogo compartido entre todos los locales, el formato
+  // de siempre. Sin efecto en clientes de un solo local. No toca el
+  // reparto de STOCK por sucursal (cantidades, Fase 27e), que es
+  // independiente. Ver filtrarPorPuntoVenta en
+  // src/modules/productos-stock/data/store.tsx.
+  aislarCatalogoPorPuntoVenta: boolean
 }
 
 /**

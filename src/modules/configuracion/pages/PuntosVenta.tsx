@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { useClienteId } from '../data/useClienteId'
 import { usePuntosVenta } from '../data/usePuntosVenta'
+import { useEmpresa } from '../data/useEmpresa'
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { generarSlug, slugValido } from '@/lib/slug'
 import type { PuntoVenta } from '../types'
@@ -63,6 +65,16 @@ export default function PuntosVenta() {
   // Fase 27d-2: necesitamos el slug del CLIENTE para armar el link
   // completo de cada local (`/menu/<slug cliente>/<slug local>`).
   const { cliente } = useClienteActual()
+  // Fase 75j: toggle self-service del flag de Fase 75i (antes solo se
+  // podía prender por SQL a mano).
+  const { empresa, guardando: guardandoAislamiento, guardar: guardarEmpresa } = useEmpresa()
+  const [errorAislamiento, setErrorAislamiento] = useState<string | null>(null)
+
+  async function handleToggleAislamiento(valor: boolean) {
+    setErrorAislamiento(null)
+    const ok = await guardarEmpresa({ aislarCatalogoPorPuntoVenta: valor })
+    if (!ok) setErrorAislamiento('No pudimos guardar. Probá de nuevo -- si sigue fallando, avisame.')
+  }
 
   const [abierto, setAbierto] = useState(false)
   const [alias, setAlias] = useState('')
@@ -495,6 +507,42 @@ export default function PuntosVenta() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Fase 75j: toggle self-service del aislamiento de catálogo entre
+          locales (Fase 75i) -- solo tiene sentido con 2+ puntos de venta
+          cargados, igual criterio que el branding propio de arriba. */}
+      {puntosVenta.length >= 2 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Catálogo por punto de venta</CardTitle>
+            <CardDescription>
+              Por defecto, Rubros, Productos, Insumos, Recepciones y Producciones se comparten
+              entre todos tus locales -- el formato de siempre. Activá esto solo si necesitás que
+              cada local tenga su propio catálogo, totalmente separado de los demás (por ejemplo,
+              un local que vende otro tipo de mercadería).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+              <div>
+                <p className="text-sm font-medium">Aislar catálogo entre locales</p>
+                <p className="text-muted-foreground text-sm">
+                  {empresa?.aislarCatalogoPorPuntoVenta
+                    ? 'Cada local ve y carga su propio catálogo -- no comparten Rubros ni Productos entre sí.'
+                    : 'Todos los locales comparten el mismo catálogo, como siempre.'}
+                </p>
+              </div>
+              <Switch
+                checked={empresa?.aislarCatalogoPorPuntoVenta ?? false}
+                onChange={handleToggleAislamiento}
+                disabled={!empresa || guardandoAislamiento}
+                label="Aislar catálogo entre locales"
+              />
+            </div>
+            {errorAislamiento && <p className="mt-2 text-sm text-red-500">{errorAislamiento}</p>}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Fase 36: branding propio del local (logo/nombre/color) -- para
           clientes multi-marca (ej. Punto Tex / Rúa) donde cada
