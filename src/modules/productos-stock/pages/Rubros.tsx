@@ -90,7 +90,14 @@ export default function Rubros() {
       // Producto.puntoVentaId, que sí admite null). En clientes de un solo
       // local (la inmensa mayoría) puntoVentaUsuarioId es null y este
       // campo directamente no se usa -- sin cambio de comportamiento.
-      const puntoVentaId = puntosVenta.length >= 2 ? puntoVentaUsuarioId ?? undefined : undefined
+      // Fase 75i: además, solo se estampa si el cliente tiene prendido
+      // el flag de catálogo aislado -- si no, queda compartido entre
+      // locales como el formato de siempre (ver Cliente.aislar_catalogo_
+      // por_punto_venta en types/index.ts).
+      const puntoVentaId =
+        puntosVenta.length >= 2 && cliente.aislar_catalogo_por_punto_venta
+          ? puntoVentaUsuarioId ?? undefined
+          : undefined
       const res = await crearRubroConfirmado({ ...data, puntoVentaId }, cliente.id)
       if (!res.ok) return res.error
       dispatch({ type: 'CONFIRM_RUBRO', payload: res.data })

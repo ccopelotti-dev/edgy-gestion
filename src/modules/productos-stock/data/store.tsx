@@ -4348,8 +4348,14 @@ function filtrarPorPuntoVenta(
   state: ProductosStockState,
   puntosVenta: { id: string }[],
   puntoVentaUsuarioId: string | null,
+  aislarCatalogoPorPuntoVenta: boolean,
 ): ProductosStockState {
-  if (puntosVenta.length < 2 || !puntoVentaUsuarioId) return state
+  // Fase 75i: la separación total es "opt-in" por cliente -- sin el
+  // flag prendido, cualquier cliente con 2+ locales sigue viendo el
+  // catálogo compartido (comportamiento anterior a la Fase 75f, el que
+  // corresponde a la inmensa mayoría). Ver comentario en
+  // types/index.ts (Cliente.aislar_catalogo_por_punto_venta).
+  if (!aislarCatalogoPorPuntoVenta || puntosVenta.length < 2 || !puntoVentaUsuarioId) return state
 
   const mio = puntoVentaUsuarioId
   const rubros = state.rubros.filter((r) => r.puntoVentaId === mio)
@@ -4423,8 +4429,14 @@ export function ProductosStockProvider({ children }: { children: ReactNode }) {
   }, [cliente?.id])
 
   const stateFiltrado = useMemo(
-    () => filtrarPorPuntoVenta(state, puntosVenta, puntoVentaUsuarioId),
-    [state, puntosVenta, puntoVentaUsuarioId],
+    () =>
+      filtrarPorPuntoVenta(
+        state,
+        puntosVenta,
+        puntoVentaUsuarioId,
+        cliente?.aislar_catalogo_por_punto_venta ?? false,
+      ),
+    [state, puntosVenta, puntoVentaUsuarioId, cliente?.aislar_catalogo_por_punto_venta],
   )
 
   const value = useMemo(() => ({ state: stateFiltrado, dispatch }), [stateFiltrado, dispatch])

@@ -90,6 +90,18 @@ export interface Cliente {
   sitio_web_icono_url: string | null
   instagram_icono_url: string | null
   whatsapp_icono_url: string | null
+  // Fase 75i (09/09, a pedido de Carlos): la separación total de
+  // Rubros/Productos/Insumos/Recepciones/Producciones por punto de
+  // venta (Fase 75f-h, pedido puntual de Rúa) había quedado activa por
+  // defecto para cualquier cliente con 2+ locales. Este flag la vuelve
+  // "opt-in" -- default false = catálogo compartido entre locales (el
+  // formato de siempre, el que corresponde a la inmensa mayoría de
+  // clientes con sucursales). Se prende a mano solo en clientes que de
+  // verdad lo pidan (hoy, solo Punto Tex). No afecta el reparto de
+  // STOCK por sucursal (stock_por_punto_venta, Fase 27e) -- ese
+  // mecanismo es independiente. Ver filtrarPorPuntoVenta en
+  // src/modules/productos-stock/data/store.tsx.
+  aislar_catalogo_por_punto_venta: boolean
   created_at: string
 }
 

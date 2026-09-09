@@ -255,7 +255,12 @@ export default function Insumos() {
       // estampa con el punto de venta del usuario que lo crea (sin opción
       // de "compartido", a diferencia de Producto). Sin efecto para
       // clientes de un solo local (puntosVenta.length < 2).
-      const puntoVentaId = puntosVenta.length >= 2 ? puntoVentaUsuarioId ?? undefined : undefined
+      // Fase 75i: y solo si el cliente tiene prendido el flag de catálogo
+      // aislado -- si no, sigue compartido como el formato de siempre.
+      const puntoVentaId =
+        puntosVenta.length >= 2 && cliente.aislar_catalogo_por_punto_venta
+          ? puntoVentaUsuarioId ?? undefined
+          : undefined
       const res = await crearInsumoConfirmado({ ...data, puntoVentaId, stock: 0 }, cliente.id)
       if (!res.ok) return res.error
       dispatch({ type: 'CONFIRM_INSUMO', payload: res.data })

@@ -346,7 +346,11 @@ export default function Productos() {
         }}
         plantillasGarantia={state.plantillasGarantia}
         puntosVenta={puntosVenta}
-        puntoVentaUsuarioId={puntoVentaUsuarioId ?? undefined}
+        // Fase 75i: el defaulting a "mi propio local" (en vez de
+        // compartido) solo corre si el cliente tiene prendido el flag de
+        // catálogo aislado -- si no, un producto nuevo sigue naciendo
+        // compartido (puntoVentaId null) como el formato de siempre.
+        puntoVentaUsuarioId={cliente?.aislar_catalogo_por_punto_venta ? puntoVentaUsuarioId ?? undefined : undefined}
         formulas={state.formulas}
         onIrAFormula={(productoId) => {
           setDialogOpen(false)
