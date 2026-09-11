@@ -160,28 +160,46 @@ export function useRegistrosInstitucion(vinculoId?: string) {
   const [registros, setRegistros] = useState<RegistroInstitucion[]>([]);
   const [cargando, setCargando] = useState(true);
 
-  useEffect(() => {
+  const cargar = useCallback(async () => {
     if (!vinculoId) {
       setRegistros([]);
       setCargando(false);
       return;
     }
-    let activo = true;
     setCargando(true);
-    supabase
+    const { data } = await supabase
       .from('institucion_registros')
       .select('*')
       .eq('vinculo_id', vinculoId)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        if (!activo) return;
-        setRegistros((data ?? []).map(filaARegistro));
-        setCargando(false);
-      });
-    return () => {
-      activo = false;
-    };
+      .order('created_at', { ascending: false });
+    setRegistros((data ?? []).map(filaARegistro));
+    setCargando(false);
   }, [vinculoId]);
 
-  return { registros, cargando };
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+
+  // Carga manual (Fase 75p) -- `origen` queda undefined/null a propósito:
+  // se reserva para cuando el sincronizador de Acadeu escriba acá, así
+  // se puede distinguir de un vistazo qué se cargó a mano vs. solo.
+  const crear = useCallback(
+    async (data: { vinculoId: string; tipoRegistro: TipoRegistroInstitucion; periodo?: string; texto: string }) => {
+      const { error } = await supabase.from('institucion_registros').insert({
+        vinculo_id: data.vinculoId,
+        tipo_registro: data.tipoRegistro,
+        periodo: data.periodo || null,
+        contenido: { texto: data.texto },
+      });
+      if (error) {
+        console.error('useRegistrosInstitucion: error insertando', error);
+        return false;
+      }
+      await cargar();
+      return true;
+    },
+    [cargar],
+  );
+
+  return { registros, cargando, crear };
 }

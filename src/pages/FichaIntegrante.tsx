@@ -40,7 +40,10 @@ import {
   SECCIONES_POR_TIPO,
   type TipoInstitucion,
   type VinculoInstitucional,
+  type TipoRegistroInstitucion,
+  type RegistroInstitucion,
 } from '@/hooks/useInstituciones'
+import { useCuentasDigitales, TIPO_CUENTA_DIGITAL_LABEL, type TipoCuentaDigital } from '@/hooks/useCuentasDigitales'
 
 // Misma paleta que ya usaba Perfil Familiar para el selector de color.
 const COLORES_PERFIL = [
@@ -50,21 +53,38 @@ const COLORES_PERFIL = [
 
 function SelectorColor({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-1.5">
       {COLORES_PERFIL.map((c) => (
         <button
           key={c}
           type="button"
           onClick={() => onChange(c)}
           aria-label={`Elegir color ${c}`}
-          className={`h-7 w-7 rounded-full transition-transform ${
-            value === c ? 'ring-2 ring-offset-2 ring-gray-900 scale-105' : ''
+          className={`h-4 w-4 rounded-full transition-transform ${
+            value === c ? 'ring-2 ring-offset-1 ring-gray-900 scale-110' : ''
           }`}
           style={{ backgroundColor: c }}
         />
       ))}
     </div>
   )
+}
+
+// Fase 75p (11/09, a pedido de Carlos): un integrante menor de 18 no
+// puede legalmente tener ingresos propios, vehículos ni inmuebles a su
+// nombre -- se calcula acá para decidir qué mostrar en la tarjeta de
+// abajo (Patrimonio vs. Cuentas). Sin fecha de nacimiento cargada se
+// asume adulto (no ocultar de más por falta de un dato opcional).
+function calcularEdad(fechaNacimiento: string | null | undefined): number | null {
+  if (!fechaNacimiento) return null
+  const hoy = new Date()
+  const nacimiento = new Date(fechaNacimiento + 'T00:00:00')
+  let edad = hoy.getFullYear() - nacimiento.getFullYear()
+  const noCumplioAunEsteAnio =
+    hoy.getMonth() < nacimiento.getMonth() ||
+    (hoy.getMonth() === nacimiento.getMonth() && hoy.getDate() < nacimiento.getDate())
+  if (noCumplioAunEsteAnio) edad -= 1
+  return edad
 }
 
 function iniciales(nombre: string | null): string {
@@ -144,8 +164,82 @@ function NuevoVinculoForm({
   )
 }
 
+// Fase 75p: cada tarjeta (Boletín, Convivencia, etc.) admite carga manual
+// -- "+Cargar" abre un form chiquito (período opcional + un texto libre)
+// que inserta en institucion_registros. Cuando el sincronizador de
+// Acadeu llegue a automatizar esto (Fase 75o dejó la exploración de esas
+// páginas como pendiente), va a insertar en la misma tabla -- esta
+// tarjeta no necesita cambiar.
+function TarjetaRegistro({
+  vinculo,
+  tipoRegistro,
+  registros,
+  cargando,
+  crear,
+}: {
+  vinculo: VinculoInstitucional
+  tipoRegistro: TipoRegistroInstitucion
+  registros: RegistroInstitucion[]
+  cargando: boolean
+  crear: (data: { vinculoId: string; tipoRegistro: TipoRegistroInstitucion; periodo?: string; texto: string }) => Promise<boolean>
+}) {
+  const [mostrarForm, setMostrarForm] = useState(false)
+  const [periodo, setPeriodo] = useState('')
+  const [texto, setTexto] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  async function guardar() {
+    if (!texto.trim()) return
+    setGuardando(true)
+    const ok = await crear({ vinculoId: vinculo.id, tipoRegistro, periodo: periodo.trim() || undefined, texto: texto.trim() })
+    setGuardando(false)
+    if (ok) {
+      setMostrarForm(false)
+      setPeriodo('')
+      setTexto('')
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-gray-100 p-2.5">
+      <div className="flex items-center justify-between gap-1">
+        <p className="text-[11px] font-medium text-gray-600">{TIPO_REGISTRO_LABEL[tipoRegistro]}</p>
+        {!mostrarForm && (
+          <button type="button" onClick={() => setMostrarForm(true)} className="text-[11px] text-gray-400 hover:text-gray-700" title="Cargar a mano">
+            + Cargar
+          </button>
+        )}
+      </div>
+      {cargando ? (
+        <p className="mt-1 text-[11px] text-gray-400">Cargando...</p>
+      ) : registros.length === 0 && !mostrarForm ? (
+        <p className="mt-1 text-[11px] text-gray-400">
+          {vinculo.proveedor === 'acadeu' ? 'Todavía no lo sincroniza Acadeu.' : 'Sin datos cargados.'}
+        </p>
+      ) : !mostrarForm ? (
+        <p className="mt-1 text-[11px] text-gray-700">{registros.length} registro(s) · último {formatDate(registros[0].createdAt.slice(0, 10))}</p>
+      ) : null}
+
+      {mostrarForm && (
+        <div className="mt-2 space-y-1.5">
+          <Input placeholder="Período (opcional, ej. 2026 T2)" value={periodo} onChange={(e) => setPeriodo(e.target.value)} className="h-7 text-xs" />
+          <Input placeholder="Detalle" value={texto} onChange={(e) => setTexto(e.target.value)} className="h-7 text-xs" />
+          <div className="flex gap-1.5">
+            <Button size="sm" className="h-6 px-2 text-[11px]" onClick={guardar} disabled={guardando || !texto.trim()}>
+              Guardar
+            </Button>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => setMostrarForm(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RegistrosDelVinculo({ vinculo }: { vinculo: VinculoInstitucional }) {
-  const { registros, cargando } = useRegistrosInstitucion(vinculo.id)
+  const { registros, cargando, crear } = useRegistrosInstitucion(vinculo.id)
   const secciones = SECCIONES_POR_TIPO[vinculo.tipo]
 
   if (secciones.length === 0) {
@@ -154,23 +248,16 @@ function RegistrosDelVinculo({ vinculo }: { vinculo: VinculoInstitucional }) {
 
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      {secciones.map((tipoRegistro) => {
-        const delTipo = registros.filter((r) => r.tipoRegistro === tipoRegistro)
-        return (
-          <div key={tipoRegistro} className="rounded-md border border-gray-100 p-2.5">
-            <p className="text-[11px] font-medium text-gray-600">{TIPO_REGISTRO_LABEL[tipoRegistro]}</p>
-            {cargando ? (
-              <p className="mt-1 text-[11px] text-gray-400">Cargando...</p>
-            ) : delTipo.length === 0 ? (
-              <p className="mt-1 text-[11px] text-gray-400">
-                {vinculo.proveedor === 'acadeu' ? 'Todavía no lo sincroniza Acadeu.' : 'Sin datos cargados.'}
-              </p>
-            ) : (
-              <p className="mt-1 text-[11px] text-gray-700">{delTipo.length} registro(s) · último {formatDate(delTipo[0].createdAt.slice(0, 10))}</p>
-            )}
-          </div>
-        )
-      })}
+      {secciones.map((tipoRegistro) => (
+        <TarjetaRegistro
+          key={tipoRegistro}
+          vinculo={vinculo}
+          tipoRegistro={tipoRegistro}
+          registros={registros.filter((r) => r.tipoRegistro === tipoRegistro)}
+          cargando={cargando}
+          crear={crear}
+        />
+      ))}
     </div>
   )
 }
@@ -240,6 +327,127 @@ function SeccionInstituciones({ clienteId, usuarioClienteId }: { clienteId: stri
             </Card>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Cuentas digitales (Fase 75p, solo para menores) ────────────────
+
+function NuevaCuentaForm({
+  clienteId,
+  usuarioClienteId,
+  puedeMercadopago,
+  crear,
+  onCreado,
+  onCancelar,
+}: {
+  clienteId: string
+  usuarioClienteId: string
+  puedeMercadopago: boolean
+  crear: ReturnType<typeof useCuentasDigitales>['crear']
+  onCreado: () => void
+  onCancelar: () => void
+}) {
+  const [tipo, setTipo] = useState<TipoCuentaDigital>('email')
+  const [valor, setValor] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const tiposDisponibles = (Object.keys(TIPO_CUENTA_DIGITAL_LABEL) as TipoCuentaDigital[]).filter(
+    (t) => t !== 'mercadopago' || puedeMercadopago,
+  )
+
+  async function guardar() {
+    if (!valor.trim()) return
+    setGuardando(true)
+    const ok = await crear({ clienteId, usuarioClienteId, tipo, valor: valor.trim() })
+    setGuardando(false)
+    if (ok) onCreado()
+  }
+
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs text-gray-500">Tipo</label>
+          <Select value={tipo} onValueChange={(v) => setTipo(v as TipoCuentaDigital)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {tiposDisponibles.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {TIPO_CUENTA_DIGITAL_LABEL[t]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-gray-500">{tipo === 'email' ? 'Dirección de mail' : 'Dato de la cuenta'}</label>
+          <Input placeholder={tipo === 'email' ? 'nombre@mail.com' : 'Ej. alias o usuario'} value={valor} onChange={(e) => setValor(e.target.value)} />
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={guardar} disabled={guardando || !valor.trim()}>
+          {guardando ? 'Guardando...' : 'Guardar'}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancelar}>
+          Cancelar
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+function SeccionCuentasDigitales({ clienteId, usuarioClienteId, edad }: { clienteId: string; usuarioClienteId: string; edad: number | null }) {
+  const { cuentas, cargando, crear, eliminar } = useCuentasDigitales(usuarioClienteId)
+  const [mostrarForm, setMostrarForm] = useState(false)
+  // Política de MercadoPago Argentina: cuenta propia a partir de los 13
+  // (con autorización de un tutor) -- sin fecha de nacimiento cargada,
+  // no se ofrece la opción (mejor pedir el dato que asumir de más).
+  const puedeMercadopago = edad != null && edad >= 13
+
+  return (
+    <div className="space-y-2 border-t border-gray-100 pt-3">
+      <div className="flex items-center justify-between">
+        <label className="text-xs text-gray-500">Cuentas</label>
+        {!mostrarForm && (
+          <Button variant="outline" size="sm" onClick={() => setMostrarForm(true)}>
+            + Agregar cuenta
+          </Button>
+        )}
+      </div>
+
+      {mostrarForm && (
+        <NuevaCuentaForm
+          clienteId={clienteId}
+          usuarioClienteId={usuarioClienteId}
+          puedeMercadopago={puedeMercadopago}
+          crear={crear}
+          onCreado={() => setMostrarForm(false)}
+          onCancelar={() => setMostrarForm(false)}
+        />
+      )}
+
+      {cargando ? (
+        <p className="text-xs text-gray-400">Cargando...</p>
+      ) : cuentas.length === 0 ? (
+        <p className="text-xs text-gray-400">Todavía no tiene ninguna cuenta cargada.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {cuentas.map((c) => (
+            <li key={c.id} className="flex items-center justify-between rounded-md bg-gray-50 px-2.5 py-1.5 text-xs">
+              <div>
+                <span className="font-medium text-gray-900">{TIPO_CUENTA_DIGITAL_LABEL[c.tipo]}</span>
+                <span className="text-gray-500"> · {c.valor}</span>
+              </div>
+              <button type="button" onClick={() => eliminar(c.id)} className="text-gray-400 hover:text-red-600" title="Eliminar">
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
@@ -662,6 +870,12 @@ export default function FichaIntegrante() {
     setUsuario(data as UsuarioCliente)
   }
 
+  // Fase 75p: se calcula sobre el dato YA guardado (usuario.fecha_nacimiento),
+  // no sobre el borrador del formulario de arriba -- evita que la tarjeta
+  // de abajo cambie de forma mientras se está tipeando una fecha nueva.
+  const edad = calcularEdad(usuario?.fecha_nacimiento)
+  const esMenor = edad != null && edad < 18
+
   if (cargando) {
     return <p className="p-6 text-sm text-gray-400">Cargando...</p>
   }
@@ -705,7 +919,12 @@ export default function FichaIntegrante() {
       </div>
 
       <Card className="space-y-3 p-4">
-        <h2 className="text-sm font-semibold text-gray-900">Datos personales</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-900">Datos personales</h2>
+          <Button size="sm" onClick={guardar} disabled={guardando}>
+            {guardando ? 'Guardando...' : 'Guardar cambios'}
+          </Button>
+        </div>
         <div className="space-y-1">
           <label className="text-xs text-gray-500">Nombre y apellido</label>
           <Input value={nombre} onChange={(e) => setNombre(e.target.value)} />
@@ -725,9 +944,6 @@ export default function FichaIntegrante() {
           <SelectorColor value={color} onChange={setColor} />
         </div>
         {error && <p className="text-sm text-red-500">{error}</p>}
-        <Button onClick={guardar} disabled={guardando}>
-          {guardando ? 'Guardando...' : 'Guardar datos personales'}
-        </Button>
       </Card>
 
       <Card className="p-4">
@@ -735,8 +951,11 @@ export default function FichaIntegrante() {
       </Card>
 
       <Card className="space-y-4 p-4">
-        <h2 className="text-sm font-semibold text-gray-900">Patrimonio</h2>
+        <h2 className="text-sm font-semibold text-gray-900">{esMenor ? 'Cuentas' : 'Patrimonio'}</h2>
 
+        {esMenor && <SeccionCuentasDigitales clienteId={usuario.cliente_id} usuarioClienteId={usuario.id} edad={edad} />}
+
+        {!esMenor && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-500">Ingresos que aporta</label>
@@ -767,6 +986,7 @@ export default function FichaIntegrante() {
             </ul>
           )}
         </div>
+        )}
 
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
@@ -800,6 +1020,7 @@ export default function FichaIntegrante() {
           )}
         </div>
 
+        {!esMenor && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-500">Vehículos</label>
@@ -832,7 +1053,9 @@ export default function FichaIntegrante() {
             </ul>
           )}
         </div>
+        )}
 
+        {!esMenor && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-500">Inmuebles</label>
@@ -863,6 +1086,7 @@ export default function FichaIntegrante() {
             </ul>
           )}
         </div>
+        )}
       </Card>
 
       <IngresoDialog
