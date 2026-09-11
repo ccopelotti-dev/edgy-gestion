@@ -1,4 +1,5 @@
 import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
+import { normalizarTelefonoArgentina } from './_lib/telefono.js'
 
 // Fase 75l (09/09, a pedido de Carlos) -- sincronizador del agente
 // Acadeu (notificaciones de colegio). El workflow n8n "Acadeu - Prueba
@@ -17,11 +18,14 @@ import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
 // lectura/escritura en Supabase (comparar contra el último estado,
 // upsert, insertar en la Agenda familiar) vive acá.
 //
-// Todavía NO envía WhatsApp -- eso queda pendiente de que Carlos defina
-// el número/instancia dedicado para este canal (lo pidió aparte, "más
-// limpio" que reusar el de La Charcutería). Esta función devuelve
-// `novedades` con el texto ya armado, listo para que un paso siguiente
-// de n8n (o una futura versión de este mismo endpoint) lo mande.
+// Fase 75m (11/09) -- ya manda WhatsApp real, por el mismo criterio que
+// enviar-documento-whatsapp.js (Fase 50d): se llama directo a Evolution
+// API desde acá, sin volver a pasar por n8n. Usa el canal DEDICADO de
+// Home Keep (`clientes_agente_canales`, canal='home_keep' -- instancia
+// Evolution "homekeep", chip nuevo, separado a propósito del canal de
+// Ventas de Punto Tex). Cada novedad se manda al WhatsApp del hijo
+// identificado + al del adulto configurado (`numero_adulto` -- durante
+// la prueba, Carlos, que es quien recibe los mensajes por ahora).
 
 // Fase 75k: mismas categorías que home_keep_tareas (types/index.ts,
 // CategoriaTareaHogar) -- 'escolar' es justo la pensada para esto.
@@ -109,12 +113,47 @@ export default async (req) => {
 
   const { data: integrantes, error: errIntegrantes } = await supabaseAdmin
     .from('usuarios_cliente')
-    .select('id, nombre')
+    .select('id, nombre, telefono')
     .eq('cliente_id', agente.clienteId)
 
   if (errIntegrantes) {
     console.error('acadeu-sincronizar: error trayendo integrantes', errIntegrantes)
     return new Response(JSON.stringify({ ok: false, error: 'No se pudo resolver la familia' }), { status: 500 })
+  }
+
+  // Canal de WhatsApp dedicado (Fase 75m) -- si todavía no está
+  // configurado (o está desactivado), seguimos detectando y cargando en
+  // la Agenda familiar igual, pero sin intentar mandar nada.
+  const { data: canal, error: errCanal } = await supabaseAdmin
+    .from('clientes_agente_canales')
+    .select('evolution_instance_nombre, evolution_instance_apikey, numero_adulto, activo')
+    .eq('cliente_id', agente.clienteId)
+    .eq('canal', 'home_keep')
+    .maybeSingle()
+
+  if (errCanal) {
+    console.error('acadeu-sincronizar: error trayendo el canal de WhatsApp', errCanal)
+  }
+  const canalListo = Boolean(canal?.activo && canal?.evolution_instance_nombre && canal?.evolution_instance_apikey)
+
+  async function mandarWhatsapp(numeroRaw, texto) {
+    const numero = normalizarTelefonoArgentina(numeroRaw)
+    if (!numero || numero.length < 12) return { numero: numeroRaw, ok: false, motivo: 'numero_invalido' }
+    try {
+      const res = await fetch(`https://evolution.edgysistemas.tech/message/sendText/${canal.evolution_instance_nombre}`, {
+        method: 'POST',
+        headers: { apikey: canal.evolution_instance_apikey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number: numero, text: texto }),
+      })
+      if (!res.ok) {
+        console.error('acadeu-sincronizar: Evolution respondió error', res.status, await res.text())
+        return { numero, ok: false, motivo: `evolution_${res.status}` }
+      }
+      return { numero, ok: true }
+    } catch (e) {
+      console.error('acadeu-sincronizar: error de red contra Evolution', e)
+      return { numero, ok: false, motivo: 'error_red' }
+    }
   }
 
   const { data: estadoPrevio, error: errEstado } = await supabaseAdmin
@@ -166,10 +205,33 @@ export default async (req) => {
       console.error('acadeu-sincronizar: error insertando en Agenda familiar para', integrante.nombre, errTarea)
     }
 
+    const mensaje = `📚 Acadeu -- ${integrante.nombre}\n${bloque.texto}`
+    let envios
+    if (canalListo) {
+      // Al hijo (si tiene teléfono cargado) + siempre al adulto -- sin
+      // duplicar si el número normalizado coincide (ej. pruebas con un
+      // solo teléfono real, o si algún día un "hijo" mayor de edad usa
+      // el mismo número que el adulto).
+      const destinatarios = new Map()
+      if (integrante.telefono) {
+        const n = normalizarTelefonoArgentina(integrante.telefono)
+        if (n) destinatarios.set(n, integrante.telefono)
+      }
+      if (canal.numero_adulto) {
+        const n = normalizarTelefonoArgentina(canal.numero_adulto)
+        if (n) destinatarios.set(n, canal.numero_adulto)
+      }
+      envios = []
+      for (const numeroRaw of destinatarios.values()) {
+        envios.push(await mandarWhatsapp(numeroRaw, mensaje))
+      }
+    }
+
     novedades.push({
       usuarioClienteId: integrante.id,
       nombre: integrante.nombre,
       mensaje: `${integrante.nombre}: ${bloque.texto}`,
+      whatsapp: canalListo ? envios : 'canal_no_configurado',
     })
   }
 

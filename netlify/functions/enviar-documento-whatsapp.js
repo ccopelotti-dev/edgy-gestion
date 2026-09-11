@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { normalizarTelefonoArgentina } from './_lib/telefono.js'
 
 // Fase 50d (28/08) -- el agente de WhatsApp como CANAL DE SALIDA: manda
 // un PDF ya armado del lado del panel (Presupuesto, Ficha, Comprobante,
@@ -52,19 +53,6 @@ import { createClient } from '@supabase/supabase-js'
 // haya sido exitoso; si el insert falla no se corta la respuesta al
 // panel (el documento ya salió, perder el log de correlación es un mal
 // menor frente a hacerle creer al operador que el envío falló).
-
-function normalizarTelefonoArgentina(telefonoRaw) {
-  let d = String(telefonoRaw || '').replace(/\D/g, '')
-  if (!d) return ''
-  if (d.startsWith('0')) d = d.slice(1)
-  // WhatsApp exige el "9" después del 54 para celulares de Argentina,
-  // aunque para marcar normalmente no se use -- si ya viene con 549 se
-  // deja igual, si viene con 54 (sin 9) se inserta, y si no tiene
-  // código de país se asume Argentina + celular.
-  if (d.startsWith('549')) return d
-  if (d.startsWith('54')) return '549' + d.slice(2)
-  return '549' + d
-}
 
 export default async (req) => {
   if (req.method !== 'POST') {
