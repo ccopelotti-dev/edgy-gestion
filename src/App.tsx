@@ -4,6 +4,7 @@ import { PanelLayout } from '@/components/PanelLayout'
 import { RutaStaff } from '@/components/RutaStaff'
 import { DashboardHome } from '@/pages/DashboardHome'
 import PerfilFamiliar from '@/pages/PerfilFamiliar'
+import FichaIntegrante from '@/pages/FichaIntegrante'
 import { ModuloRoute } from '@/pages/ModuloRoute'
 import { NuevoProyecto } from '@/pages/onboarding/NuevoProyecto'
 import { ClientesListado } from '@/pages/panel/ClientesListado'
@@ -60,6 +61,11 @@ export default function App() {
             DashboardLayout para conservar header/sidebar. */}
         <Route path="/perfil-familiar" element={<DashboardLayout />}>
           <Route index element={<PerfilFamiliar />} />
+          {/* Fase 75o: Ficha de Integrante -- reemplaza al modal
+              EditarFamiliarDialog que vivía acá mismo (Vehículos/
+              Tarjetas/Inmuebles/Ingresos + Instituciones ya no entran
+              en un dialog angosto). */}
+          <Route path=":usuarioClienteId" element={<FichaIntegrante />} />
         </Route>
        <Route path="/m/:slug/*" element={<DashboardLayout />}>
   <Route index element={<ModuloRoute />} />

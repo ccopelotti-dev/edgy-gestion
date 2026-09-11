@@ -51,14 +51,16 @@ const ICONO_POR_TIPO = {
 
 // El texto de "nueva evaluación cargada" no menciona el nombre del
 // chico, solo el curso entre paréntesis al final (ej. "...en
-// Construcción de la Ciudadanía (1° III)"). Mapeo confirmado por
-// Carlos el 11/09 -- si algún día cambia de división hay que actualizar
-// esto a mano.
-const CURSO_A_NOMBRE_PILA = {
-  '1° III': 'Milagros',
-  '6° Economía y Administración': 'Mateo',
-  '4° B Prim': 'Martina',
-}
+// Construcción de la Ciudadanía (1° III)").
+//
+// Fase 75o (11/09, a pedido de Carlos): ANTES esto era un mapeo
+// hardcodeado acá mismo (CURSO_A_NOMBRE_PILA) -- "si algún día cambia
+// de división hay que actualizar esto a mano" quedó anotado como
+// pendiente en la Fase 75n y duró menos de un día. Ahora el curso vive
+// en edgy_gestion.vinculos_institucionales (tabla nueva, alta desde la
+// ficha de cada integrante en Perfil Familiar) y se resuelve acá con
+// una consulta -- cambiar de división es editar un campo, no pedir un
+// deploy.
 
 function clasificarTipo(texto) {
   const t = texto.toLowerCase()
@@ -87,16 +89,15 @@ function encontrarIntegrantePorNombre(texto, integrantes) {
 }
 
 // "Nueva evaluación cargada" no trae el nombre -- el curso va entre
-// paréntesis al final del texto.
-function encontrarIntegrantePorCurso(texto, integrantes) {
+// paréntesis al final del texto. `cursoAIntegranteId` es el mapa armado
+// en caliente desde vinculos_institucionales (ver más abajo).
+function encontrarIntegrantePorCurso(texto, integrantes, cursoAIntegranteId) {
   const m = texto.match(/\(([^)]+)\)\s*$/)
   if (!m) return null
   const curso = m[1].trim()
-  const nombrePila = CURSO_A_NOMBRE_PILA[curso]
-  if (!nombrePila) return null
-  return (
-    integrantes.find((i) => primerNombre(i.nombre).toLowerCase() === nombrePila.toLowerCase()) || null
-  )
+  const integranteId = cursoAIntegranteId.get(curso)
+  if (!integranteId) return null
+  return integrantes.find((i) => i.id === integranteId) || null
 }
 
 export default async (req) => {
@@ -141,6 +142,23 @@ export default async (req) => {
     console.error('acadeu-sincronizar: error trayendo integrantes', errIntegrantes)
     return new Response(JSON.stringify({ ok: false, error: 'No se pudo resolver la familia' }), { status: 500 })
   }
+
+  // Fase 75o: curso -> usuario_cliente_id, para "nueva evaluación
+  // cargada" (que solo trae el curso, no el nombre) -- reemplaza el
+  // mapeo hardcodeado que tenía la Fase 75n.
+  const { data: vinculos, error: errVinculos } = await supabaseAdmin
+    .from('vinculos_institucionales')
+    .select('usuario_cliente_id, curso')
+    .eq('cliente_id', agente.clienteId)
+    .eq('proveedor', 'acadeu')
+    .eq('activo', true)
+
+  if (errVinculos) {
+    console.error('acadeu-sincronizar: error trayendo vinculos_institucionales', errVinculos)
+  }
+  const cursoAIntegranteId = new Map(
+    (vinculos || []).filter((v) => v.curso).map((v) => [v.curso, v.usuario_cliente_id]),
+  )
 
   const { data: canal, error: errCanal } = await supabaseAdmin
     .from('clientes_agente_canales')
@@ -200,7 +218,7 @@ export default async (req) => {
 
   for (const n of nuevas) {
     const tipo = clasificarTipo(n.texto)
-    const integrante = encontrarIntegrantePorNombre(n.texto, integrantes || []) || encontrarIntegrantePorCurso(n.texto, integrantes || [])
+    const integrante = encontrarIntegrantePorNombre(n.texto, integrantes || []) || encontrarIntegrantePorCurso(n.texto, integrantes || [], cursoAIntegranteId)
 
     if (!integrante) {
       sinIdentificar.push({ id: n.id, texto: n.texto })
