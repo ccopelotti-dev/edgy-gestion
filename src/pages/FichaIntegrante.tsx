@@ -14,7 +14,7 @@
 // Ingresos/Tarjetas/Vehículos/Inmuebles sigue insertando directo en
 // Supabase, no pasa por el store/reducer de Home Keep.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ChangeEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -35,6 +35,7 @@ import { TIPO_INGRESO_LABEL, generarId, type Ingreso, type TarjetaCredito, type 
 import {
   useVinculosInstitucionales,
   useRegistrosInstitucion,
+  useAdjuntosRegistro,
   TIPO_INSTITUCION_LABEL,
   TIPO_REGISTRO_LABEL,
   SECCIONES_POR_TIPO,
@@ -42,6 +43,7 @@ import {
   type VinculoInstitucional,
   type TipoRegistroInstitucion,
   type RegistroInstitucion,
+  type EntradaHistorial,
 } from '@/hooks/useInstituciones'
 import { useCuentasDigitales, TIPO_CUENTA_DIGITAL_LABEL, type TipoCuentaDigital } from '@/hooks/useCuentasDigitales'
 
@@ -164,12 +166,122 @@ function NuevoVinculoForm({
   )
 }
 
-// Fase 75p: cada tarjeta (Boletín, Convivencia, etc.) admite carga manual
-// -- "+Cargar" abre un form chiquito (período opcional + un texto libre)
-// que inserta en institucion_registros. Cuando el sincronizador de
-// Acadeu llegue a automatizar esto (Fase 75o dejó la exploración de esas
-// páginas como pendiente), va a insertar en la misma tabla -- esta
-// tarjeta no necesita cambiar.
+// Fase 75r: resumen legible del último estado, según el tipo de
+// registro -- reemplaza el "N registro(s)" genérico de la Fase 75p.
+function ResumenEstado({ tipoRegistro, estado }: { tipoRegistro: TipoRegistroInstitucion; estado: any }) {
+  if (tipoRegistro === 'boletin') {
+    const asignaturas = (estado?.asignaturas ?? []) as { nombre: string; valores: Record<string, string> }[]
+    if (asignaturas.length === 0) return <p className="text-gray-400">Sin datos.</p>
+    return (
+      <ul className="space-y-0.5">
+        {asignaturas.slice(0, 4).map((a) => {
+          const valores = Object.values(a.valores).filter(Boolean)
+          return (
+            <li key={a.nombre} className="truncate">
+              <span className="text-gray-900">{a.nombre}</span>
+              {valores.length > 0 && <span className="text-gray-500"> · {valores.join(' / ')}</span>}
+            </li>
+          )
+        })}
+        {asignaturas.length > 4 && <li className="text-gray-400">+{asignaturas.length - 4} más</li>}
+      </ul>
+    )
+  }
+
+  if (tipoRegistro === 'asistencias_historico') {
+    const resumen = estado?.resumen as Record<string, string> | null
+    if (!resumen) return <p className="text-gray-400">Sin datos.</p>
+    return (
+      <p>
+        {Object.entries(resumen)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(' · ')}
+      </p>
+    )
+  }
+
+  // convivencia / materias_adeudadas / otro
+  const mensaje = estado?.mensaje as string | null | undefined
+  const items = (estado?.items ?? []) as Record<string, string>[]
+  if (mensaje) return <p>{mensaje}</p>
+  if (items.length > 0) return <p>{items.length} ítem(s) cargado(s)</p>
+  return <p className="text-gray-400">Sin datos.</p>
+}
+
+function HistorialRegistro({ historial }: { historial: EntradaHistorial[] }) {
+  if (historial.length === 0) {
+    return <p className="text-[11px] text-gray-400">Sin cambios registrados todavía.</p>
+  }
+  return (
+    <ul className="space-y-1">
+      {[...historial].reverse().map((h, i) => (
+        <li key={i} className="text-[11px] text-gray-600">
+          <span className="text-gray-400">{formatDate(h.fecha.slice(0, 10))}</span> — {h.cambios.join('; ')}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function AdjuntosDelRegistro({ registroId, clienteId }: { registroId: string; clienteId: string }) {
+  const { adjuntos, cargando, subir, descargar, eliminar } = useAdjuntosRegistro(registroId)
+  const [subiendo, setSubiendo] = useState(false)
+
+  async function onElegirArchivo(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setSubiendo(true)
+    await subir(file, clienteId)
+    setSubiendo(false)
+  }
+
+  async function onVer(path: string) {
+    try {
+      const url = await descargar(path)
+      window.open(url, '_blank')
+    } catch (err) {
+      console.error('No se pudo abrir el adjunto', err)
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-medium text-gray-500">Adjuntos</p>
+        <label className="text-[11px] text-gray-400 hover:text-gray-700 cursor-pointer">
+          {subiendo ? 'Subiendo...' : '+ Adjuntar'}
+          <input type="file" className="hidden" onChange={onElegirArchivo} disabled={subiendo} />
+        </label>
+      </div>
+      {cargando ? (
+        <p className="text-[11px] text-gray-400">Cargando...</p>
+      ) : adjuntos.length === 0 ? (
+        <p className="text-[11px] text-gray-400">Sin adjuntos.</p>
+      ) : (
+        <ul className="space-y-0.5">
+          {adjuntos.map((a) => (
+            <li key={a.id} className="flex items-center justify-between text-[11px]">
+              <button type="button" onClick={() => onVer(a.path)} className="truncate text-left text-blue-600 hover:underline">
+                {a.nombreArchivo}
+              </button>
+              <button type="button" onClick={() => eliminar(a)} className="ml-2 text-gray-400 hover:text-red-600" title="Eliminar">
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// Fase 75p/75r: cada tarjeta (Boletín, Convivencia, etc.) admite carga
+// manual -- "+Cargar" abre un form chiquito (período opcional + un
+// texto libre). Además muestra el resumen legible del último estado
+// (ResumenEstado), y "Ver más" expande el historial de cambios y los
+// adjuntos.
 function TarjetaRegistro({
   vinculo,
   tipoRegistro,
@@ -184,6 +296,7 @@ function TarjetaRegistro({
   crear: (data: { vinculoId: string; tipoRegistro: TipoRegistroInstitucion; periodo?: string; texto: string }) => Promise<boolean>
 }) {
   const [mostrarForm, setMostrarForm] = useState(false)
+  const [mostrarMas, setMostrarMas] = useState(false)
   const [periodo, setPeriodo] = useState('')
   const [texto, setTexto] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -200,6 +313,8 @@ function TarjetaRegistro({
     }
   }
 
+  const ultimo = registros[0]
+
   return (
     <div className="rounded-md border border-gray-100 p-2.5">
       <div className="flex items-center justify-between gap-1">
@@ -210,14 +325,29 @@ function TarjetaRegistro({
           </button>
         )}
       </div>
+
       {cargando ? (
         <p className="mt-1 text-[11px] text-gray-400">Cargando...</p>
-      ) : registros.length === 0 && !mostrarForm ? (
+      ) : !ultimo && !mostrarForm ? (
         <p className="mt-1 text-[11px] text-gray-400">
           {vinculo.proveedor === 'acadeu' ? 'Todavía no lo sincroniza Acadeu.' : 'Sin datos cargados.'}
         </p>
-      ) : !mostrarForm ? (
-        <p className="mt-1 text-[11px] text-gray-700">{registros.length} registro(s) · último {formatDate(registros[0].createdAt.slice(0, 10))}</p>
+      ) : ultimo && !mostrarForm ? (
+        <div className="mt-1 text-[11px]">
+          <ResumenEstado tipoRegistro={tipoRegistro} estado={ultimo.contenido.estadoActual} />
+          <button type="button" onClick={() => setMostrarMas((v) => !v)} className="mt-1 text-gray-400 hover:text-gray-700">
+            {mostrarMas ? 'Ver menos' : 'Ver más'}
+          </button>
+          {mostrarMas && (
+            <div className="mt-2 space-y-2 border-t border-gray-100 pt-2">
+              <div>
+                <p className="mb-1 font-medium text-gray-500">Historial de cambios</p>
+                <HistorialRegistro historial={ultimo.contenido.historial} />
+              </div>
+              <AdjuntosDelRegistro registroId={ultimo.id} clienteId={vinculo.clienteId} />
+            </div>
+          )}
+        </div>
       ) : null}
 
       {mostrarForm && (

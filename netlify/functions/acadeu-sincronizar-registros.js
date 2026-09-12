@@ -4,17 +4,31 @@ import { crearSupabaseAdmin, autenticarAgente } from './_lib/agenteAuth.js'
 // (que lee /notificaciones -- un feed de eventos, con cursor por ID, cada
 // 30 minutos) esto lee 4 páginas de CONSULTA por alumno (Boletín,
 // Convivencia, Materias Adeudadas, Asistencias histórico) que no traen un
-// id incremental -- son un estado actual, no un feed. Por eso la lógica
-// acá es "upsert del snapshot más reciente" en vez de "cursor de
-// novedades": una fila por (vinculo, tipo_registro) con origen='acadeu'
-// que se pisa cada corrida. Los registros cargados a MANO (sin
-// origen='acadeu') no se tocan nunca desde acá -- conviven en la misma
-// tabla, distinguidos por esa columna.
+// id incremental -- son un estado actual, no un feed.
 //
-// Corre bastante menos seguido que las notificaciones -- 2 veces por día
-// (13/14hs y 18hs aprox., decisión de Carlos) porque esto no cambia cada
-// 30 minutos, no tiene sentido pegarle a Acadeu tan seguido para algo que
-// se actualiza a lo sumo una vez por día.
+// Fase 75r (11/09, a pedido de Carlos): dos agregados sobre la versión
+// original --
+//   1) NORMALIZACIÓN: el scraper de Puppeteer manda tablas HTML crudas
+//      (headers/filas genéricos, distintos entre primaria y secundaria).
+//      Acá se las convierte a una forma prolija por tipo de registro
+//      (ver normalizarPorTipo) para que la Ficha pueda mostrar un
+//      resumen legible en vez de tener que interpretar tablas crudas.
+//   2) HISTORIAL LIVIANO: en vez de pisar el registro sin dejar rastro,
+//      se compara el estado nuevo contra el anterior (mismo vínculo +
+//      tipo + origen='acadeu') y, si algo cambió, se agrega una entrada
+//      corta a contenido.historial (capado a las últimas 50) -- NO se
+//      duplica la tabla entera en cada corrida, que sería la mayoría
+//      de las veces exactamente igual a la anterior. Los cambios de
+//      nota puntuales YA llegan por WhatsApp vía el feed de
+//      notificaciones (30 min) -- este historial es de referencia
+//      dentro de la ficha, no una alerta nueva.
+//
+// El campo `contenido` de cada fila queda entonces:
+//   { estadoActual: <forma normalizada según el tipo>, historial: [{fecha, cambios: [...]}] }
+// Los registros cargados a MANO (ver useInstituciones.ts) usan el mismo
+// sobre -- estadoActual: { mensaje: texto }, historial: [] -- para que
+// el renderer de la Ficha tenga una sola forma que entender sin
+// importar el origen.
 //
 //   POST /.netlify/functions/acadeu-sincronizar-registros
 //   Header: X-Api-Key: <api key del tenant -- La Charcutería>
@@ -43,8 +57,148 @@ const CLAVE_A_TIPO_REGISTRO = {
   materias_adeudadas: 'materias_adeudadas',
 }
 
+const MAX_HISTORIAL = 50
+
 function primerNombre(nombreCompleto) {
   return (nombreCompleto || '').trim().split(/\s+/)[0] || ''
+}
+
+// ─── Normalización de tablas crudas a una forma tipada por sección ──
+
+function tablaPorHeaderRegex(tablas, regex, excluir) {
+  return (tablas || []).find(
+    (t) => (t.headers || []).some((h) => regex.test(h)) && t !== excluir,
+  )
+}
+
+function filasATablaObjetos(tabla, limite) {
+  if (!tabla) return []
+  const headers = tabla.headers || []
+  const filas = limite ? (tabla.filas || []).slice(0, limite) : tabla.filas || []
+  return filas.map((fila) => {
+    const obj = {}
+    headers.forEach((h, i) => {
+      if (h) obj[h] = fila[i] ?? ''
+    })
+    return obj
+  })
+}
+
+// Boletín: tabla de asignaturas (nombre + una columna por trimestre) +
+// resumen de asistencias del período + materias adeudadas de años
+// anteriores + observaciones. Los headers exactos difieren entre
+// primaria ("1T","2T","3T") y secundaria ("1° Trimestre", "Valoración
+// final", etc.) -- por eso se busca por patrón, no por texto exacto.
+function normalizarBoletin(datos) {
+  const tablas = datos.tablas || []
+  const tAsignaturas = tablaPorHeaderRegex(tablas, /^asignatura/i)
+  const tAsistencias = tablaPorHeaderRegex(tablas, /^asistencia/i)
+  const tMateriasAdeudadas = tablaPorHeaderRegex(tablas, /materias adeudadas/i)
+  const tObservaciones = tablaPorHeaderRegex(tablas, /observaciones/i)
+
+  function filaAValores(tabla, fila) {
+    const valores = {}
+    ;(tabla.headers || []).slice(1).forEach((h, i) => {
+      if (h) valores[h] = fila[i + 1] ?? ''
+    })
+    return valores
+  }
+
+  const asignaturas = (tAsignaturas?.filas || [])
+    .map((fila) => ({ nombre: fila[0], valores: filaAValores(tAsignaturas, fila) }))
+    .filter((a) => a.nombre)
+
+  const asistenciasResumen = (tAsistencias?.filas || [])
+    .map((fila) => ({ nombre: fila[0], valores: filaAValores(tAsistencias, fila) }))
+    .filter((a) => a.nombre)
+
+  const materiasAdeudadasAnteriores = (tMateriasAdeudadas?.filas || [])
+    .map((f) => f[0])
+    .filter((t) => t && !/sin materias adeudadas/i.test(t))
+
+  const observaciones = tObservaciones?.filas?.[0]?.[0] || null
+
+  return { asignaturas, asistenciasResumen, materiasAdeudadasAnteriores, observaciones }
+}
+
+// Asistencias histórico: tabla resumen (Justificadas/Injustificadas/
+// Computadas/Porcentaje, 1 fila) + tabla detalle (Fecha/Actividad/
+// Estado/Justificación/Acumulado, muchas filas). El resto de las
+// tablas que trae la página son el widget de calendario -- se ignoran.
+function normalizarAsistenciasHistorico(datos) {
+  const tablas = datos.tablas || []
+  const tResumen = tablaPorHeaderRegex(tablas, /justificad/i)
+  const tDetalle = tablaPorHeaderRegex(tablas, /^fecha$/i, tResumen)
+
+  let resumen = null
+  if (tResumen) {
+    const fila = tResumen.filas?.[0] || []
+    resumen = {}
+    ;(tResumen.headers || []).forEach((h, i) => {
+      if (h && h.toLowerCase() !== 'acciones') resumen[h] = fila[i] ?? ''
+    })
+  }
+
+  const detalle = tDetalle ? filasATablaObjetos(tDetalle, 40) : []
+
+  return { resumen, detalle }
+}
+
+// Convivencia y Materias Adeudadas: cuando no hay nada cargado, Acadeu
+// muestra un mensaje informativo ("El alumno no posee..."); cuando sí
+// hay algo, aparece como tabla -- se listan sus filas como items
+// genéricos (headers como claves).
+function normalizarGenerico(datos) {
+  const tablas = datos.tablas || []
+  if (tablas.length === 0) {
+    return { mensaje: datos.mensaje || null, items: [] }
+  }
+  const items = tablas.flatMap((t) => filasATablaObjetos(t))
+  return { mensaje: null, items }
+}
+
+function normalizarPorTipo(tipoRegistro, datos) {
+  if (tipoRegistro === 'boletin') return normalizarBoletin(datos)
+  if (tipoRegistro === 'asistencias_historico') return normalizarAsistenciasHistorico(datos)
+  return normalizarGenerico(datos)
+}
+
+// ─── Historial liviano: solo anota si algo realmente cambió ─────────
+
+function detectarCambios(tipoRegistro, anterior, actual) {
+  if (!anterior) return [] // primera carga -- no es un "cambio", es el alta
+
+  const cambios = []
+
+  if (tipoRegistro === 'boletin') {
+    const porNombre = new Map((anterior.asignaturas || []).map((a) => [a.nombre, a.valores]))
+    for (const a of actual.asignaturas || []) {
+      const antes = porNombre.get(a.nombre)
+      if (!antes) cambios.push(`${a.nombre}: agregada`)
+      else if (JSON.stringify(antes) !== JSON.stringify(a.valores)) cambios.push(`${a.nombre}: actualizada`)
+    }
+    if ((anterior.observaciones || '') !== (actual.observaciones || '') && actual.observaciones) {
+      cambios.push('Observaciones actualizadas')
+    }
+  } else if (tipoRegistro === 'asistencias_historico') {
+    const a = anterior.resumen || {}
+    const b = actual.resumen || {}
+    const claves = new Set([...Object.keys(a), ...Object.keys(b)])
+    const partes = []
+    for (const k of claves) {
+      if (String(a[k] ?? '') !== String(b[k] ?? '')) partes.push(`${k}: ${a[k] ?? '—'} → ${b[k] ?? '—'}`)
+    }
+    if (partes.length > 0) cambios.push(partes.join(', '))
+  } else {
+    if ((anterior.mensaje || '') !== (actual.mensaje || '') && actual.mensaje) {
+      cambios.push(actual.mensaje)
+    }
+    const antesN = (anterior.items || []).length
+    const ahoraN = (actual.items || []).length
+    if (ahoraN !== antesN) cambios.push(`Pasó de ${antesN} a ${ahoraN} ítem(s)`)
+  }
+
+  return cambios
 }
 
 export default async (req) => {
@@ -116,10 +270,11 @@ export default async (req) => {
       if (!datos || !TIPOS_VALIDOS.includes(tipoRegistro)) continue
 
       // ¿Ya existe el snapshot de Acadeu para este vínculo+tipo? Se pisa
-      // en vez de acumular -- ver comentario de cabecera.
+      // en vez de acumular filas -- pero antes se compara para armar el
+      // historial liviano (ver comentario de cabecera).
       const { data: existente, error: errBuscar } = await supabaseAdmin
         .from('institucion_registros')
-        .select('id')
+        .select('id, contenido')
         .eq('vinculo_id', vinculoId)
         .eq('tipo_registro', tipoRegistro)
         .eq('origen', 'acadeu')
@@ -130,11 +285,20 @@ export default async (req) => {
         continue
       }
 
+      const estadoActual = normalizarPorTipo(tipoRegistro, datos)
+      const estadoAnterior = existente?.contenido?.estadoActual || null
+      const cambios = detectarCambios(tipoRegistro, estadoAnterior, estadoActual)
+      const historialPrevio = existente?.contenido?.historial || []
+      const historial =
+        cambios.length > 0
+          ? [...historialPrevio, { fecha: new Date().toISOString(), cambios }].slice(-MAX_HISTORIAL)
+          : historialPrevio
+
       const payload = {
         vinculo_id: vinculoId,
         tipo_registro: tipoRegistro,
         periodo: new Date().getFullYear().toString(),
-        contenido: datos,
+        contenido: { estadoActual, historial },
         origen: 'acadeu',
         updated_at: new Date().toISOString(),
       }
