@@ -11,6 +11,7 @@ import {
   FileText,
   BookOpen,
   HelpCircle,
+  CreditCard,
 } from 'lucide-react';
 
 import type {
@@ -126,14 +127,20 @@ const medioPagoConfig: Record<MedioPago, { color: string; icon: React.ReactNode 
   transferencia: { color: 'purple', icon: <ArrowRightLeft className="h-3 w-3" /> },
   cheque: { color: 'amber', icon: <FileText className="h-3 w-3" /> },
   cuenta_corriente: { color: 'teal', icon: <BookOpen className="h-3 w-3" /> },
+  tarjeta: { color: 'blue', icon: <CreditCard className="h-3 w-3" /> },
   otro: { color: 'gray', icon: <HelpCircle className="h-3 w-3" /> },
 };
 
+// Defensivo (11/09): un medio_pago que llegue de la base y no esté en
+// medioPagoConfig no debe tumbar el módulo entero -- cae a "Otro" en vez
+// de crashear. Esto fue justo lo que rompió Home Keep cuando el agente
+// empezó a insertar medio_pago='tarjeta' antes de que existiera acá.
 export function MedioPagoBadge({ medio }: { medio: MedioPago }) {
-  const cfg = medioPagoConfig[medio];
+  const cfg = medioPagoConfig[medio] ?? medioPagoConfig.otro;
+  const label = MEDIO_PAGO_LABEL[medio] ?? MEDIO_PAGO_LABEL.otro;
   return (
     <Badge color={cfg.color} icon={cfg.icon}>
-      {MEDIO_PAGO_LABEL[medio]}
+      {label}
     </Badge>
   );
 }

@@ -79,6 +79,7 @@ export type MedioPago =
   | 'transferencia'
   | 'cheque'
   | 'cuenta_corriente'
+  | 'tarjeta'
   | 'otro';
 
 /** Impuesto/percepción adicional cargado a mano en un comprobante. Lista
@@ -466,6 +467,7 @@ export const MEDIO_PAGO_LABEL: Record<MedioPago, string> = {
   transferencia: 'Transferencia',
   cheque: 'Cheque',
   cuenta_corriente: 'Cuenta corriente',
+  tarjeta: 'Tarjeta',
   otro: 'Otro',
 };
 
