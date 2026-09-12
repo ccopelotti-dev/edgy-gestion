@@ -213,6 +213,22 @@ export default async (req) => {
 
   const maxIdVisto = Math.max(ultimoIdProcesado, ...notificaciones.map((n) => n.id))
 
+  // Alerta barata (11/09, a pedido de Carlos): /notificaciones muestra
+  // una sola pantalla (20 ítems) por vez -- se confirmó en vivo que
+  // Acadeu pagina por JS (knockout.js), sin querystring, así que
+  // automatizar el click-through de página no está a la altura de un
+  // caso tan raro. En operación normal esto no importa (la pantalla
+  // siempre alcanza para 30 minutos de novedades), pero si el agente
+  // estuvo caído varios días podría haberse acumulado más de una
+  // pantalla, y las notificaciones más viejas (que quedarían en la
+  // página 2) nunca se volverían a ver porque el cursor salta directo
+  // al ID más alto visto. Señal barata de que puede haber pasado: TODA
+  // la pantalla que llegó esta vez es "nueva" para el cursor -- no se
+  // encontró el límite adentro de lo que se scrapeó. No se dispara en
+  // la primerísima corrida (cursor en 0, ahí es normal que todo sea
+  // nuevo).
+  const posibleHuecoDePaginacion = ultimoIdProcesado > 0 && notificaciones.length > 0 && nuevas.length === notificaciones.length
+
   const novedades = []
   const sinIdentificar = []
 
@@ -289,11 +305,21 @@ export default async (req) => {
     console.error('acadeu-sincronizar: error guardando el cursor', errUpsertEstado)
   }
 
+  // Alerta de posible hueco de paginación -- va solo al adulto (no a
+  // cada chico), y aparte de los mensajes normales de novedades.
+  if (posibleHuecoDePaginacion && canalListo && canal.numero_adulto) {
+    await mandarWhatsapp(
+      canal.numero_adulto,
+      `⚠️ Acadeu: llegaron ${nuevas.length} notificaciones nuevas y no se encontró dónde había quedado la última vez dentro de la pantalla leída. Acadeu pagina en la web y esto no recorre páginas viejas, así que podría haber novedades más antiguas sin sincronizar. Conviene revisar /notificaciones a mano.`,
+    )
+  }
+
   return new Response(
     JSON.stringify({
       ok: true,
       novedades,
       huboNovedades: novedades.length > 0,
+      posibleHuecoDePaginacion,
       sinIdentificar: sinIdentificar.length > 0 ? sinIdentificar : undefined,
     }),
     { status: 200 },
