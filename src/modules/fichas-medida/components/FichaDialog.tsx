@@ -778,11 +778,23 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
               <div className="space-y-3">
                 {items.map((it) => (
                   <div key={it.key} className="rounded-lg border border-gray-200 p-3">
-                    {/* A pedido de Carlos (18/08): orden de campos calcado al orden real
-                        de la entrevista con el cliente -- primero Producto, después
-                        Medidas (lo primero que dice el cliente: "quiero una cortina de
-                        0.80 x 1 metro para la cocina"), recién después los datos
-                        secundarios (Tela, Cantidad, Barral, Tipo de cortina). */}
+                    {/* Fase 76 (14/09, rediseño a pedido de Carlos: "está muy
+                        mezclado genérico con cortina"): el ítem pasa a ser un
+                        único flujo vertical, de arriba hacia abajo, con un
+                        bloque separado y con encabezado propio por concepto
+                        -- ya no una grilla de 4 columnas que mezclaba campos
+                        universales (Tela/Color/Cantidad) con los específicos
+                        del tipo (Medida/Peso vs. Ancho/Alto ventana). El
+                        badge de tipo es solo indicativo -- el tipo se elige
+                        una vez por ficha, arriba (ver selector "Tipo"). */}
+                    <div className="mb-3">
+                      <span className="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700">
+                        {TIPO_FICHA_LABEL[tipo]}
+                      </span>
+                    </div>
+
+                    {/* Producto: siempre primero y a lo ancho -- lo primero
+                        que dice el cliente ("quiero una cortina de..."). */}
                     <div>
                       <label className="mb-1 block text-xs text-gray-500">Producto</label>
                       <input
@@ -806,7 +818,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                     {tipo === 'cortinas' && (
                       <div className="mt-3 border-t border-gray-100 pt-3">
                         <div className="mb-1 flex items-center justify-between">
-                          <label className="text-sm font-medium text-gray-700">Medidas (Ancho × Alto por paño, en metros)</label>
+                          <label className="text-sm font-medium text-gray-700">Medidas por paño (Ancho × Alto, en metros)</label>
                           <button
                             onClick={() => agregarPano(it.key)}
                             className="flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 hover:bg-teal-100"
@@ -846,26 +858,32 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                       </div>
                     )}
 
-                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 border-t border-gray-100 pt-3">
-                      <div>
-                        <label className="mb-1 block text-xs text-gray-500">Tela</label>
-                        <input
-                          type="text"
-                          value={it.tela}
-                          onChange={(e) => actualizarItem(it.key, { tela: e.target.value })}
-                          className={inputClass}
-                        />
+                    {/* Datos del ítem: campos universales (aplican a
+                        cualquier tipo), separados del bloque de medidas
+                        específico del tipo que viene después. */}
+                    <div className="mt-3 border-t border-gray-100 pt-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Datos del ítem</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-500">Tela</label>
+                          <input
+                            type="text"
+                            value={it.tela}
+                            onChange={(e) => actualizarItem(it.key, { tela: e.target.value })}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-500">Color</label>
+                          <input
+                            type="text"
+                            value={it.color}
+                            onChange={(e) => actualizarItem(it.key, { color: e.target.value })}
+                            className={inputClass}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-gray-500">Color</label>
-                        <input
-                          type="text"
-                          value={it.color}
-                          onChange={(e) => actualizarItem(it.key, { color: e.target.value })}
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
+                      <div className="mt-2">
                         <label className="mb-1 block text-xs text-gray-500">Cantidad</label>
                         <input
                           type="text"
@@ -875,9 +893,12 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                           className={inputClass}
                         />
                       </div>
+                    </div>
 
-                      {tipo === 'generica' && (
-                        <>
+                    {tipo === 'generica' && (
+                      <div className="mt-3 border-t border-gray-100 pt-3">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Medida y peso</p>
+                        <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="mb-1 block text-xs text-gray-500">Medida</label>
                             <input
@@ -896,20 +917,22 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                               className={inputClass}
                             />
                           </div>
-                        </>
-                      )}
+                        </div>
+                      </div>
+                    )}
 
-                      {/* Fase 43h (20/08, a pedido de Carlos): medida
-                          TOTAL del hueco/ventana -- dato de referencia
-                          que el cliente da de entrada ("quiero cubrir
-                          una ventana de 1.30 x 1.42"), distinto de las
-                          medidas de corte por paño (que pueden diferir
-                          por fruncido/superposición). Dos campos
-                          numéricos, mismo patrón que Ancho/Alto de
-                          paño -- ocupan el mismo lugar en la grilla que
-                          Medida/Peso en Genérica. */}
-                      {tipo === 'cortinas' && (
-                        <>
+                    {/* Fase 43h (20/08, a pedido de Carlos): medida TOTAL
+                        del hueco/ventana -- dato de referencia que el
+                        cliente da de entrada ("quiero cubrir una ventana
+                        de 1.30 x 1.42"), distinto de las medidas de corte
+                        por paño (arriba, que pueden diferir por
+                        fruncido/superposición). Ahora en su propio bloque
+                        con encabezado, ya no comparte grilla con Medida/
+                        Peso de Genérica. */}
+                    {tipo === 'cortinas' && (
+                      <div className="mt-3 border-t border-gray-100 pt-3">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Medida total de la ventana</p>
+                        <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="mb-1 block text-xs text-gray-500">Ancho ventana (m)</label>
                             <input
@@ -934,9 +957,9 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
                               className={inputClass}
                             />
                           </div>
-                        </>
-                      )}
-                    </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Fase 62 (30/08): costeo manual "con calculadora en
                         mano" -- solo tiene sentido en Genérica sin producto
@@ -952,6 +975,7 @@ export function FichaDialog({ open, onOpenChange, clienteTenantId, ficha, contar
 
                     {tipo === 'cortinas' && (
                       <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Barral y tipo de cortina</p>
                         <div>
                           <label className="mb-1 flex items-center gap-2 text-xs text-gray-500">
                             <input
