@@ -36,6 +36,10 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   'comandas-cocina': lazy(() => import('./comandas-cocina')),
   'caja-turno': lazy(() => import('./caja-turno')),
   'menu-qr': lazy(() => import('./menu-qr')),
+  // Fase 76: Landing -- panel básico para editar la foto de portada, el
+  // contraste y la promo de la landing pública del negocio (sitio
+  // estático aparte de este repo, ver charcuteria-landing/README.md).
+  'landing': lazy(() => import('./landing')),
   // Antes 'delivery-whatsapp' (Fase 22): mismo módulo, renombrado a
   // "Ventas Online" porque dejó de ser exclusivo de WhatsApp -- ver
   // migración 0062_rename_delivery_whatsapp_a_ventas_online.sql.

@@ -20,6 +20,7 @@ import {
   Landmark,
   ScrollText,
   Ruler,
+  Image,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -49,6 +50,7 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   utilidades: Wrench,
   servicios: Briefcase,
   contable: Calculator,
+  landing: Image,
 }
 
 export function iconoDeModulo(slug: string): LucideIcon {

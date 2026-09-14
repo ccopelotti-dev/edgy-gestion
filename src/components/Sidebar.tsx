@@ -47,6 +47,9 @@ const ORDEN_PRINCIPALES = [
   'mesas-salon',
   'comandas-cocina',
   'menu-qr',
+  // Fase 76: Landing va junto a Menú QR -- ambos son la cara pública
+  // del negocio hacia afuera (uno el menú, el otro la web/vidriera).
+  'landing',
   'ventas-online',
   'caja-turno',
   'reportes',
