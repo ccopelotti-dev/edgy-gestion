@@ -15,7 +15,14 @@
 // después de "Recargar página" (el SW seguía sirviendo la cáscara
 // vieja en vez de ir a buscar la nueva). Subir la versión fuerza a
 // todos los clientes viejos a invalidar su caché y traer todo de nuevo.
-const CACHE_NAME = 'edgy-gestion-v2'
+//
+// Fase 78 (15/09): subido a v3 -- mismo síntoma exacto, esta vez con el
+// panel de Landing ampliado (Carlos vio el panel viejo incluso después
+// de cerrar sesión y volver a entrar, en la app de escritorio). Recordar
+// para adelante: CUALQUIER entrega que cambie una pantalla de la app
+// necesita este bump, si no la app de escritorio queda pegada a la
+// versión anterior hasta que alguien la reinicie del todo.
+const CACHE_NAME = 'edgy-gestion-v3'
 const APP_SHELL = ['/', '/index.html', '/icon-192.png', '/icon-512.png', '/manifest.json']
 
 self.addEventListener('install', (event) => {
