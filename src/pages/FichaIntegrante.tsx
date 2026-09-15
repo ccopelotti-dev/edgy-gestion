@@ -16,11 +16,12 @@
 
 import { useEffect, useState, type ChangeEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Lock } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -615,6 +616,57 @@ export default function FichaIntegrante() {
   const [cargandoInmuebles, setCargandoInmuebles] = useState(false)
   const [mostrarInmuebleDialog, setMostrarInmuebleDialog] = useState(false)
 
+  // Fase 80 (15/09, a pedido de Carlos): privacidad de Patrimonio/Datos
+  // personales por integrante. Para decidir si el que está mirando esta
+  // ficha puede ver todo sin restricción, hace falta saber quién es --
+  // su propio usuarios_cliente.id y si su rol es admin (Dueño). Arranca
+  // en "false"/null (el estado más restrictivo) mientras carga, para no
+  // mostrar de más ni sea sea por una fracción de segundo -- mismo
+  // criterio "fail closed" que ya usa RLS del lado del servidor.
+  const [viewerUsuarioClienteId, setViewerUsuarioClienteId] = useState<string | null>(null)
+  const [viewerEsAdmin, setViewerEsAdmin] = useState(false)
+  const [revelarTelefono, setRevelarTelefono] = useState(false)
+  const [revelarFecha, setRevelarFecha] = useState(false)
+
+  useEffect(() => {
+    let activo = true
+    async function cargarViewer() {
+      const { data: authData } = await supabase.auth.getUser()
+      if (!authData.user || !activo) return
+      const { data } = await supabase
+        .from('usuarios_cliente')
+        .select('id, rol_id, roles(es_admin)')
+        .eq('user_id', authData.user.id)
+        .single()
+      if (!activo || !data) return
+      setViewerUsuarioClienteId(data.id as string)
+      const rolRow = (data as any).roles as { es_admin: boolean } | null
+      // Usuario legado sin rol_id asignado se trata como admin -- mismo
+      // criterio que useClienteActual/Layout.tsx en el resto del sistema.
+      setViewerEsAdmin(!data.rol_id || !!rolRow?.es_admin)
+    }
+    cargarViewer()
+    return () => {
+      activo = false
+    }
+  }, [])
+
+  async function actualizarPrivacidad(clave: 'patrimonio_privado' | 'datos_personales_privado', valor: boolean) {
+    if (!usuario) return
+    const nuevoDatosExtra = { ...(usuario.datos_extra ?? {}), [clave]: valor ? 'true' : 'false' }
+    const { data, error: errUpdate } = await supabase
+      .from('usuarios_cliente')
+      .update({ datos_extra: nuevoDatosExtra })
+      .eq('id', usuario.id)
+      .select()
+      .single()
+    if (errUpdate || !data) {
+      console.error('FichaIntegrante: error actualizando privacidad', errUpdate)
+      return
+    }
+    setUsuario(data as UsuarioCliente)
+  }
+
   useEffect(() => {
     if (!usuarioClienteId) return
     let activo = true
@@ -1006,6 +1058,17 @@ export default function FichaIntegrante() {
   const edad = calcularEdad(usuario?.fecha_nacimiento)
   const esMenor = edad != null && edad < 18
 
+  // Fase 80: visibilidad completa (sin máscara/oculto) si soy admin
+  // (Dueño) o si esta es mi propia ficha -- para cualquier otro
+  // integrante de la familia, rige lo que haya marcado como privado.
+  const esPropiaFicha = viewerUsuarioClienteId != null && usuario != null && viewerUsuarioClienteId === usuario.id
+  const puedeVerSinRestriccion = viewerEsAdmin || esPropiaFicha
+  const datosPersonalesPrivado = usuario?.datos_extra?.datos_personales_privado === 'true'
+  const patrimonioPrivado = usuario?.datos_extra?.patrimonio_privado === 'true'
+  const datosPersonalesOcultos = datosPersonalesPrivado && !puedeVerSinRestriccion
+  const patrimonioOculto = patrimonioPrivado && !puedeVerSinRestriccion
+  const mostrarPatrimonioDetallado = esMenor || !patrimonioOculto
+
   if (cargando) {
     return <p className="p-6 text-sm text-gray-400">Cargando...</p>
   }
@@ -1050,7 +1113,19 @@ export default function FichaIntegrante() {
 
       <Card className="space-y-3 p-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">Datos personales</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-gray-900">Datos personales</h2>
+            {puedeVerSinRestriccion && (
+              <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                <Switch
+                  checked={datosPersonalesPrivado}
+                  onChange={(v) => actualizarPrivacidad('datos_personales_privado', v)}
+                  label="Marcar datos personales como privados"
+                />
+                Privado
+              </label>
+            )}
+          </div>
           <Button size="sm" onClick={guardar} disabled={guardando}>
             {guardando ? 'Guardando...' : 'Guardar cambios'}
           </Button>
@@ -1062,11 +1137,43 @@ export default function FichaIntegrante() {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <label className="text-xs text-gray-500">Teléfono</label>
-            <Input placeholder="Ej. 2954 12-3456" value={telefono} onChange={(e) => setTelefono(e.target.value)} />
+            {datosPersonalesOcultos && !revelarTelefono ? (
+              <div className="flex items-center gap-2">
+                <span className="flex h-9 flex-1 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400">
+                  •••• ••••
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRevelarTelefono(true)}
+                  className="text-gray-400 hover:text-gray-700"
+                  title="Mostrar teléfono"
+                >
+                  <Eye className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <Input placeholder="Ej. 2954 12-3456" value={telefono} onChange={(e) => setTelefono(e.target.value)} />
+            )}
           </div>
           <div className="space-y-1">
             <label className="text-xs text-gray-500">Fecha de nacimiento</label>
-            <Input type="date" value={fechaNacimiento} onChange={(e) => setFechaNacimiento(e.target.value)} />
+            {datosPersonalesOcultos && !revelarFecha ? (
+              <div className="flex items-center gap-2">
+                <span className="flex h-9 flex-1 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400">
+                  •• / •• / ••••
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRevelarFecha(true)}
+                  className="text-gray-400 hover:text-gray-700"
+                  title="Mostrar fecha de nacimiento"
+                >
+                  <Eye className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <Input type="date" value={fechaNacimiento} onChange={(e) => setFechaNacimiento(e.target.value)} />
+            )}
           </div>
         </div>
         <div className="space-y-1">
@@ -1081,11 +1188,30 @@ export default function FichaIntegrante() {
       </Card>
 
       <Card className="space-y-4 p-4">
-        <h2 className="text-sm font-semibold text-gray-900">{esMenor ? 'Cuentas' : 'Patrimonio'}</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-900">{esMenor ? 'Cuentas' : 'Patrimonio'}</h2>
+          {!esMenor && puedeVerSinRestriccion && (
+            <label className="flex items-center gap-1.5 text-xs text-gray-400">
+              <Switch
+                checked={patrimonioPrivado}
+                onChange={(v) => actualizarPrivacidad('patrimonio_privado', v)}
+                label="Marcar patrimonio como privado"
+              />
+              Privado
+            </label>
+          )}
+        </div>
 
         {esMenor && <SeccionCuentasDigitales clienteId={usuario.cliente_id} usuarioClienteId={usuario.id} edad={edad} />}
 
-        {!esMenor && (
+        {!esMenor && !mostrarPatrimonioDetallado && (
+          <div className="flex items-center gap-2 rounded-md border border-dashed border-gray-200 p-3 text-xs text-gray-400">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            {usuario.nombre ?? 'Este integrante'} marcó su patrimonio como privado -- solo lo puede ver el Dueño o la propia persona.
+          </div>
+        )}
+
+        {!esMenor && mostrarPatrimonioDetallado && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-500">Ingresos que aporta</label>
@@ -1118,6 +1244,7 @@ export default function FichaIntegrante() {
         </div>
         )}
 
+        {mostrarPatrimonioDetallado && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-500">Tarjetas de crédito</label>
@@ -1149,8 +1276,9 @@ export default function FichaIntegrante() {
             </ul>
           )}
         </div>
+        )}
 
-        {!esMenor && (
+        {!esMenor && mostrarPatrimonioDetallado && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-500">Vehículos</label>
@@ -1185,7 +1313,7 @@ export default function FichaIntegrante() {
         </div>
         )}
 
-        {!esMenor && (
+        {!esMenor && mostrarPatrimonioDetallado && (
         <div className="space-y-2 border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between">
             <label className="text-xs text-gray-500">Inmuebles</label>
