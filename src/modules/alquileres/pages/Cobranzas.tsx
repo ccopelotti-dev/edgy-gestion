@@ -1,12 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Receipt } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Receipt, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAlquileres } from '../data/store'
 import { EmptyState } from '../components/display'
 import { PagoDialog } from '../components/dialogs'
 import { formatARS, formatDate, formatMesAnio, claveMes, todayISO } from '../lib/format'
+import { obtenerUrlDescarga } from '@/modules/utilidades/lib/archivos'
 import type { FormaPago } from '../types'
 
 function mesAnterior(clave: string): string {
@@ -66,6 +67,7 @@ export default function Cobranzas() {
     datosBancarios?: { cbuAlias?: string }
     numeroRecibo?: string
     notas?: string
+    comprobantePath?: string
   }) {
     if (!inquilinoSeleccionado) return
     const total = data.montoAlquiler + data.montoTasas + data.montoExpensas + data.montoOtros
@@ -91,6 +93,15 @@ export default function Cobranzas() {
   function handleEliminar(id: string) {
     if (window.confirm('¿Eliminar esta cobranza?')) {
       dispatch({ type: 'DELETE_PAGO', payload: id })
+    }
+  }
+
+  async function handleVerComprobante(path: string) {
+    try {
+      const url = await obtenerUrlDescarga(path)
+      window.open(url, '_blank')
+    } catch {
+      window.alert('No se pudo generar el link de descarga del comprobante.')
     }
   }
 
@@ -162,9 +173,16 @@ export default function Cobranzas() {
                       {p.saldoPropietario != null ? formatARS(p.saldoPropietario) : '—'}
                     </td>
                     <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1">
+                      {p.comprobantePath && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleVerComprobante(p.comprobantePath!)} title="Ver comprobante">
+                          <FileText className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-500" onClick={() => handleEliminar(p.id)} title="Eliminar">
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

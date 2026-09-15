@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Upload, FileText, X, Loader2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,10 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useClienteActual } from '@/hooks/useClienteActual'
+import { subirArchivo, obtenerUrlDescarga, eliminarArchivo } from '@/modules/utilidades/lib/archivos'
+
+const ACCEPT_ARCHIVO_ADJUNTO = 'image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf'
 import type {
   Propietario,
   Propiedad,
@@ -24,6 +28,86 @@ import type {
   FormaPago,
 } from '../types'
 import { TIPOS_UNIDAD, ESTADOS_UNIDAD, FORMAS_PAGO } from '../types'
+
+/** Input de archivo compartido por PropietarioDialog (firma) y PagoDialog
+ * (comprobante) -- sube a "archivos-cliente" (bucket privado, carpeteado
+ * por cliente_id, ver @/modules/utilidades/lib/archivos.ts) y guarda el
+ * path devuelto, no una URL pública. Mientras no haya archivo, muestra el
+ * botón de subir; con archivo cargado, muestra un chip con "Ver" (URL
+ * firmada al vuelo) y "Quitar".
+ */
+function AdjuntoInput({
+  label,
+  path,
+  onChange,
+}: {
+  label: string
+  path?: string
+  onChange: (path: string | undefined) => void
+}) {
+  const { cliente } = useClienteActual()
+  const [subiendo, setSubiendo] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleFile(file: File | null) {
+    if (!file || !cliente?.id) return
+    setError(null)
+    setSubiendo(true)
+    try {
+      const { path: nuevoPath } = await subirArchivo(file, cliente.id, crypto.randomUUID())
+      onChange(nuevoPath)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo subir el archivo.')
+    } finally {
+      setSubiendo(false)
+    }
+  }
+
+  async function handleVer() {
+    if (!path) return
+    try {
+      const url = await obtenerUrlDescarga(path)
+      window.open(url, '_blank')
+    } catch {
+      setError('No se pudo generar el link de descarga.')
+    }
+  }
+
+  function handleQuitar() {
+    if (path) eliminarArchivo(path)
+    onChange(undefined)
+  }
+
+  return (
+    <div className="grid gap-1.5">
+      <label className="text-sm font-medium">{label}</label>
+      {path ? (
+        <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm">
+          <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <button type="button" className="truncate text-left underline underline-offset-2" onClick={handleVer}>
+            Ver archivo
+          </button>
+          <button type="button" className="ml-auto text-muted-foreground hover:text-red-500" onClick={handleQuitar} title="Quitar">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : (
+        <label className={cn(inputClass, 'flex cursor-pointer items-center gap-2 text-muted-foreground')}>
+          {subiendo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+          {subiendo ? 'Subiendo...' : 'Elegir archivo...'}
+          <input
+            type="file"
+            className="hidden"
+            accept={ACCEPT_ARCHIVO_ADJUNTO}
+            disabled={subiendo || !cliente?.id}
+            onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+          />
+        </label>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
 
 const inputClass =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -39,10 +123,11 @@ interface PropietarioFormData {
   email: string
   direccion: string
   comisionPorcentaje: string
+  firmaPath?: string
 }
 
 function emptyPropietarioForm(): PropietarioFormData {
-  return { nombreCompleto: '', documento: '', telefono: '', email: '', direccion: '', comisionPorcentaje: '' }
+  return { nombreCompleto: '', documento: '', telefono: '', email: '', direccion: '', comisionPorcentaje: '', firmaPath: undefined }
 }
 
 function propietarioToForm(p: Propietario): PropietarioFormData {
@@ -53,6 +138,7 @@ function propietarioToForm(p: Propietario): PropietarioFormData {
     email: p.email ?? '',
     direccion: p.direccion ?? '',
     comisionPorcentaje: String(p.comisionPorcentaje),
+    firmaPath: p.firmaPath,
   }
 }
 
@@ -81,6 +167,7 @@ export function PropietarioDialog({ open, onOpenChange, onSave, editData }: Prop
       email: form.email.trim() || undefined,
       direccion: form.direccion.trim() || undefined,
       comisionPorcentaje: form.comisionPorcentaje ? parseFloat(form.comisionPorcentaje) : 0,
+      firmaPath: form.firmaPath,
     })
     onOpenChange(false)
   }
@@ -122,6 +209,7 @@ export function PropietarioDialog({ open, onOpenChange, onSave, editData }: Prop
             <label className="text-sm font-medium">Dirección</label>
             <input className={inputClass} value={form.direccion} onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))} />
           </div>
+          <AdjuntoInput label="Firma (imagen o PDF)" path={form.firmaPath} onChange={(firmaPath) => setForm((f) => ({ ...f, firmaPath }))} />
         </div>
 
         <DialogFooter>
@@ -533,12 +621,14 @@ interface PagoFormData {
   cbuAlias: string
   numeroRecibo: string
   notas: string
+  comprobantePath?: string
 }
 
 function emptyPagoForm(montoSugerido?: number): PagoFormData {
   return {
     fecha: '', formaPago: 'transferencia', montoAlquiler: montoSugerido != null ? String(montoSugerido) : '',
     montoTasas: '0', montoExpensas: '0', montoOtros: '0', concepto: '', cbuAlias: '', numeroRecibo: '', notas: '',
+    comprobantePath: undefined,
   }
 }
 
@@ -556,6 +646,7 @@ interface PagoDialogProps {
     datosBancarios?: { cbuAlias?: string }
     numeroRecibo?: string
     notas?: string
+    comprobantePath?: string
   }) => void
   inquilinoNombre: string
   comisionPorcentaje: number
@@ -589,6 +680,7 @@ export function PagoDialog({ open, onOpenChange, onSave, inquilinoNombre, comisi
       datosBancarios: form.cbuAlias.trim() ? { cbuAlias: form.cbuAlias.trim() } : undefined,
       numeroRecibo: form.numeroRecibo.trim() || undefined,
       notas: form.notas.trim() || undefined,
+      comprobantePath: form.comprobantePath,
     })
     onOpenChange(false)
   }
@@ -637,9 +729,12 @@ export function PagoDialog({ open, onOpenChange, onSave, inquilinoNombre, comisi
           </div>
 
           {form.formaPago === 'transferencia' && (
-            <div className="grid gap-1.5">
-              <label className="text-sm font-medium">CBU / Alias</label>
-              <input className={inputClass} value={form.cbuAlias} onChange={(e) => setForm((f) => ({ ...f, cbuAlias: e.target.value }))} />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-1.5">
+                <label className="text-sm font-medium">CBU / Alias</label>
+                <input className={inputClass} value={form.cbuAlias} onChange={(e) => setForm((f) => ({ ...f, cbuAlias: e.target.value }))} />
+              </div>
+              <AdjuntoInput label="Comprobante" path={form.comprobantePath} onChange={(comprobantePath) => setForm((f) => ({ ...f, comprobantePath }))} />
             </div>
           )}
 

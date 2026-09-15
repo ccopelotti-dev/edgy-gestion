@@ -1,12 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, UserRound } from 'lucide-react'
+import { Plus, Pencil, Trash2, UserRound, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAlquileres } from '../data/store'
 import { EmptyState } from '../components/display'
 import { PropietarioDialog } from '../components/dialogs'
 import { formatARS } from '../lib/format'
+import { obtenerUrlDescarga } from '@/modules/utilidades/lib/archivos'
 import type { Propietario } from '../types'
 
 export default function Propietarios() {
@@ -35,6 +36,16 @@ export default function Propietarios() {
       dispatch({ type: 'UPDATE_PROPIETARIO', payload: { ...editing, ...data } })
     } else {
       dispatch({ type: 'ADD_PROPIETARIO', payload: data })
+    }
+  }
+
+  async function handleVerFirma(p: Propietario) {
+    if (!p.firmaPath) return
+    try {
+      const url = await obtenerUrlDescarga(p.firmaPath)
+      window.open(url, '_blank')
+    } catch {
+      window.alert('No se pudo generar el link de descarga de la firma.')
     }
   }
 
@@ -89,6 +100,11 @@ export default function Propietarios() {
                   <td className="px-4 py-3 text-right">{conteoPropiedades.get(p.id) ?? 0}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1">
+                      {p.firmaPath && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleVerFirma(p)} title="Ver firma">
+                          <FileText className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditar(p)} title="Editar">
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
