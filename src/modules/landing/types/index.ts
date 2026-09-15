@@ -88,3 +88,20 @@ export interface ProductoCatalogoOpcion {
   imagen: string | null
   rubroNombre: string | null
 }
+
+/** Fase 79: "Capa 1" del plan de redes -- generador de contenido (imagen
+ * JPG lista para compartir en Instagram/WhatsApp, publicación 100% manual
+ * y a criterio del cliente). Un producto o un combo real del catálogo,
+ * con los datos que necesita el generador de imagen promocional
+ * (ver lib/imagenPromocional.ts). */
+export interface ItemContenido {
+  id: string
+  tipo: 'producto' | 'combo'
+  nombre: string
+  descripcion: string
+  precio: number
+  /** Galería completa (hasta 2 se usan para el layout "pantalla dividida"). */
+  imagenes: string[]
+  /** Solo los combos pueden tener etiqueta/badge de promo. */
+  etiqueta?: string
+}

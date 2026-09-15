@@ -15,7 +15,7 @@
 // el momento -- ver script inline en ese repo (index.html).
 
 import { useEffect, useRef, useState } from 'react'
-import { Image as ImageIcon, Loader2, UploadCloud, ExternalLink, X, ArrowUp, ArrowDown } from 'lucide-react'
+import { Image as ImageIcon, Loader2, UploadCloud, ExternalLink, X, ArrowUp, ArrowDown, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -25,13 +25,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useClienteActual } from '@/hooks/useClienteActual'
 import { useLandingConfig } from '../data/useLandingConfig'
 import { useCatalogoParaLanding } from '../data/useCatalogoParaLanding'
+import { useContenidoCatalogo } from '../data/useContenidoCatalogo'
 import { subirImagenLanding, ACCEPT_IMAGENES } from '../lib/imagenes'
-import { GALERIA_MAX_FOTOS, HERO_CONTRASTE_MAX, HERO_CONTRASTE_MIN, type LandingConfig } from '../types'
+import { GeneradorContenidoDialog } from '../components/GeneradorContenidoDialog'
+import { GALERIA_MAX_FOTOS, HERO_CONTRASTE_MAX, HERO_CONTRASTE_MIN, type ItemContenido, type LandingConfig } from '../types'
 
 export default function Index() {
   const { cliente } = useClienteActual()
   const { config, cargando, guardando, error, clienteId, guardar } = useLandingConfig()
   const { productos: catalogo, cargando: cargandoCatalogo } = useCatalogoParaLanding()
+  const { items: itemsContenido, cargando: cargandoContenido } = useContenidoCatalogo()
+  const [itemGenerador, setItemGenerador] = useState<ItemContenido | null>(null)
 
   const [form, setForm] = useState<LandingConfig>(config)
 
@@ -559,6 +563,53 @@ export default function Index() {
         </CardContent>
       </Card>
 
+      {/* ── Generador de contenido para redes (Fase 79, "Capa 1") ── */}
+      <Card>
+        <CardContent className="flex flex-col gap-3 py-6">
+          <h2 className="font-medium">Generador de contenido para redes</h2>
+          <p className="text-xs text-muted-foreground">
+            Elegí un producto o combo real del catálogo y generá una imagen JPG lista para
+            compartir en Instagram, WhatsApp o donde prefieras. Solo genera la imagen -- dónde y
+            cómo publicarla queda a tu criterio.
+          </p>
+
+          {cargandoContenido ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Cargando catálogo...
+            </div>
+          ) : itemsContenido.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Todavía no hay productos ni combos activos cargados en el catálogo.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {itemsContenido.map((item) => (
+                <button
+                  key={`${item.tipo}-${item.id}`}
+                  type="button"
+                  onClick={() => setItemGenerador(item)}
+                  className="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-accent"
+                >
+                  {item.imagenes[0] ? (
+                    <img src={item.imagenes[0]} alt="" className="h-9 w-9 rounded object-cover" />
+                  ) : (
+                    <div className="flex h-9 w-9 items-center justify-center rounded bg-muted">
+                      <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  )}
+                  <span className="flex-1 truncate">{item.nombre}</span>
+                  <span className="text-[10px] uppercase text-muted-foreground">
+                    {item.tipo === 'combo' ? 'Combo' : 'Producto'}
+                  </span>
+                  <Sparkles className="h-4 w-4 shrink-0 text-brand-500" />
+                </button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* ── Promo ── */}
       <Card>
         <CardContent className="flex flex-col gap-4 py-6">
@@ -619,6 +670,14 @@ export default function Index() {
           )}
         </Button>
       </div>
+
+      <GeneradorContenidoDialog
+        open={itemGenerador !== null}
+        onOpenChange={(open) => {
+          if (!open) setItemGenerador(null)
+        }}
+        item={itemGenerador ?? undefined}
+      />
     </div>
   )
 }
