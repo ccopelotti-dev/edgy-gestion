@@ -95,6 +95,13 @@ interface FormulaLocal {
   unidadSecundaria: UnidadMedida | ''
   equivalenciaSecundaria: number
   equivalenciaSecundariaTexto: string
+  /** Fase 81: ver comentario en types/index.ts (Formula.requiereReposo). */
+  requiereReposo: boolean
+  criterioReposo: 'dias' | 'peso'
+  diasReposo: number
+  diasReposoTexto: string
+  porcentajePesoObjetivo: number
+  porcentajePesoObjetivoTexto: string
 }
 
 function emptyFormula(): FormulaLocal {
@@ -110,6 +117,12 @@ function emptyFormula(): FormulaLocal {
     unidadSecundaria: '',
     equivalenciaSecundaria: 0,
     equivalenciaSecundariaTexto: '',
+    requiereReposo: false,
+    criterioReposo: 'dias',
+    diasReposo: 0,
+    diasReposoTexto: '',
+    porcentajePesoObjetivo: 0,
+    porcentajePesoObjetivoTexto: '',
   }
 }
 
@@ -137,6 +150,12 @@ function formulaToLocal(f: Formula): FormulaLocal {
     unidadSecundaria: f.unidadSecundaria ?? '',
     equivalenciaSecundaria: f.equivalenciaSecundaria ?? 0,
     equivalenciaSecundariaTexto: decimalATexto(f.equivalenciaSecundaria ?? 0),
+    requiereReposo: f.requiereReposo ?? false,
+    criterioReposo: f.criterioReposo ?? 'dias',
+    diasReposo: f.diasReposo ?? 0,
+    diasReposoTexto: f.diasReposo ? decimalATexto(f.diasReposo) : '',
+    porcentajePesoObjetivo: f.porcentajePesoObjetivo ?? 0,
+    porcentajePesoObjetivoTexto: f.porcentajePesoObjetivo ? decimalATexto(f.porcentajePesoObjetivo) : '',
   }
 }
 
@@ -966,6 +985,21 @@ export default function FormularProducto() {
       fuenteDimension: l.unidad === 'metro' ? l.fuenteDimension ?? 'ancho' : undefined,
     }))
 
+    // Fase 81: si está tildado "necesita reposo" pero falta el dato del
+    // criterio elegido, cortar acá con un mensaje claro -- el check de la
+    // base (formulas_reposo_coherente_check) igual lo rechazaría, pero es
+    // mejor decirlo antes de la vuelta al servidor.
+    if (formula.requiereReposo) {
+      if (formula.criterioReposo === 'dias' && !(formula.diasReposo > 0)) {
+        setErrorFormula('Cargá cuántos días de reposo necesita este producto.')
+        return
+      }
+      if (formula.criterioReposo === 'peso' && !(formula.porcentajePesoObjetivo > 0)) {
+        setErrorFormula('Cargá el % de peso objetivo para liberar el reposo.')
+        return
+      }
+    }
+
     setGuardandoFormula(true)
     setErrorFormula(null)
 
@@ -983,6 +1017,11 @@ export default function FormularProducto() {
         equivalenciaSecundaria: formula.unidadSecundaria && formula.equivalenciaSecundaria > 0
           ? formula.equivalenciaSecundaria
           : null,
+        requiereReposo: formula.requiereReposo,
+        criterioReposo: formula.requiereReposo ? formula.criterioReposo : null,
+        diasReposo: formula.requiereReposo && formula.criterioReposo === 'dias' ? formula.diasReposo : null,
+        porcentajePesoObjetivo:
+          formula.requiereReposo && formula.criterioReposo === 'peso' ? formula.porcentajePesoObjetivo : null,
         createdAt: existingFormula?.createdAt,
       },
       cliente.id,
@@ -1251,6 +1290,97 @@ export default function FormularProducto() {
                 producto sigue con un único número de stock, en {unidadAbrev(formula.unidadProducida)}.
               </p>
             )}
+
+            {/* Fase 81 (15/09, a pedido de Carlos -- Charcutería): etapa de
+                Reposo -- productos que después de producidos necesitan un
+                tiempo de espera (curado, secado, estacionamiento, etc.)
+                antes de poder sumarse a stock disponible. Nombre genérico
+                a propósito, no específico de ningún rubro. */}
+            <div className="mt-3 pt-3 border-t">
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={formula.requiereReposo}
+                  onChange={(e) => {
+                    const checked = e.target.checked
+                    setFormula((prev) => (prev ? { ...prev, requiereReposo: checked } : prev))
+                    setDirty(true)
+                  }}
+                />
+                Este producto necesita reposo antes de sumar a stock
+              </label>
+
+              {formula.requiereReposo && (
+                <div className="mt-2 space-y-2 pl-6">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-xs text-muted-foreground">Criterio:</label>
+                    <select
+                      className={cn(inputClass, 'w-48')}
+                      value={formula.criterioReposo}
+                      onChange={(e) => {
+                        const criterio = e.target.value as 'dias' | 'peso'
+                        setFormula((prev) => (prev ? { ...prev, criterioReposo: criterio } : prev))
+                        setDirty(true)
+                      }}
+                    >
+                      <option value="dias">Por días fijos</option>
+                      <option value="peso">Por pérdida de peso</option>
+                    </select>
+
+                    {formula.criterioReposo === 'dias' ? (
+                      <>
+                        <input
+                          className={cn(inputClass, 'w-20 text-right')}
+                          type="text"
+                          inputMode="decimal"
+                          value={formula.diasReposoTexto}
+                          onChange={(e) => {
+                            const texto = sanitizarDecimal(e.target.value)
+                            setFormula((prev) =>
+                              prev ? { ...prev, diasReposoTexto: texto, diasReposo: parsearDecimal(texto) } : prev,
+                            )
+                            setDirty(true)
+                          }}
+                          placeholder="Ej: 45"
+                        />
+                        <span className="text-xs text-muted-foreground">días desde la fecha de producción</span>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          className={cn(inputClass, 'w-20 text-right')}
+                          type="text"
+                          inputMode="decimal"
+                          value={formula.porcentajePesoObjetivoTexto}
+                          onChange={(e) => {
+                            const texto = sanitizarDecimal(e.target.value)
+                            setFormula((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    porcentajePesoObjetivoTexto: texto,
+                                    porcentajePesoObjetivo: parsearDecimal(texto),
+                                  }
+                                : prev,
+                            )
+                            setDirty(true)
+                          }}
+                          placeholder="Ej: 70"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          % del peso inicial del lote (se pesa el lote en Producción para saber cuándo liberarlo)
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {formula.criterioReposo === 'dias'
+                      ? 'Al confirmar un lote, los insumos se descuentan igual que siempre, pero el producto terminado queda "en reposo" -- recién suma a stock cuando lo liberes a mano desde Producción, usando el peso real de ese momento.'
+                      : 'Al confirmar un lote queda "en reposo": cargá pesadas de control desde Producción a medida que pasa el tiempo, y liberalo a stock cuando corresponda -- el sistema no lo hace solo.'}
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Section 1: Insumos / Materiales */}

@@ -88,6 +88,7 @@ import type {
   Produccion,
   EstadoProduccion,
   InsumoImputado,
+  ControlReposo,
   MovimientoStock,
   Recepcion,
   LineaRecepcion,
@@ -1422,6 +1423,11 @@ function formulaToRow(f: Formula, clienteId: string) {
     aplicar_merma_costo: f.aplicarMermaCosto,
     unidad_secundaria: f.unidadSecundaria || null,
     equivalencia_secundaria: f.equivalenciaSecundaria || null,
+    // Fase 81: ver comentario en types/index.ts (Formula.requiereReposo).
+    requiere_reposo: f.requiereReposo,
+    criterio_reposo: f.criterioReposo || null,
+    dias_reposo: f.diasReposo || null,
+    porcentaje_peso_objetivo: f.porcentajePesoObjetivo || null,
   }
 }
 
@@ -2450,6 +2456,11 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     equivalenciaSecundaria: r.equivalencia_secundaria === null || r.equivalencia_secundaria === undefined
       ? null
       : Number(r.equivalencia_secundaria),
+    // Fase 81: ver comentario en types/index.ts (Formula.requiereReposo).
+    requiereReposo: Boolean(r.requiere_reposo ?? false),
+    criterioReposo: r.criterio_reposo ?? null,
+    diasReposo: r.dias_reposo != null ? Number(r.dias_reposo) : null,
+    porcentajePesoObjetivo: r.porcentaje_peso_objetivo != null ? Number(r.porcentaje_peso_objetivo) : null,
   }))
 
   const producciones: Produccion[] = (produccionesRes.data ?? []).map((r: any) => ({
@@ -2466,6 +2477,11 @@ export async function fetchProductosStockState(): Promise<ProductosStockState> {
     estado: (r.estado ?? 'confirmada') as EstadoProduccion,
     insumosImputados: (r.insumos_imputados ?? []) as InsumoImputado[],
     puntoVentaId: r.punto_venta_id ?? undefined,
+    // Fase 81: ver comentario en types/index.ts (Produccion.fechaEstimadaLiberacion).
+    fechaEstimadaLiberacion: r.fecha_estimada_liberacion ?? undefined,
+    controlesReposo: (r.controles_reposo ?? []) as ControlReposo[],
+    pesoLiberacion: r.peso_liberacion != null ? Number(r.peso_liberacion) : undefined,
+    fechaLiberacion: r.fecha_liberacion ?? undefined,
   }))
 
   const movimientos: MovimientoStock[] = (movimientosRes.data ?? []).map((r: any) => ({
@@ -2792,6 +2808,11 @@ export async function guardarFormulaConfirmada(
     aplicarMermaCosto: boolean
     unidadSecundaria?: UnidadMedida | null
     equivalenciaSecundaria?: number | null
+    /** Fase 81: ver comentario en types/index.ts (Formula.requiereReposo). */
+    requiereReposo?: boolean
+    criterioReposo?: 'dias' | 'peso' | null
+    diasReposo?: number | null
+    porcentajePesoObjetivo?: number | null
     /** Solo relevante al actualizar -- se preserva la fecha de creación original. */
     createdAt?: string
   },
@@ -2809,6 +2830,10 @@ export async function guardarFormulaConfirmada(
     aplicarMermaCosto: args.aplicarMermaCosto,
     unidadSecundaria: args.unidadSecundaria ?? null,
     equivalenciaSecundaria: args.equivalenciaSecundaria ?? null,
+    requiereReposo: args.requiereReposo ?? false,
+    criterioReposo: args.criterioReposo ?? null,
+    diasReposo: args.diasReposo ?? null,
+    porcentajePesoObjetivo: args.porcentajePesoObjetivo ?? null,
     createdAt: args.createdAt ?? todayISO(),
   }
 
@@ -3413,6 +3438,29 @@ async function ejecutarConsumoYConfirmar(
   const { id: loteId, notas, fecha, fichaItemId } = produccion
   const esAMedida = Boolean(fichaItemId)
 
+  // Fase 81: si la fórmula tiene Reposo configurado, el producto
+  // terminado NO se acredita a stock todavía -- ver comentario grande en
+  // types/index.ts (Formula.requiereReposo) y en la migración de esta
+  // fase. Los insumos SÍ se descuentan igual más abajo: ya se usaron
+  // físicamente para producir, tenga reposo o no. No aplica al modo a
+  // medida (esAMedida): ahí nunca se acredita stock genérico de todos
+  // modos, así que el reposo no tendría nada que demorar.
+  let requiereReposo = false
+  let criterioReposo: 'dias' | 'peso' | null = null
+  let diasReposo: number | null = null
+  if (!esAMedida) {
+    const { data: formulaRow } = await supabase
+      .from('formulas')
+      .select('requiere_reposo, criterio_reposo, dias_reposo')
+      .eq('id', produccion.formulaId)
+      .single()
+    if (formulaRow?.requiere_reposo) {
+      requiereReposo = true
+      criterioReposo = (formulaRow.criterio_reposo ?? null) as 'dias' | 'peso' | null
+      diasReposo = formulaRow.dias_reposo != null ? Number(formulaRow.dias_reposo) : null
+    }
+  }
+
   const movimientos: MovimientoStock[] = []
   const productoIdsAfectados = new Set<string>()
   const insumoIdsAfectados = new Set<string>()
@@ -3457,7 +3505,11 @@ async function ejecutarConsumoYConfirmar(
   // Kardex de depósito. El registro de `producciones` con fichaItemId ya es
   // la trazabilidad real de este lote: quedó producido e imputado al
   // pedido hasta que se facture el presupuesto vinculado a la ficha.
-  if (!esAMedida) {
+  //
+  // Fase 81: con Reposo configurado tampoco se acredita nada acá -- queda
+  // pendiente hasta liberarReposo (más abajo), que es quien realmente
+  // suma stock, con el peso REAL post-reposo en vez de cantidadRealProducida.
+  if (!esAMedida && !requiereReposo) {
     const ajusteProducto = await aplicarAjusteAtomico({
       itemTipo: 'producto',
       itemId: produccion.productoId,
@@ -3501,14 +3553,26 @@ async function ejecutarConsumoYConfirmar(
     }
   }
 
+  // Fase 81: si requiere reposo, el lote pasa a 'en_reposo' (no
+  // 'confirmada' todavía) -- y para criterio 'dias' se calcula de una vez
+  // la fecha desde la que ya se puede liberar, para no tener que rehacer
+  // esta cuenta en cada pantalla que la necesite mostrar.
+  const estadoFinal: EstadoProduccion = requiereReposo ? 'en_reposo' : 'confirmada'
+  const updatePayload: Record<string, unknown> = { estado: estadoFinal }
+  if (requiereReposo && criterioReposo === 'dias' && diasReposo != null) {
+    const fechaEstimada = new Date(`${fecha}T00:00:00`)
+    fechaEstimada.setDate(fechaEstimada.getDate() + diasReposo)
+    updatePayload.fecha_estimada_liberacion = fechaEstimada.toISOString().slice(0, 10)
+  }
+
   const { error: errEstado } = await supabase
     .from('producciones')
-    .update({ estado: 'confirmada' })
+    .update(updatePayload)
     .eq('id', loteId)
   if (errEstado) {
     return {
       ok: false,
-      error: `El stock ya se movió, pero no se pudo marcar el lote como confirmado: ${errEstado.message}. Avisá antes de seguir -- el lote puede figurar como borrador aunque el stock ya esté descontado.`,
+      error: `El stock ya se movió, pero no se pudo marcar el lote como ${estadoFinal === 'en_reposo' ? 'en reposo' : 'confirmado'}: ${errEstado.message}. Avisá antes de seguir -- el lote puede figurar como borrador aunque el stock ya esté descontado.`,
     }
   }
 
@@ -3528,8 +3592,183 @@ async function ejecutarConsumoYConfirmar(
 
   return {
     ok: true,
-    data: { produccion: { ...produccion, estado: 'confirmada' }, productos, insumos, movimientos },
+    data: {
+      produccion: {
+        ...produccion,
+        estado: estadoFinal,
+        fechaEstimadaLiberacion: (updatePayload.fecha_estimada_liberacion as string | undefined) ?? produccion.fechaEstimadaLiberacion,
+      },
+      productos,
+      insumos,
+      movimientos,
+    },
   }
+}
+
+/**
+ * Fase 81 (15/09, a pedido de Carlos): libera a stock un lote que había
+ * quedado 'en_reposo' -- recién acá se acredita el stock del producto
+ * terminado, con el peso REAL post-reposo (`pesoLiberacion`), no el
+ * teórico -- ese es justamente el sentido del reposo (reflejar la merma
+ * real, no la esperada). Para criterio 'dias' la UI sugiere por defecto
+ * `cantidadRealProducida` (ya contempla la merma esperada, confirmado con
+ * Carlos), pero el operador puede corregirlo a mano antes de liberar; para
+ * criterio 'peso' tiene que venir de la última pesada de control cargada.
+ */
+export async function liberarReposo(
+  loteId: string,
+  pesoLiberacion: number,
+  clienteId: string,
+): Promise<ResultadoGuardado<{
+  produccion: Produccion
+  productos: Producto[]
+  movimientos: MovimientoStock[]
+}>> {
+  if (!(pesoLiberacion > 0)) {
+    return { ok: false, error: 'El peso a liberar tiene que ser mayor a cero.' }
+  }
+
+  const { data: row, error: errFetch } = await supabase
+    .from('producciones')
+    .select('*')
+    .eq('id', loteId)
+    .eq('cliente_id', clienteId)
+    .single()
+  if (errFetch || !row) {
+    return { ok: false, error: `No se encontró el lote a liberar: ${errFetch?.message ?? 'no existe'}` }
+  }
+  if (row.estado !== 'en_reposo') {
+    return { ok: false, error: `Este lote no está en reposo (estado actual: "${row.estado}").` }
+  }
+
+  const ajusteProducto = await aplicarAjusteAtomico({
+    itemTipo: 'producto',
+    itemId: row.producto_id,
+    delta: pesoLiberacion,
+    clienteId,
+  })
+  if (!ajusteProducto.ok) {
+    return { ok: false, error: `No se pudo sumar el stock del producto terminado: ${ajusteProducto.error}` }
+  }
+
+  const movimiento: MovimientoStock = {
+    id: uid(),
+    tipo: 'ingreso',
+    itemTipo: 'producto',
+    itemId: ajusteProducto.data.itemIdEfectivo,
+    cantidad: pesoLiberacion,
+    nota: row.notas ?? undefined,
+    fecha: todayISO(),
+    origen: 'formula',
+    origenId: loteId,
+  }
+  const { error: errMov } = await supabase
+    .from('movimientos_stock')
+    .insert({ ...movimientoToRow(movimiento, clienteId), punto_venta_id: ajusteProducto.data.puntoVentaId })
+  if (errMov) {
+    return {
+      ok: false,
+      error: `El stock se sumó, pero no se pudo guardar el movimiento del Kardex: ${errMov.message}. El historial puede quedar incompleto.`,
+    }
+  }
+
+  const fechaLiberacion = new Date().toISOString()
+  const { error: errUpdate } = await supabase
+    .from('producciones')
+    .update({ estado: 'confirmada', peso_liberacion: pesoLiberacion, fecha_liberacion: fechaLiberacion })
+    .eq('id', loteId)
+  if (errUpdate) {
+    return {
+      ok: false,
+      error: `El stock ya se sumó, pero no se pudo marcar el lote como confirmado: ${errUpdate.message}. Avisá antes de seguir.`,
+    }
+  }
+
+  const productos = await fetchProductosPorId([ajusteProducto.data.itemIdEfectivo])
+
+  const produccion: Produccion = {
+    id: row.id,
+    formulaId: row.formula_id,
+    productoId: row.producto_id,
+    factor: Number(row.factor),
+    cantidadTeorica: Number(row.cantidad_teorica),
+    cantidadRealProducida: Number(row.cantidad_real_producida),
+    fecha: row.fecha,
+    notas: row.notas ?? undefined,
+    createdAt: (row.created_at ?? '').slice(0, 10),
+    fichaItemId: row.ficha_item_id ?? undefined,
+    estado: 'confirmada',
+    insumosImputados: (row.insumos_imputados ?? []) as InsumoImputado[],
+    puntoVentaId: row.punto_venta_id ?? undefined,
+    fechaEstimadaLiberacion: row.fecha_estimada_liberacion ?? undefined,
+    controlesReposo: (row.controles_reposo ?? []) as ControlReposo[],
+    pesoLiberacion,
+    fechaLiberacion,
+  }
+
+  return { ok: true, data: { produccion, productos, movimientos: [movimiento] } }
+}
+
+/**
+ * Fase 81: carga una pesada de control sobre un lote 'en_reposo' con
+ * criterioReposo='peso' -- no mueve stock ni cambia el estado, solo va
+ * dejando registro para poder decidir cuándo liberar (ver liberarReposo).
+ * No exige que la pesada "cumpla" el objetivo: el operador decide.
+ */
+export async function agregarControlReposo(
+  loteId: string,
+  peso: number,
+  clienteId: string,
+): Promise<ResultadoGuardado<{ produccion: Produccion }>> {
+  if (!(peso > 0)) {
+    return { ok: false, error: 'El peso tiene que ser mayor a cero.' }
+  }
+
+  const { data: row, error: errFetch } = await supabase
+    .from('producciones')
+    .select('*')
+    .eq('id', loteId)
+    .eq('cliente_id', clienteId)
+    .single()
+  if (errFetch || !row) {
+    return { ok: false, error: `No se encontró el lote: ${errFetch?.message ?? 'no existe'}` }
+  }
+  if (row.estado !== 'en_reposo') {
+    return { ok: false, error: 'Este lote no está en reposo.' }
+  }
+
+  const controlesPrevios = (row.controles_reposo ?? []) as ControlReposo[]
+  const controlesReposo = [...controlesPrevios, { fecha: new Date().toISOString(), peso }]
+
+  const { error: errUpdate } = await supabase
+    .from('producciones')
+    .update({ controles_reposo: controlesReposo })
+    .eq('id', loteId)
+  if (errUpdate) {
+    return { ok: false, error: `No se pudo guardar la pesada: ${errUpdate.message}` }
+  }
+
+  const produccion: Produccion = {
+    id: row.id,
+    formulaId: row.formula_id,
+    productoId: row.producto_id,
+    factor: Number(row.factor),
+    cantidadTeorica: Number(row.cantidad_teorica),
+    cantidadRealProducida: Number(row.cantidad_real_producida),
+    fecha: row.fecha,
+    notas: row.notas ?? undefined,
+    createdAt: (row.created_at ?? '').slice(0, 10),
+    fichaItemId: row.ficha_item_id ?? undefined,
+    estado: row.estado as EstadoProduccion,
+    insumosImputados: (row.insumos_imputados ?? []) as InsumoImputado[],
+    puntoVentaId: row.punto_venta_id ?? undefined,
+    fechaEstimadaLiberacion: row.fecha_estimada_liberacion ?? undefined,
+    controlesReposo,
+    pesoLiberacion: row.peso_liberacion != null ? Number(row.peso_liberacion) : undefined,
+    fechaLiberacion: row.fecha_liberacion ?? undefined,
+  }
+
+  return { ok: true, data: { produccion } }
 }
 
 /**

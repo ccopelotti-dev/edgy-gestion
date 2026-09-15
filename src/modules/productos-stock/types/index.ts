@@ -907,6 +907,31 @@ export interface Formula {
    * de nada -- los dos campos van siempre juntos.
    */
   equivalenciaSecundaria?: number | null
+  /**
+   * Fase 81 (15/09, a pedido de Carlos -- Charcutería): algunos productos
+   * necesitan un tiempo de espera DESPUÉS de fabricados y ANTES de poder
+   * sumarse a stock disponible (curado, secado, estacionamiento, lo que
+   * sea según el rubro -- nombre genérico a propósito, no "Madurado").
+   * `false` por defecto: ninguna fórmula existente cambia de
+   * comportamiento. OJO, no es lo mismo que `mermaPorcentaje`: eso es
+   * solo un dato informativo de costo, esto demora de verdad el alta de
+   * stock (ver EstadoProduccion.en_reposo).
+   */
+  requiereReposo: boolean
+  /**
+   * 'dias': el lote queda disponible por el solo paso del tiempo
+   * (`diasReposo` desde la fecha de producción). 'peso': el lote queda
+   * disponible cuando una pesada de control (ver Produccion.controlesReposo)
+   * llega a `porcentajePesoObjetivo` del peso inicial -- para procesos
+   * donde el tiempo real varía según humedad/ambiente y no alcanza con
+   * una fecha fija. null si `requiereReposo` es false.
+   */
+  criterioReposo?: 'dias' | 'peso' | null
+  /** Solo para criterioReposo='dias'. */
+  diasReposo?: number | null
+  /** Solo para criterioReposo='peso' -- ej. 70 = liberar cuando el lote
+   * pesado llegue al 70% de su peso inicial (cantidadRealProducida). */
+  porcentajePesoObjetivo?: number | null
   createdAt: string
 }
 
@@ -927,7 +952,21 @@ export interface Formula {
  * desde la UI, pero evita otra migración el día que haga falta). Los lotes
  * históricos (de antes de esta fase) nacieron ya confirmados -- el stock
  * para ellos se movió con la lógica vieja, de una sola vez. */
-export type EstadoProduccion = 'borrador' | 'confirmada' | 'anulada'
+/** Fase 81: nuevo estado intermedio -- ver comentario en Formula.requiereReposo.
+ * Un lote 'en_reposo' ya descontó insumos (se usaron físicamente para
+ * producir) pero todavía NO sumó stock del producto terminado; recién lo
+ * hace al liberarlo (ver liberarReposo en data/store.tsx), momento en que
+ * pasa a 'confirmada' igual que un lote sin reposo. */
+export type EstadoProduccion = 'borrador' | 'confirmada' | 'anulada' | 'en_reposo'
+
+/** Fase 81: una pesada de control cargada mientras un lote está
+ * 'en_reposo' (criterioReposo='peso') -- se van acumulando hasta que
+ * alguien decide liberar el lote (no hace falta que la última pesada
+ * "cumpla" el objetivo para poder liberar a mano). */
+export interface ControlReposo {
+  fecha: string
+  peso: number
+}
 
 /** Fase 47: foto de un insumo imputado a un lote, tomada al crear el
  * borrador (nombre y costo incluidos, no solo el id -- mismo criterio que
@@ -970,6 +1009,21 @@ export interface Produccion {
    * mismo criterio que Recepcion.puntoVentaId). undefined en clientes de
    * un solo local. */
   puntoVentaId?: string
+  /** Fase 81: solo se completa si el lote quedó 'en_reposo' con
+   * criterioReposo='dias' -- fecha desde la que ya se puede liberar
+   * (fecha de producción + diasReposo de la fórmula). */
+  fechaEstimadaLiberacion?: string
+  /** Fase 81: pesadas de control cargadas durante el reposo (ver
+   * ControlReposo) -- solo tiene sentido con criterioReposo='peso'. */
+  controlesReposo?: ControlReposo[]
+  /** Fase 81: peso REAL acreditado a stock al liberar el lote (no el
+   * teórico) -- confirmado con Carlos que el alta de stock siempre usa
+   * este valor, nunca cantidadRealProducida, para reflejar la merma real
+   * post-reposo. undefined mientras el lote no se liberó todavía. */
+  pesoLiberacion?: number
+  /** Fase 81: cuándo se liberó a stock (distinto de `fecha`, que es la
+   * fecha de PRODUCCIÓN del lote). */
+  fechaLiberacion?: string
 }
 
 // ─── Stock ──────────────────────────────────────────────────────────────────────

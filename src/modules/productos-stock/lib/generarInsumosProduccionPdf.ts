@@ -33,6 +33,8 @@ const ESTADO_LABEL: Record<EstadoProduccion, string> = {
   borrador: 'Borrador (todavía sin confirmar -- preview de lo que se va a descontar)',
   confirmada: 'Confirmada',
   anulada: 'Anulada',
+  // Fase 81: ver comentario en types/index.ts (EstadoProduccion).
+  en_reposo: 'En reposo (insumos ya descontados, producto todavía sin sumar a stock)',
 }
 
 export async function generarInsumosProduccionPdf(

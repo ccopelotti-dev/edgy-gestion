@@ -19,8 +19,16 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle, ClipboardCheck, ShoppingCart, FileDown, CheckCircle2, Trash2, FileClock } from 'lucide-react'
+import { Factory, Boxes, CalendarClock, FlaskConical, Loader2, Ruler, AlertTriangle, ClipboardCheck, ShoppingCart, FileDown, CheckCircle2, Trash2, FileClock, Clock, PackageCheck, Scale } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import {
   useProductosStock,
@@ -28,6 +36,8 @@ import {
   crearProduccionBorrador,
   confirmarProduccion,
   eliminarProduccionBorrador,
+  liberarReposo,
+  agregarControlReposo,
   fetchPedidosAMedidaPendientes,
   type PedidoAMedidaPendiente,
 } from '../data/store'
@@ -35,7 +45,7 @@ import { useClienteActual } from '@/hooks/useClienteActual'
 import { supabase } from '@/lib/supabase'
 import { KpiCard, EmptyState } from '../components/productos/display'
 import { formatDate, formatARS, todayISO } from '../lib/format'
-import { sanitizarDecimal, parsearDecimal } from '@/lib/decimal'
+import { sanitizarDecimal, parsearDecimal, decimalATexto } from '@/lib/decimal'
 import {
   unidadAbrev,
   calcularCantidadesAMedida,
@@ -93,6 +103,19 @@ export default function Produccion() {
   const [eliminandoId, setEliminandoId] = useState<string | null>(null)
   const [descargandoId, setDescargandoId] = useState<string | null>(null)
   const [errorAccionLote, setErrorAccionLote] = useState('')
+
+  // Fase 81: lote 'en_reposo' que se está por liberar a stock (dialog de
+  // "Liberar a stock") o al que se le está por cargar una pesada de
+  // control (dialog de "Registrar pesada") -- null = ningún dialog abierto.
+  const [loteALiberar, setLoteALiberar] = useState<Produccion | null>(null)
+  const [pesoLiberacionTexto, setPesoLiberacionTexto] = useState('')
+  const [liberandoLote, setLiberandoLote] = useState(false)
+  const [errorLiberar, setErrorLiberar] = useState('')
+
+  const [loteAPesar, setLoteAPesar] = useState<Produccion | null>(null)
+  const [pesoControlTexto, setPesoControlTexto] = useState('')
+  const [guardandoControl, setGuardandoControl] = useState(false)
+  const [errorControl, setErrorControl] = useState('')
 
   const formulaSeleccionada = useMemo(
     () => state.formulas.find((f) => f.productoId === selectedProductoId) ?? null,
@@ -340,6 +363,64 @@ export default function Produccion() {
     if (loteBorrador?.id === loteId) setLoteBorrador(null)
   }
 
+  // Fase 81: abre el dialog de "Liberar a stock" -- precarga el peso
+  // sugerido según el criterio de la fórmula: para 'dias' es la cantidad
+  // real producida (ya contempla la merma esperada, confirmado con
+  // Carlos); para 'peso' es la última pesada de control cargada, si hay
+  // alguna (si no, arranca vacío -- hace falta al menos una pesada real).
+  function abrirLiberarReposo(p: Produccion) {
+    setErrorLiberar('')
+    setLoteALiberar(p)
+    const formula = formulasMap.get(p.formulaId)
+    const ultimaPesada = p.controlesReposo?.length ? p.controlesReposo[p.controlesReposo.length - 1].peso : null
+    const sugerido = formula?.criterioReposo === 'peso' ? ultimaPesada : p.cantidadRealProducida
+    setPesoLiberacionTexto(sugerido != null ? decimalATexto(sugerido) : '')
+  }
+
+  async function handleLiberarReposo() {
+    if (!loteALiberar || !cliente?.id || liberandoLote) return
+    const peso = parsearDecimal(pesoLiberacionTexto)
+    if (!(peso > 0)) {
+      setErrorLiberar('Cargá el peso real a sumar a stock (mayor a cero).')
+      return
+    }
+    setLiberandoLote(true)
+    setErrorLiberar('')
+    const res = await liberarReposo(loteALiberar.id, peso, cliente.id)
+    setLiberandoLote(false)
+    if (!res.ok) {
+      setErrorLiberar(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: res.data })
+    setLoteALiberar(null)
+  }
+
+  function abrirRegistrarPesada(p: Produccion) {
+    setErrorControl('')
+    setPesoControlTexto('')
+    setLoteAPesar(p)
+  }
+
+  async function handleRegistrarPesada() {
+    if (!loteAPesar || !cliente?.id || guardandoControl) return
+    const peso = parsearDecimal(pesoControlTexto)
+    if (!(peso > 0)) {
+      setErrorControl('Cargá el peso pesado (mayor a cero).')
+      return
+    }
+    setGuardandoControl(true)
+    setErrorControl('')
+    const res = await agregarControlReposo(loteAPesar.id, peso, cliente.id)
+    setGuardandoControl(false)
+    if (!res.ok) {
+      setErrorControl(res.error)
+      return
+    }
+    dispatch({ type: 'CONFIRM_STOCK_SYNC', payload: { produccion: res.data.produccion } })
+    setLoteAPesar(null)
+  }
+
   // Fase 47: PDF de insumos imputados a un lote YA guardado (borrador o
   // confirmada) -- usa el snapshot congelado en insumosImputados, nunca
   // recalcula de la fórmula.
@@ -545,6 +626,8 @@ export default function Produccion() {
       total: state.producciones.length,
       esteMes: esteMes.length,
       productosDisponibles: productosConFormula.length,
+      // Fase 81
+      enReposo: state.producciones.filter((p) => p.estado === 'en_reposo').length,
     }
   }, [state.producciones, productosConFormula])
 
@@ -560,7 +643,7 @@ export default function Produccion() {
   return (
     <div className="space-y-6">
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           title="Lotes producidos"
           value={String(kpis.total)}
@@ -578,6 +661,12 @@ export default function Produccion() {
           value={String(kpis.productosDisponibles)}
           accent="warning"
           icon={FlaskConical}
+        />
+        <KpiCard
+          title="En reposo"
+          value={String(kpis.enReposo)}
+          accent="warning"
+          icon={Clock}
         />
       </div>
 
@@ -1111,6 +1200,7 @@ export default function Produccion() {
                 const formula = formulasMap.get(p.formulaId)
                 const unidad = formula ? unidadAbrev(formula.unidadProducida) : ''
                 const esBorrador = p.estado === 'borrador'
+                const enReposo = p.estado === 'en_reposo'
                 return (
                   <tr key={p.id} className="border-b last:border-0">
                     <td className="px-4 py-3 tabular-nums">{formatDate(p.fecha)}</td>
@@ -1135,13 +1225,28 @@ export default function Produccion() {
                           'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
                           esBorrador
                             ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400'
-                            : p.estado === 'anulada'
-                              ? 'bg-gray-100 text-gray-500'
-                              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400',
+                            : enReposo
+                              ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400'
+                              : p.estado === 'anulada'
+                                ? 'bg-gray-100 text-gray-500'
+                                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400',
                         )}
                       >
-                        {esBorrador ? 'Borrador' : p.estado === 'anulada' ? 'Anulada' : 'Confirmada'}
+                        {esBorrador ? 'Borrador' : enReposo ? 'En reposo' : p.estado === 'anulada' ? 'Anulada' : 'Confirmada'}
                       </span>
+                      {enReposo && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {formula?.criterioReposo === 'peso' ? (
+                            p.controlesReposo?.length ? (
+                              <>Última pesada: {p.controlesReposo[p.controlesReposo.length - 1].peso.toFixed(2)} {unidad}</>
+                            ) : (
+                              'Sin pesadas todavía'
+                            )
+                          ) : p.fechaEstimadaLiberacion ? (
+                            <>Disponible desde {formatDate(p.fechaEstimadaLiberacion)}</>
+                          ) : null}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
@@ -1160,6 +1265,30 @@ export default function Produccion() {
                             ) : (
                               <CheckCircle2 className="h-3.5 w-3.5" />
                             )}
+                          </Button>
+                        )}
+                        {enReposo && formula?.criterioReposo === 'peso' && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            title="Registrar pesada de control"
+                            onClick={() => abrirRegistrarPesada(p)}
+                          >
+                            <Scale className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {enReposo && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-emerald-600 hover:text-emerald-700"
+                            title="Liberar a stock (suma el producto terminado con el peso real)"
+                            onClick={() => abrirLiberarReposo(p)}
+                          >
+                            <PackageCheck className="h-3.5 w-3.5" />
                           </Button>
                         )}
                         <Button
@@ -1206,6 +1335,112 @@ export default function Produccion() {
           <div className="px-4 py-2 border-t text-xs text-red-600">{errorAccionLote}</div>
         )}
       </div>
+
+      {/* ── Dialog: Liberar a stock (Fase 81) ──────────────────────────────── */}
+      <Dialog open={!!loteALiberar} onOpenChange={(open) => !open && !liberandoLote && setLoteALiberar(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Liberar a stock</DialogTitle>
+            <DialogDescription>
+              {productosMap.get(loteALiberar?.productoId ?? '')?.nombre ?? '(producto eliminado)'} -- se suma a
+              stock recién ahora, con el peso real de este lote (no el teórico).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div className="rounded-md bg-muted px-4 py-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Cantidad real producida (teórica al inicio)</span>
+                <span className="font-medium">
+                  {loteALiberar?.cantidadRealProducida.toFixed(2)}{' '}
+                  {loteALiberar ? unidadAbrev(formulasMap.get(loteALiberar.formulaId)?.unidadProducida ?? 'unidad') : ''}
+                </span>
+              </div>
+              {loteALiberar?.controlesReposo?.length ? (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Última pesada de control</span>
+                  <span className="font-medium">
+                    {loteALiberar.controlesReposo[loteALiberar.controlesReposo.length - 1].peso.toFixed(2)}{' '}
+                    {unidadAbrev(formulasMap.get(loteALiberar.formulaId)?.unidadProducida ?? 'unidad')}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Peso real a sumar a stock</label>
+              <input
+                className={inputClass}
+                type="text"
+                inputMode="decimal"
+                value={pesoLiberacionTexto}
+                onChange={(e) => setPesoLiberacionTexto(sanitizarDecimal(e.target.value))}
+                placeholder="0,00"
+              />
+            </div>
+
+            {errorLiberar && (
+              <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                {errorLiberar}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLoteALiberar(null)} disabled={liberandoLote}>
+              Cancelar
+            </Button>
+            <Button onClick={handleLiberarReposo} disabled={liberandoLote}>
+              {liberandoLote && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Liberar a stock
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Registrar pesada de control (Fase 81) ──────────────────── */}
+      <Dialog open={!!loteAPesar} onOpenChange={(open) => !open && !guardandoControl && setLoteAPesar(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Registrar pesada de control</DialogTitle>
+            <DialogDescription>
+              {productosMap.get(loteAPesar?.productoId ?? '')?.nombre ?? '(producto eliminado)'} -- queda guardada
+              como referencia, no mueve stock. Cuando el lote llegue al peso objetivo, liberalo desde "Liberar a
+              stock".
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">Peso pesado ahora</label>
+              <input
+                className={inputClass}
+                type="text"
+                inputMode="decimal"
+                value={pesoControlTexto}
+                onChange={(e) => setPesoControlTexto(sanitizarDecimal(e.target.value))}
+                placeholder="0,00"
+              />
+            </div>
+
+            {errorControl && (
+              <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                {errorControl}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLoteAPesar(null)} disabled={guardandoControl}>
+              Cancelar
+            </Button>
+            <Button onClick={handleRegistrarPesada} disabled={guardandoControl}>
+              {guardandoControl && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Guardar pesada
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
