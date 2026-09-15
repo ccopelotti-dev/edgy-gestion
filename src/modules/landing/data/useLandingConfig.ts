@@ -6,14 +6,33 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useClienteActual } from '@/hooks/useClienteActual'
-import { LANDING_CONFIG_DEFAULT, type LandingConfig } from '../types'
+import { LANDING_CONFIG_DEFAULT, type HeroCtaTipo, type LandingConfig } from '../types'
+
+const COLUMNAS =
+  'hero_imagen_url, hero_contraste, hero_titulo, hero_bajada, hero_cta_tipo, hero_cta_producto_id, ' +
+  'whatsapp_numero, promo_titulo, promo_texto, promo_activa, ' +
+  'nosotros_titulo, nosotros_texto1, nosotros_texto2, nosotros_imagen_url, ' +
+  'productos_destacados_ids, galeria_titulo, galeria_bajada, galeria_imagenes'
 
 interface FilaLandingConfig {
   hero_imagen_url: string | null
   hero_contraste: number
+  hero_titulo: string | null
+  hero_bajada: string | null
+  hero_cta_tipo: HeroCtaTipo
+  hero_cta_producto_id: string | null
+  whatsapp_numero: string | null
   promo_titulo: string | null
   promo_texto: string | null
   promo_activa: boolean
+  nosotros_titulo: string | null
+  nosotros_texto1: string | null
+  nosotros_texto2: string | null
+  nosotros_imagen_url: string | null
+  productos_destacados_ids: string[] | null
+  galeria_titulo: string | null
+  galeria_bajada: string | null
+  galeria_imagenes: string[] | null
 }
 
 function filaAConfig(fila: FilaLandingConfig | null): LandingConfig {
@@ -21,9 +40,26 @@ function filaAConfig(fila: FilaLandingConfig | null): LandingConfig {
   return {
     heroImagenUrl: fila.hero_imagen_url,
     heroContraste: fila.hero_contraste,
+    heroTitulo: fila.hero_titulo ?? '',
+    heroBajada: fila.hero_bajada ?? '',
+    heroCtaTipo: fila.hero_cta_tipo ?? 'catalogo',
+    heroCtaProductoId: fila.hero_cta_producto_id,
+    whatsappNumero: fila.whatsapp_numero ?? '',
+
     promoTitulo: fila.promo_titulo ?? '',
     promoTexto: fila.promo_texto ?? '',
     promoActiva: fila.promo_activa,
+
+    nosotrosTitulo: fila.nosotros_titulo ?? '',
+    nosotrosTexto1: fila.nosotros_texto1 ?? '',
+    nosotrosTexto2: fila.nosotros_texto2 ?? '',
+    nosotrosImagenUrl: fila.nosotros_imagen_url,
+
+    productosDestacadosIds: fila.productos_destacados_ids ?? [],
+
+    galeriaTitulo: fila.galeria_titulo ?? '',
+    galeriaBajada: fila.galeria_bajada ?? '',
+    galeriaImagenes: fila.galeria_imagenes ?? [],
   }
 }
 
@@ -54,7 +90,7 @@ export function useLandingConfig(): UseLandingConfigResult {
     setError(null)
     const { data, error: errFetch } = await supabase
       .from('landing_config')
-      .select('hero_imagen_url, hero_contraste, promo_titulo, promo_texto, promo_activa')
+      .select(COLUMNAS)
       .eq('cliente_id', clienteId)
       .maybeSingle()
 
@@ -63,7 +99,7 @@ export function useLandingConfig(): UseLandingConfigResult {
       setCargando(false)
       return
     }
-    setConfig(filaAConfig(data as FilaLandingConfig | null))
+    setConfig(filaAConfig(data as unknown as FilaLandingConfig | null))
     setCargando(false)
   }, [clienteId])
 
@@ -81,9 +117,22 @@ export function useLandingConfig(): UseLandingConfigResult {
           cliente_id: clienteId,
           hero_imagen_url: nueva.heroImagenUrl,
           hero_contraste: nueva.heroContraste,
+          hero_titulo: nueva.heroTitulo.trim() || null,
+          hero_bajada: nueva.heroBajada.trim() || null,
+          hero_cta_tipo: nueva.heroCtaTipo,
+          hero_cta_producto_id: nueva.heroCtaTipo === 'producto' ? nueva.heroCtaProductoId : null,
+          whatsapp_numero: nueva.whatsappNumero.replace(/\D/g, '') || null,
           promo_titulo: nueva.promoTitulo.trim() || null,
           promo_texto: nueva.promoTexto.trim() || null,
           promo_activa: nueva.promoActiva,
+          nosotros_titulo: nueva.nosotrosTitulo.trim() || null,
+          nosotros_texto1: nueva.nosotrosTexto1.trim() || null,
+          nosotros_texto2: nueva.nosotrosTexto2.trim() || null,
+          nosotros_imagen_url: nueva.nosotrosImagenUrl,
+          productos_destacados_ids: nueva.productosDestacadosIds,
+          galeria_titulo: nueva.galeriaTitulo.trim() || null,
+          galeria_bajada: nueva.galeriaBajada.trim() || null,
+          galeria_imagenes: nueva.galeriaImagenes,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'cliente_id' },
