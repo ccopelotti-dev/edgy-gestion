@@ -21,11 +21,15 @@ export const LABEL_POR_VERTICAL: Record<string, string> = {
   core: 'Núcleo',
   gastronomico: 'Kit Gastronómico',
   'a-medida': 'Kit A Medida',
+  // Fase 82: Alquileres (administración de propiedades en alquiler) --
+  // primer cliente GD Neuquén.
+  inmobiliario: 'Kit Inmobiliario',
 }
 
 export const COLOR_POR_VERTICAL: Record<string, string> = {
   gastronomico: '#F97316', // naranja cálido
   'a-medida': '#0D9488', // teal
+  inmobiliario: '#0EA5E9', // sky blue
 }
 
 export const COLOR_KIT_DEFAULT = '#64748B' // slate -- fallback para kits futuros sin color asignado

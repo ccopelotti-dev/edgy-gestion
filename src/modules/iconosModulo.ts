@@ -21,6 +21,7 @@ import {
   ScrollText,
   Ruler,
   Image,
+  Building2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -51,6 +52,8 @@ const ICONOS_POR_SLUG: Record<string, LucideIcon> = {
   servicios: Briefcase,
   contable: Calculator,
   landing: Image,
+  // Fase 82: Alquileres (Kit Inmobiliario) -- primer cliente GD Neuquén.
+  alquileres: Building2,
 }
 
 export function iconoDeModulo(slug: string): LucideIcon {

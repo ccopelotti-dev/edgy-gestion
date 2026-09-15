@@ -54,6 +54,8 @@ const ORDEN_PRINCIPALES = [
   'caja-turno',
   'reportes',
   'contable',
+  // Fase 82: Alquileres (Kit Inmobiliario) -- primer cliente GD Neuquén.
+  'alquileres',
 ]
 
 function ordenarPrincipales(modulos: ModuloActivo[]): ModuloActivo[] {

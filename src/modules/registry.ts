@@ -45,4 +45,8 @@ export const REGISTRO_MODULOS: Record<string, ReturnType<typeof lazy>> = {
   // migración 0062_rename_delivery_whatsapp_a_ventas_online.sql.
   'ventas-online': lazy(() => import('./delivery-whatsapp')),
   'viandas': lazy(() => import('./viandas')),
+  // Fase 82: Alquileres (Kit Inmobiliario) -- administración de
+  // alquileres (propietarios/propiedades/unidades/inquilinos/cobranzas/
+  // liquidaciones). Primer cliente: GD Neuquén.
+  'alquileres': lazy(() => import('./alquileres')),
 }
